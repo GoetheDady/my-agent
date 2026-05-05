@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+.superpowers/
+.opencode/
+.env
+.claude/settings.local.json
+.DS_Store
+*.log
+*.swp
+*.swo
+.vscode/
+*.sqlite-wal
+*.sqlite-shm
