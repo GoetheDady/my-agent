@@ -12,3 +12,4 @@ data/
 .vscode/
 *.sqlite-wal
 *.sqlite-shm
+package-lock.json

@@ -54,13 +54,14 @@ const DEFAULT_MODEL = "deepseek-chat";
  */
 function getProjectRoot(): string {
   // Bun 特有 API：import.meta.dir 直接返回当前文件所在目录
+  // 当前文件：src/core/config.ts，需要向上两级到达项目根目录
   const meta = import.meta as unknown as { dir?: string };
-  if (meta.dir) return resolve(meta.dir, "..");
+  if (meta.dir) return resolve(meta.dir, "../..");
 
   // Node 兼容路径：通过 fileURLToPath 反推目录
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  return resolve(__dirname, "..");
+  return resolve(__dirname, "../..");
 }
 
 /**
@@ -80,9 +81,10 @@ export function loadConfig(): AppConfig {
   if (existsSync(configPath)) {
     try {
       fileConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-    } catch {
+    } catch (err) {
       // 配置文件读取失败时跳过，继续用环境变量兜底
       // 不抛异常：用户可能没有配置文件，只用环境变量运行
+      console.warn(`配置文件读取失败: ${configPath}`, err);
     }
   }
 
