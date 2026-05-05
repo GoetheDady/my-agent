@@ -49,16 +49,15 @@ const DEFAULT_MODEL = "deepseek-chat";
 /**
  * 获取项目根目录
  *
- * Bun 和 Node 的 __dirname 行为不同，做兼容处理。
+ * Bun 和 Node 的 import.meta 行为不同，做兼容处理。
+ * Bun 有 import.meta.dir，Node 需要用 fileURLToPath。
  */
 function getProjectRoot(): string {
-  try {
-    // Bun 的 import.meta.dir 是 Bun 特有 API
-    const bunDir = (import.meta as any).dir;
-    if (bunDir) return resolve(bunDir, "..");
-  } catch {
-    // Node 环境用 fileURLToPath
-  }
+  // Bun 特有 API：import.meta.dir 直接返回当前文件所在目录
+  const meta = import.meta as unknown as { dir?: string };
+  if (meta.dir) return resolve(meta.dir, "..");
+
+  // Node 兼容路径：通过 fileURLToPath 反推目录
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   return resolve(__dirname, "..");

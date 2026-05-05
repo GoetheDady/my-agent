@@ -21,11 +21,13 @@ let _runtime: RuntimeKind;
  * 不要在每个 compat 模块里重复检测——统一入口减少不一致。
  */
 function detectRuntime(): RuntimeKind {
-  // 优先检测 Bun：检查全局 Bun 对象是否存在且版本号有效
-  // 注意：不能用 process.versions.bun，在 some edge case 下可能不准确
-  if (typeof (globalThis as any).Bun !== "undefined") {
+  // 检查全局 Bun 对象——TypeScript 不认这个全局类型，用 unknown 收窄
+  const g = globalThis as unknown as { Bun?: { version?: string } };
+  const bun = g.Bun;
+
+  if (bun !== undefined) {
     try {
-      const version = (globalThis as any).Bun.version;
+      const version = bun.version;
       if (typeof version === "string" && version.length > 0) {
         return "bun";
       }
