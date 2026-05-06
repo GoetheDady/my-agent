@@ -203,7 +203,18 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
   const userText = typeof lastUserMessage?.content === "string"
     ? lastUserMessage.content
     : JSON.stringify(lastUserMessage?.content ?? "");
-  const enhancedPrompt = await injectMemories(defaultSystemPrompt, userText);
+
+  // 记忆注入：增强体验，失败时降级为默认提示
+  let enhancedPrompt = defaultSystemPrompt;
+  try {
+    const result = await Promise.race([
+      injectMemories(defaultSystemPrompt, userText),
+      new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+    ]);
+    if (result) enhancedPrompt = result;
+  } catch {
+    // 记忆检索失败或超时，继续用默认提示
+  }
 
   const stream = new ReadableStream({
     async start(controller) {

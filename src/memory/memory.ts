@@ -1,11 +1,21 @@
 import { searchMemories } from "./store";
 import { extractMemories } from "./extract";
 
+function sanitize(text: string): string {
+  return text
+    .replace(/\n/g, " ")
+    .replace(/\r/g, "")
+    .replace(/```/g, "")
+    .slice(0, 500);
+}
+
 export async function injectMemories(systemPrompt: string, userMessage: string): Promise<string> {
   const memories = await searchMemories(userMessage);
   if (memories.length === 0) return systemPrompt;
 
-  const lines = memories.map((m) => `- [${m.memory_type}] ${m.content}`).join("\n");
+  const lines = memories
+    .map((m) => `- [${m.memory_type}] "${sanitize(m.content)}"`)
+    .join("\n");
 
   return `${systemPrompt}
 
