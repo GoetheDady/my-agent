@@ -27,7 +27,7 @@ import {
 } from "./session-api";
 
 /** SSE 事件类型 */
-type SSEEventType = "text_delta" | "thinking" | "tool_start" | "tool_done" | "done" | "error";
+type SSEEventType = "text_delta" | "thinking" | "tool_start" | "tool_done" | "done" | "title_update" | "error";
 
 /** SSE 事件 */
 interface SSEEvent {
@@ -219,6 +219,10 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
           if (req.signal.aborted) break;
 
           if (event.type === "loop_done") {
+            controller.enqueue(encoder.encode(formatSSE({
+              event: "done",
+              data: { sessionId: capturedSessionId },
+            })));
             continue;
           }
 
@@ -274,14 +278,24 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
             appendMessage(capturedSessionId, "assistant", JSON.stringify(storageBlocks));
           }
 
-          if (storageBlocks.some((b) => b.type === "text")) {
-            const firstUserText = messages
-              .filter((m) => m.role === "user")
-              .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-              .join(" ")
-              .slice(0, 200);
+          // 标题生成：基于用户问题 + 助手回复，3 秒超时
+          const firstUserText = messages
+            .filter((m) => m.role === "user")
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+            .join(" ")
+            .slice(0, 200);
+          const assistantText = assistantBlocks
+            .filter((b) => b.type === "text")
+            .map((b) => b.text ?? "")
+            .join(" ")
+            .slice(0, 500);
 
-            generateTitle(capturedSessionId, firstUserText).catch(() => {});
+          const title = await generateTitle(capturedSessionId, firstUserText, assistantText);
+          if (title && !req.signal.aborted) {
+            controller.enqueue(encoder.encode(formatSSE({
+              event: "title_update",
+              data: { sessionId: capturedSessionId, title },
+            })));
           }
         }
 
@@ -392,16 +406,19 @@ async function serveStatic(pathname: string): Promise<Response> {
   }
 }
 
-async function generateTitle(sessionId: string, userMessage: string): Promise<void> {
+async function generateTitle(sessionId: string, userMessage: string, assistantText: string): Promise<string> {
   try {
     const { streamChat: providerStream } = await import("../brain/provider");
-    const titlePrompt = `根据以下用户消息，生成一个简短的对话标题（不超过20个字，不要引号，不要句号）：\n\n${userMessage}`;
+    const prompt = assistantText
+      ? `根据以下对话，生成一个简短的标题（不超过20个字，不要引号和句号）：\n用户：${userMessage}\n助手：${assistantText}`
+      : `根据以下用户消息，生成一个简短的标题（不超过20个字，不要引号和句号）：\n${userMessage}`;
 
     let title = "";
     for await (const event of providerStream({
       system: "你是标题生成器。只返回标题文本，不要任何额外内容。",
-      messages: [{ role: "user", content: titlePrompt }],
-      signal: AbortSignal.timeout(10000),
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 50,
+      signal: AbortSignal.timeout(8000),
     })) {
       if (event.type === "text_delta") {
         title += event.content;
@@ -412,7 +429,8 @@ async function generateTitle(sessionId: string, userMessage: string): Promise<vo
     if (title) {
       updateSessionTitle(sessionId, title);
     }
+    return title;
   } catch {
-    // 标题生成失败不影响主流程
+    return "";
   }
 }

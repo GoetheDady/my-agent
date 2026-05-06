@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { useChatStore } from "../store/chatStore";
 
@@ -60,9 +61,10 @@ export default function SessionSidebar() {
       <div className="p-3">
         <button
           onClick={handleNew}
-          className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-[var(--color-text)] hover:bg-white/5"
+          className="flex w-full items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-[var(--color-text)] hover:bg-white/5"
         >
-          + 新对话
+          <Plus size={16} />
+          新对话
         </button>
       </div>
 
@@ -86,7 +88,7 @@ export default function SessionSidebar() {
               className="hidden shrink-0 text-white/30 hover:text-red-400 group-hover:block"
               title="删除"
             >
-              &times;
+              <Trash2 size={14} />
             </button>
           </div>
         ))}

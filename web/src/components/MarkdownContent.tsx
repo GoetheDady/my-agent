@@ -3,6 +3,7 @@ import type { ReactNode, ReactElement } from "react";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { useState, useRef, useCallback } from "react";
+import { Check, Copy } from "lucide-react";
 
 export default function MarkdownContent({ content }: { content: string }) {
   return (
@@ -46,8 +47,9 @@ function PreBlock({ children }: { children?: ReactNode }) {
     <div className="relative">
       <button
         onClick={handleCopy}
-        className="absolute right-2 top-2 rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20"
+        className="absolute right-2 top-2 flex items-center gap-1 rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20"
       >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
         {copied ? "已复制" : "复制"}
       </button>
       <pre>{children}</pre>

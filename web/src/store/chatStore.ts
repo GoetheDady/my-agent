@@ -173,6 +173,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
             break;
           }
+          case "title_update": {
+            useSessionStore.getState().fetchSessions();
+            break;
+          }
           case "error": {
             const errBlock: DisplayBlock = { type: "text", content: `错误: ${data.message}` };
             finalizeStream(set, get, streamingId, [errBlock]);

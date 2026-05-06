@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PanelLeft, PanelRight } from "lucide-react";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import SessionSidebar from "./SessionSidebar";
@@ -17,7 +18,7 @@ export default function ChatView() {
             className="text-white/60 hover:text-white"
             title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
           >
-            {sidebarOpen ? "◁" : "▷"}
+            {sidebarOpen ? <PanelLeft size={18} /> : <PanelRight size={18} />}
           </button>
           <h1 className="text-lg font-semibold text-[var(--color-text)]">
             My Agent

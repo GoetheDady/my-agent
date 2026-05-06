@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { ArrowUp, Square } from "lucide-react";
 import { useChatStore } from "../store/chatStore";
 
 export default function ChatInput() {
@@ -41,15 +42,17 @@ export default function ChatInput() {
       {isLoading ? (
         <button
           onClick={abortRequest}
-          className="rounded-lg bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-3 text-white hover:bg-red-700 disabled:opacity-50"
         >
+          <Square size={16} fill="currentColor" />
           停止
         </button>
       ) : (
         <button
           onClick={handleSend}
-          className="rounded-lg bg-accent px-5 py-3 text-white hover:brightness-110 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-3 text-white hover:brightness-110 disabled:opacity-50"
         >
+          <ArrowUp size={16} />
           发送
         </button>
       )}
