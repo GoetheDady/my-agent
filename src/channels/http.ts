@@ -75,6 +75,7 @@ export function serve(port: number = 3000) {
 
   Bun.serve({
     port,
+    idleTimeout: 60, // memory embedding + LLM 调用可能需较长时间
     async fetch(req) {
       const url = new URL(req.url);
 
@@ -140,6 +141,33 @@ export function serve(port: number = 3000) {
         });
       }
 
+      if (req.method === "POST" && url.pathname === "/api/memory/extract") {
+        try {
+          const body = await req.json().catch(() => ({})) as {
+            sessionId?: string;
+            userText?: string;
+            assistantText?: string;
+          };
+          if (!body.sessionId || !body.userText) {
+            return jsonError("缺少 sessionId 或 userText", 400);
+          }
+          const count = await extractMemories(
+            [body.userText],
+            [body.assistantText ?? ""],
+            body.sessionId,
+          );
+          return new Response(JSON.stringify({ count }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "记忆提取失败";
+          return new Response(JSON.stringify({ error: message }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+
       // 聊天端点
       if (req.method === "POST" && url.pathname === "/api/chat") {
         try {
@@ -172,7 +200,7 @@ export function serve(port: number = 3000) {
  * 将流式事件转换为 SSE 格式逐条返回。
  */
 async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Response> {
-  let body: { message?: string; messages?: Message[]; sessionId?: string };
+  let body: { message?: string; messages?: Message[]; sessionId?: string; thinkingEnabled?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -224,6 +252,7 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
         systemPrompt: enhancedPrompt,
         messages,
         signal: req.signal,
+        thinkingEnabled: body.thinkingEnabled ?? false,
       });
 
       const abortHandler = () => {
@@ -318,11 +347,7 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
             })));
           }
 
-          const assistantMsg = assistantBlocks
-            .filter((b) => b.type === "text")
-            .map((b) => b.text ?? "")
-            .join(" ");
-          extractMemories([userText], [assistantMsg], capturedSessionId).catch(() => {});
+
         }
 
         try { controller.close(); } catch { /* 已关闭 */ }
