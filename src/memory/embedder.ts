@@ -17,6 +17,7 @@ export async function embedText(text: string): Promise<number[]> {
         model: config.embedding.model,
         input: text,
       }),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (!res.ok) {
@@ -34,10 +35,11 @@ export async function embedText(text: string): Promise<number[]> {
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length === 0 || b.length === 0) return 0;
+  if (a.length !== b.length) return 0;
   let dot = 0;
   let normA = 0;
   let normB = 0;
-  for (let i = 0; i < a.length && i < b.length; i++) {
+  for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
