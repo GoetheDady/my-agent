@@ -30,9 +30,16 @@ export interface ProviderConfig {
   model: string;
 }
 
+/** Embedding 相关配置 */
+export interface EmbeddingConfig {
+  apiKey: string;
+  model: string;
+}
+
 /** 完整应用配置 */
 export interface AppConfig {
   provider: ProviderConfig;
+  embedding: EmbeddingConfig;
 }
 
 // ============================================================
@@ -116,6 +123,10 @@ export function loadConfig(): AppConfig {
       apiKey,
       baseUrl: fileConfig.provider?.baseUrl ?? DEFAULT_BASE_URL,
       model: fileConfig.provider?.model ?? DEFAULT_MODEL,
+    },
+    embedding: {
+      apiKey: process.env.ZHIPU_API_KEY ?? "",
+      model: "embedding-3",
     },
   };
 }

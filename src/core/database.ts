@@ -44,6 +44,32 @@ export function getDb(): Database {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'default',
+      agent_id TEXT NOT NULL DEFAULT '',
+      memory_type TEXT NOT NULL DEFAULT 'fact',
+      content TEXT NOT NULL,
+      embedding TEXT NOT NULL,
+      source_session_id TEXT NOT NULL DEFAULT '',
+      source_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_accessed_at INTEGER NOT NULL,
+      access_count INTEGER NOT NULL DEFAULT 0,
+      embedding_model TEXT NOT NULL DEFAULT 'embedding-3',
+      embedding_dim INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_memories_agent ON memories(user_id, agent_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)`);
+
   console.log(`[db] 数据库已初始化: ${dbPath}`);
   return db;
 }
