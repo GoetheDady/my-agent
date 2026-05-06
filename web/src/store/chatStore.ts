@@ -71,11 +71,7 @@ function triggerMemoryExtract(
       if (count === undefined) return;
 
       const map = { ...get().memoryStatusMap };
-      if (count === 0) {
-        delete map[assistantMessageId];
-      } else {
-        map[assistantMessageId] = { status: "success", count };
-      }
+      map[assistantMessageId] = { status: "success", count };
       set({ memoryStatusMap: map });
     })
     .catch(() => {

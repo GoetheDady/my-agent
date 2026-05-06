@@ -49,7 +49,10 @@ function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus 
   }
 
   if (memoryStatus.status === "success") {
-    return <div className="px-2 py-1 text-xs text-white/30">已提取 {memoryStatus.count ?? 0} 条记忆</div>;
+    if (memoryStatus.count === 0) {
+      return <div className="px-2 py-1 text-xs text-white/20">无可提取记忆</div>;
+    }
+    return <div className="px-2 py-1 text-xs text-white/30">已提取 {memoryStatus.count} 条记忆</div>;
   }
 
   if (memoryStatus.status === "error") {
