@@ -48,10 +48,10 @@ export function appendMessage(sessionId: string, role: "user" | "assistant", con
   const now = Date.now();
   db.run(
     "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-    [id, sessionId, role, JSON.stringify(content), now],
+    [id, sessionId, role, content, now],
   );
   db.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, sessionId]);
-  return { id, session_id: sessionId, role, content: JSON.stringify(content), created_at: now };
+  return { id, session_id: sessionId, role, content, created_at: now };
 }
 
 export function getSessionMessages(sessionId: string): SessionMessage[] {

@@ -26,7 +26,11 @@ export default function SessionSidebar() {
   async function handleSwitch(id: string) {
     if (id === activeSessionId) return;
     switchSession(id);
-    await loadSession(id);
+    try {
+      await loadSession(id);
+    } catch {
+      useSessionStore.getState().setActiveSessionId(null);
+    }
   }
 
   async function handleDelete(e: React.MouseEvent, id: string) {

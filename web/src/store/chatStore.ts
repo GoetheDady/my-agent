@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message, DisplayBlock } from "../types";
+import { useSessionStore } from "./sessionStore";
 
 let abortController: AbortController | null = null;
 
@@ -164,8 +165,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           case "done": {
             flushTextBuffer(set, get);
-            if (data.sessionId && !get().sessionId) {
-              set({ sessionId: data.sessionId });
+            if (data.sessionId) {
+              const sid = data.sessionId as string;
+              set({ sessionId: sid });
+              useSessionStore.getState().fetchSessions();
+              useSessionStore.getState().setActiveSessionId(sid);
             }
             break;
           }
@@ -233,23 +237,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadSession: async (sessionId: string) => {
     const s = get();
     if (s.isLoading) return;
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/messages`);
-      if (!res.ok) throw new Error("加载消息失败");
-      const rawMessages = (await res.json()) as Array<{
-        id: string;
-        role: "user" | "assistant";
-        content: string;
-      }>;
-      const messages: Message[] = rawMessages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        blocks: parseDbContent(m.content, m.role),
-      }));
-      set({ messages, sessionId, streamingMessageId: null, streamingBlocks: [] });
-    } catch (err) {
-      console.error("加载会话失败:", err);
-    }
+    const res = await fetch(`/api/sessions/${sessionId}/messages`);
+    if (!res.ok) throw new Error("加载消息失败");
+    const rawMessages = (await res.json()) as Array<{
+      id: string;
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    const messages: Message[] = rawMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      blocks: parseDbContent(m.content, m.role),
+    }));
+    set({ messages, sessionId, streamingMessageId: null, streamingBlocks: [] });
   },
 
   setSessionId: (id: string | null) => {
