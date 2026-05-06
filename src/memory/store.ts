@@ -55,12 +55,12 @@ export async function addMemory(params: {
 }
 
 export async function updateMemory(id: string, content: string): Promise<Memory | null> {
-  const embedding = await embedText(content);
-  if (embedding.length === 0) return null;
-
   const db = getDb();
   const row = db.query("SELECT * FROM memories WHERE id = ?").get(id) as MemoryRow | null;
   if (!row) return null;
+
+  const embedding = await embedText(content);
+  if (embedding.length === 0) return null;
 
   const now = Date.now();
   db.run(
@@ -144,6 +144,7 @@ export async function searchMemories(
 
   const top = deduped.slice(0, topN);
 
+  const now = Date.now();
   for (const m of top) {
     touchMemory(m.id);
   }
@@ -154,8 +155,8 @@ export async function searchMemories(
     embedding: m.embedding, source_session_id: m.source_session_id,
     source_text: m.source_text, status: m.status,
     confidence: m.confidence, created_at: m.created_at,
-    updated_at: m.updated_at, last_accessed_at: m.last_accessed_at,
-    access_count: m.access_count, embedding_model: m.embedding_model,
+    updated_at: m.updated_at, last_accessed_at: now,
+    access_count: m.access_count + 1, embedding_model: m.embedding_model,
     embedding_dim: m.embedding_dim,
   }));
 }
