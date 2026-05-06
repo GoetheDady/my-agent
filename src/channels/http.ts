@@ -23,6 +23,7 @@ import {
   updateSessionTitle,
   deleteSession,
   getSessionMessages,
+  appendMessage,
 } from "./session-api";
 
 /** SSE 事件类型 */
@@ -170,18 +171,13 @@ export function serve(port: number = 3000) {
  * 将流式事件转换为 SSE 格式逐条返回。
  */
 async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Response> {
-  // 解析请求体
-  let body: { message?: string; messages?: Message[] };
+  let body: { message?: string; messages?: Message[]; sessionId?: string };
   try {
     body = await req.json();
   } catch {
     return jsonError("请求体必须是 JSON", 400);
   }
 
-  // 构造消息列表
-  // 支持两种格式：
-  //   1. { message: "你好" } — 单条消息，简洁格式
-  //   2. { messages: [...] } — 完整消息历史，用于多轮对话
   const messages: Message[] = body.messages ?? [
     { role: "user", content: body.message ?? "" },
   ];
@@ -190,51 +186,72 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
     return jsonError("消息为空", 400);
   }
 
-  /**
-   * SSE 流式响应
-   *
-   * 使用 ReadableStream + AbortSignal 实现可取消的 SSE 流。
-   *
-   * 客户端断开时：
-   *   1. req.signal 触发 abort 事件
-   *   2. 通过 iterator.return() 中止 runLoop 生成器
-   *   3. runLoop 的 signal.aborted 检查 → 停止下一轮循环
-   *   4. streamChat 的 fetch signal → 中止 HTTP 请求
-   *   5. parseSSEStream 的 reader 自动释放
-   *   全链路取消，不浪费 API token。
-   */
+  const capturedSessionId = body.sessionId ?? createSession().id;
+
+  const lastUserMsg = messages.filter((m) => m.role === "user").at(-1);
+  if (lastUserMsg) {
+    const text = typeof lastUserMsg.content === "string"
+      ? lastUserMsg.content
+      : JSON.stringify(lastUserMsg.content);
+    appendMessage(capturedSessionId, "user", text);
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
-      // 获取 runLoop 的生成器句柄，同时用于迭代和中止
-      // async function* 返回的 AsyncGenerator 既是 AsyncIterable 也有 .return() 方法
       const loopGen = runLoop({
         systemPrompt: defaultSystemPrompt,
         messages,
         signal: req.signal,
       });
 
-      // 客户端断开时主动清理生成器
-      // .return() 触发生成器的 finally 块（如果有），干净退出
-      // 不调用 .return() 的话，生成器继续异步迭代，底层 fetch 继续运行
       const abortHandler = () => {
         (loopGen as { return?: () => void }).return?.();
         try { controller.close(); } catch { /* 已关闭 */ }
       };
       req.signal.addEventListener("abort", abortHandler, { once: true });
 
+      const assistantBlocks: { type: string; text?: string; thinking?: string; signature?: string; id?: string; name?: string; input?: Record<string, unknown> }[] = [];
+
       try {
         for await (const event of loopGen) {
           if (req.signal.aborted) break;
 
           if (event.type === "loop_done") {
-            // 最终事件：携带完整消息历史
-            // 前端不需要这些信息（MVP 阶段前端不做持久化），跳过
             continue;
           }
 
-          const sse = chatEventToSSE(event);
+          switch (event.type) {
+            case "text_delta": {
+              const last = assistantBlocks.at(-1);
+              if (last && last.type === "text") {
+                last.text = (last.text ?? "") + event.content;
+              } else {
+                assistantBlocks.push({ type: "text", text: event.content });
+              }
+              break;
+            }
+            case "thinking_delta": {
+              const last = assistantBlocks.at(-1);
+              if (last && last.type === "thinking") {
+                last.thinking = (last.thinking ?? "") + event.content;
+              } else {
+                assistantBlocks.push({ type: "thinking", thinking: event.content, signature: "" });
+              }
+              break;
+            }
+            case "thinking_done": {
+              const lastThink = assistantBlocks.findLast((b) => b.type === "thinking");
+              if (lastThink) lastThink.signature = event.signature;
+              break;
+            }
+            case "tool_use_done":
+              assistantBlocks.push({ type: "tool_use", id: event.id, name: event.name, input: event.input });
+              break;
+          }
+
+          const sse = chatEventToSSE(event, capturedSessionId);
           if (sse) {
             controller.enqueue(encoder.encode(formatSSE(sse)));
           }
@@ -250,6 +267,24 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
         }
       } finally {
         req.signal.removeEventListener("abort", abortHandler);
+
+        if (!req.signal.aborted && assistantBlocks.length > 0) {
+          const storageBlocks = assistantBlocks.filter((b) => b.type !== "thinking");
+          if (storageBlocks.length > 0) {
+            appendMessage(capturedSessionId, "assistant", JSON.stringify(storageBlocks));
+          }
+
+          if (storageBlocks.some((b) => b.type === "text")) {
+            const firstUserText = messages
+              .filter((m) => m.role === "user")
+              .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+              .join(" ")
+              .slice(0, 200);
+
+            generateTitle(capturedSessionId, firstUserText).catch(() => {});
+          }
+        }
+
         try { controller.close(); } catch { /* 已关闭 */ }
       }
     },
@@ -260,7 +295,6 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       "connection": "keep-alive",
-      // CORS：允许前端跨域访问
       "access-control-allow-origin": "*",
     },
   });
@@ -274,7 +308,7 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
  *
  * 返回 null 表示该事件不需要通知前端（如 tool_use_delta 的中间状态）。
  */
-function chatEventToSSE(event: ChatEvent): SSEEvent | null {
+function chatEventToSSE(event: ChatEvent, sessionId?: string): SSEEvent | null {
   switch (event.type) {
     case "text_delta":
       return { event: "text_delta", data: { content: event.content } };
@@ -295,10 +329,10 @@ function chatEventToSSE(event: ChatEvent): SSEEvent | null {
           stopReason: event.stopReason,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
+          ...(sessionId ? { sessionId } : {}),
         },
       };
 
-    // 以下事件不需要通知前端
     case "thinking_done":
     case "tool_use_delta":
       return null;
@@ -355,5 +389,30 @@ async function serveStatic(pathname: string): Promise<Response> {
     } catch {
       return new Response("Not Found", { status: 404 });
     }
+  }
+}
+
+async function generateTitle(sessionId: string, userMessage: string): Promise<void> {
+  try {
+    const { streamChat: providerStream } = await import("../brain/provider");
+    const titlePrompt = `根据以下用户消息，生成一个简短的对话标题（不超过20个字，不要引号，不要句号）：\n\n${userMessage}`;
+
+    let title = "";
+    for await (const event of providerStream({
+      system: "你是标题生成器。只返回标题文本，不要任何额外内容。",
+      messages: [{ role: "user", content: titlePrompt }],
+      signal: AbortSignal.timeout(10000),
+    })) {
+      if (event.type === "text_delta") {
+        title += event.content;
+      }
+    }
+
+    title = title.trim().replace(/^["""']+|["""']+$/g, "").slice(0, 30);
+    if (title) {
+      updateSessionTitle(sessionId, title);
+    }
+  } catch {
+    // 标题生成失败不影响主流程
   }
 }
