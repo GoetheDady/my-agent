@@ -39,7 +39,7 @@ export interface AppConfig {
 // 默认值
 // ============================================================
 
-const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
+const DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_MODEL = "deepseek-chat";
 
 // ============================================================
