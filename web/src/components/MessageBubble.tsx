@@ -13,7 +13,7 @@ export default function MessageBubble({ message }: { message: Message }) {
           {message.blocks.map((b, i) => (
             <p key={i} className="whitespace-pre-wrap text-sm">{b.content}</p>
           ))}
-        </div>
+      </div>
     </div>
   );
 }
