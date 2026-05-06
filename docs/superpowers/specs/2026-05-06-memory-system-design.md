@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 | `add` | 新增记忆，embed + INSERT |
 | `update` | 更新 content（小修正），UPDATE + re-embed |
 | `supersede` | 旧记忆设为 `superseded`，新增一条（重大变化，保留历史） |
-| `delete` | 标记 `deleted`（不真删，用于训练数据） |
+| `delete` | 硬删除（DELETE FROM memories）。用户有权彻底移除记忆 |
 | `noop` | 不操作，但更新 `last_accessed_at`（巩固） |
 
 ### 4.4 安全约束
@@ -152,9 +152,10 @@ CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 ```
 获取最后一条用户消息
   → embedText(message)
-  → SELECT * FROM memories WHERE status='active'
+  → SELECT * FROM memories WHERE status='active' AND user_id=? AND agent_id=?
   → 逐条计算：similarity × decay × confidence
-  → 过滤 score < min_score (0.3)
+  → 过滤 similarity < min_similarity (0.3)
+  → 过滤 final_score < min_final_score (0.15)
   → 排序取 Top-5
   → 更新 last_accessed_at, access_count
   → 注入 System Prompt
@@ -166,11 +167,11 @@ CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 function decay(memory: Memory): number {
   const days = (Date.now() - memory.last_accessed_at) / (1000 * 60 * 60 * 24);
   switch (memory.memory_type) {
-    case "fact":       return 1.0;                                   // 不衰减
-    case "project":    return Math.exp(-days / 90);                  // 90天半衰期
-    case "preference": return Math.exp(-days / 30);                  // 30天半衰期
-    case "lesson":     return Math.exp(-days / 14);                  // 14天半衰期
-    default:           return Math.exp(-days / 30);
+    case "fact":       return 1.0;                              // 不衰减
+    case "project":    return 0.5 ** (days / 90);               // 90天半衰期
+    case "preference": return 0.5 ** (days / 30);               // 30天半衰期
+    case "lesson":     return 0.5 ** (days / 14);               // 14天半衰期
+    default:           return 0.5 ** (days / 30);
   }
 }
 ```
@@ -254,9 +255,9 @@ src/
 │   ├── store.ts                 ← 记忆 CRUD + 向量检索
 │   ├── extract.ts               ← LLM 审视提取 + action 执行
 │   └── memory.ts                ← 对外接口（injectMemories + extractMemories）
-├── brain/
-│   ├── loop.ts                  ← 修改：支持工具执行 + 工具注册
-│   └── provider.ts              ← 不改
+  ├── brain/
+  │   ├── loop.ts                  ← 不改（MVP 不做工具召回）
+  │   └── provider.ts              ← 不改
 ├── core/
 │   ├── database.ts              ← 修改：添加 memories 表
 │   └── config.ts                ← 修改：添加 embedding 配置
