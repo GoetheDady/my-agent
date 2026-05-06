@@ -3,6 +3,7 @@ import type { Message, DisplayBlock } from "../types";
 import { useSessionStore } from "./sessionStore";
 
 let abortController: AbortController | null = null;
+let memoryAbortController: AbortController | null = null;
 
 let throttledTextBuffer = "";
 let throttleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -13,12 +14,106 @@ interface ChatState {
   streamingMessageId: string | null;
   streamingBlocks: DisplayBlock[];
   sessionId: string | null;
+  thinkingEnabled: boolean;
+  memoryExtractId: string | null;
 
   sendMessage: (text: string) => void;
   abortRequest: () => void;
   clearMessages: () => void;
   loadSession: (sessionId: string) => Promise<void>;
   setSessionId: (id: string | null) => void;
+  setThinkingEnabled: (enabled: boolean) => void;
+}
+
+function triggerMemoryExtract(
+  set: (partial: Partial<ChatState>) => void,
+  get: () => ChatState,
+  assistantMessageId: string,
+  userText: string,
+  assistantText: string,
+  sessionId: string | null,
+) {
+  if (memoryAbortController) {
+    memoryAbortController.abort();
+  }
+  memoryAbortController = new AbortController();
+  const signal = memoryAbortController.signal;
+
+  const s = get();
+  const msgIdx = s.messages.findIndex((m) => m.id === assistantMessageId);
+  if (msgIdx === -1) return;
+
+  const msg = s.messages[msgIdx];
+  const lastTextIdx = msg.blocks.findLastIndex((b) => b.type === "text");
+  if (lastTextIdx === -1) return;
+
+  const updatedBlocks = [...msg.blocks];
+  updatedBlocks[lastTextIdx] = { ...updatedBlocks[lastTextIdx], memoryStatus: "loading" as const, memoryCount: undefined };
+  const updatedMessages = [...s.messages];
+  updatedMessages[msgIdx] = { ...msg, blocks: updatedBlocks };
+  set({ messages: updatedMessages });
+
+  const controller = memoryAbortController;
+
+  fetch("/api/memory/extract", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId, userText, assistantText }),
+    signal,
+  })
+    .then(async (res) => {
+      if (controller !== memoryAbortController) return;
+      if (signal.aborted) return;
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "提取失败" })) as { error?: string };
+        throw new Error(err.error ?? "提取失败");
+      }
+      const data = await res.json() as { count: number };
+      return data.count;
+    })
+    .then((count) => {
+      if (controller !== memoryAbortController) return;
+      if (signal.aborted) return;
+
+      const s2 = get();
+      const idx = s2.messages.findIndex((m) => m.id === assistantMessageId);
+      if (idx === -1) return;
+
+      const m = s2.messages[idx];
+      const ti = m.blocks.findLastIndex((b) => b.type === "text");
+      if (ti === -1) return;
+
+      if (count === undefined) return;
+
+      const blocks = [...m.blocks];
+      if (count === 0) {
+        blocks[ti] = { ...blocks[ti], memoryStatus: undefined, memoryCount: undefined };
+      } else {
+        blocks[ti] = { ...blocks[ti], memoryStatus: "success", memoryCount: count };
+      }
+      const msgs = [...s2.messages];
+      msgs[idx] = { ...m, blocks };
+      set({ messages: msgs });
+    })
+    .catch(() => {
+      if (controller !== memoryAbortController) return;
+      if (signal.aborted) return;
+
+      const s2 = get();
+      const idx = s2.messages.findIndex((m) => m.id === assistantMessageId);
+      if (idx === -1) return;
+
+      const m = s2.messages[idx];
+      const ti = m.blocks.findLastIndex((b) => b.type === "text");
+      if (ti === -1) return;
+
+      const blocks = [...m.blocks];
+      blocks[ti] = { ...blocks[ti], memoryStatus: "error", memoryCount: undefined };
+      const msgs = [...s2.messages];
+      msgs[idx] = { ...m, blocks };
+      set({ messages: msgs });
+    });
 }
 
 function flushTextBuffer(set: (partial: Partial<ChatState>) => void, get: () => ChatState) {
@@ -85,6 +180,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingMessageId: null,
   streamingBlocks: [],
   sessionId: null,
+  thinkingEnabled: false,
+  memoryExtractId: null,
 
   sendMessage: (text: string) => {
     const state = get();
@@ -111,6 +208,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const apiMessages = toApiMessages([...state.messages, userMsg]);
+    const thinkingEnabled = get().thinkingEnabled;
 
     const controller = new AbortController();
     abortController = controller;
@@ -118,9 +216,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     streamChat(
       apiMessages,
       get().sessionId,
+      thinkingEnabled,
       (eventType, data) => {
         switch (eventType) {
           case "text_delta": {
+            flushTextBuffer(set, get);
+            const currentBlocks = [...get().streamingBlocks];
+            const hadThinkingBefore = currentBlocks.some((b: DisplayBlock) => b.type === "thinking" && !b.collapsed);
+            if (hadThinkingBefore) {
+              for (let i = 0; i < currentBlocks.length; i++) {
+                if (currentBlocks[i].type === "thinking" && !currentBlocks[i].collapsed) {
+                  currentBlocks[i] = { ...currentBlocks[i], collapsed: true };
+                }
+              }
+              set({ streamingBlocks: currentBlocks });
+            }
             throttledTextBuffer += data.content;
             if (!throttleTimer) {
               throttleTimer = setTimeout(() => {
@@ -138,7 +248,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (last && last.type === "thinking") {
               currentBlocks[currentBlocks.length - 1] = { ...last, content: last.content + data.content };
             } else {
-              currentBlocks.push({ type: "thinking", content: data.content, collapsed: true });
+              currentBlocks.push({ type: "thinking", content: data.content, collapsed: false });
             }
             set({ streamingBlocks: currentBlocks });
             break;
@@ -187,6 +297,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       controller.signal,
     ).then(() => {
       finalizeStream(set, get, streamingId);
+
+      const s = get();
+      const assistantMsg = s.messages.find((m) => m.id === streamingId);
+      if (assistantMsg && s.sessionId) {
+        const userBlocks = s.messages
+          .filter((m) => m.role === "user")
+          .at(-1)?.blocks ?? [];
+        const userText = userBlocks
+          .filter((b) => b.type === "text")
+          .map((b) => b.content)
+          .join("\n");
+        const assistantText = assistantMsg.blocks
+          .filter((b) => b.type === "text")
+          .map((b) => b.content)
+          .join("\n");
+        if (userText) {
+          triggerMemoryExtract(set, get, streamingId, userText, assistantText, s.sessionId);
+        }
+      }
     }).catch(() => {
       // 兜底：未预期的异常，重置状态避免永久卡 isLoading
       const s = get();
@@ -199,6 +328,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abortRequest: () => {
     abortController?.abort();
     abortController = null;
+    memoryAbortController?.abort();
+    memoryAbortController = null;
     if (throttleTimer) {
       clearTimeout(throttleTimer);
       throttleTimer = null;
@@ -230,6 +361,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     abortController?.abort();
     abortController = null;
+    memoryAbortController?.abort();
+    memoryAbortController = null;
     if (throttleTimer) {
       clearTimeout(throttleTimer);
       throttleTimer = null;
@@ -258,6 +391,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSessionId: (id: string | null) => {
     set({ sessionId: id });
+  },
+
+  setThinkingEnabled: (enabled: boolean) => {
+    set({ thinkingEnabled: enabled });
   },
 }));
 
@@ -288,6 +425,7 @@ function toApiMessages(messages: Message[]) {
 async function streamChat(
   messages: { role: string; content: unknown }[],
   sessionId: string | null,
+  thinkingEnabled: boolean,
   onEvent: (type: string, data: any) => void,
   signal: AbortSignal,
 ) {
@@ -298,7 +436,7 @@ async function streamChat(
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ messages, sessionId }),
+      body: JSON.stringify({ messages, sessionId, thinkingEnabled }),
       signal,
     });
   } catch (err) {
