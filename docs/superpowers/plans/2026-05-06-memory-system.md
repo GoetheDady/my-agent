@@ -283,20 +283,21 @@ export async function addMemory(params: {
   };
 }
 
-export function updateMemory(id: string, content: string): Memory | null {
+export async function updateMemory(id: string, content: string): Promise<Memory | null> {
+  const embedding = await embedText(content);
+  if (embedding.length === 0) return null;
+
   const db = getDb();
   const row = db.query("SELECT * FROM memories WHERE id = ?").get(id) as MemoryRow | null;
   if (!row) return null;
 
   const now = Date.now();
   db.run(
-    "UPDATE memories SET content = ?, updated_at = ? WHERE id = ?",
-    [content, now, id],
+    "UPDATE memories SET content = ?, embedding = ?, embedding_dim = ?, updated_at = ? WHERE id = ?",
+    [content, JSON.stringify(embedding), embedding.length, now, id],
   );
 
-  let emb: number[] = [];
-  try { emb = JSON.parse(row.embedding); } catch {}
-  return { ...row, embedding: emb, content, updated_at: now };
+  return { ...row, embedding, content, updated_at: now, embedding_dim: embedding.length };
 }
 
 export function supersedeMemory(oldId: string, params: {
@@ -345,8 +346,7 @@ export async function searchMemories(
   const db = getDb();
   const rows = db.query(
     "SELECT * FROM memories WHERE status = ? AND user_id = ? AND agent_id = ?",
-    ["active", USER_ID, AGENT_ID],
-  ).all() as MemoryRow[];
+  ).all("active", USER_ID, AGENT_ID) as MemoryRow[];
 
   const scored = rows
     .map((row) => {
@@ -662,13 +662,16 @@ const loopGen = runLoop({
 
 ```ts
 // 异步提取记忆（fire-and-forget，不阻塞响应）
-const userTexts = messages
-  .filter((m) => m.role === "user")
-  .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
-const assistantTexts = assistantBlocks
+// 只提取本轮对话（最后一条用户消息 + 本轮助手回复）
+const lastUserMsg2 = messages.filter((m) => m.role === "user").at(-1);
+const userText = typeof lastUserMsg2?.content === "string"
+  ? lastUserMsg2.content
+  : JSON.stringify(lastUserMsg2?.content ?? "");
+const assistantText = assistantBlocks
   .filter((b) => b.type === "text")
-  .map((b) => b.text ?? "");
-extractMemories(userTexts, assistantTexts, capturedSessionId).catch(() => {});
+  .map((b) => b.text ?? "")
+  .join(" ");
+extractMemories([userText], [assistantText], capturedSessionId).catch(() => {});
 ```
 
 - [ ] **Step 4: 运行 check**
@@ -721,7 +724,7 @@ sleep 8
 bun -e "
 import { getDb } from './src/core/database';
 const db = getDb();
-const rows = db.query('SELECT id, memory_type, content FROM memories WHERE status = ?', ['active']).all();
+const rows = db.query("SELECT id, memory_type, content FROM memories WHERE status = ?").all("active");
 console.log('记忆数:', rows.length);
 rows.forEach((r: any) => console.log(' - [' + r.memory_type + ']', r.content));
 "
