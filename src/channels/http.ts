@@ -15,6 +15,15 @@
 
 import { runLoop } from "../brain/loop";
 import type { Message, ChatEvent } from "../brain/provider";
+import { resolve, extname, relative } from "path";
+import { readFile, stat } from "fs/promises";
+import {
+  createSession,
+  listSessions,
+  updateSessionTitle,
+  deleteSession,
+  getSessionMessages,
+} from "./session-api";
 
 /** SSE 事件类型 */
 type SSEEventType = "text_delta" | "thinking" | "tool_start" | "tool_done" | "done" | "error";
@@ -67,6 +76,19 @@ export function serve(port: number = 3000) {
     async fetch(req) {
       const url = new URL(req.url);
 
+      // CORS preflight
+      if (req.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+            "access-control-allow-headers": "content-type",
+            "access-control-max-age": "86400",
+          },
+        });
+      }
+
       // 健康检查
       if (req.method === "GET" && url.pathname === "/api/health") {
         return new Response(JSON.stringify({ status: "ok" }), {
@@ -74,14 +96,64 @@ export function serve(port: number = 3000) {
         });
       }
 
+      // Session API
+      if (req.method === "GET" && url.pathname === "/api/sessions") {
+        const sessions = listSessions();
+        return new Response(JSON.stringify(sessions), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/sessions") {
+        const body = await req.json().catch(() => ({})) as { title?: string };
+        const session = createSession(body.title);
+        return new Response(JSON.stringify(session), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/api/sessions/") && url.pathname.endsWith("/messages")) {
+        const id = url.pathname.split("/")[3];
+        const messages = getSessionMessages(id);
+        return new Response(JSON.stringify(messages), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (req.method === "PATCH" && url.pathname.startsWith("/api/sessions/") && !url.pathname.includes("/messages")) {
+        const id = url.pathname.split("/")[3];
+        const body = await req.json().catch(() => ({})) as { title?: string };
+        if (body.title) updateSessionTitle(id, body.title);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (req.method === "DELETE" && url.pathname.startsWith("/api/sessions/")) {
+        const id = url.pathname.split("/")[3];
+        deleteSession(id);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       // 聊天端点
       if (req.method === "POST" && url.pathname === "/api/chat") {
-        return handleChat(req, DEFAULT_SYSTEM_PROMPT);
+        try {
+          return await handleChat(req, DEFAULT_SYSTEM_PROMPT);
+        } catch (err) {
+          console.error("[chat] 未捕获异常:", err);
+          return jsonError(
+            err instanceof Error ? err.message : "内部错误",
+            500,
+          );
+        }
       }
 
       // 前端页面
-      if (req.method === "GET" && url.pathname === "/") {
-        return serveIndex();
+      if (req.method === "GET") {
+        return serveStatic(url.pathname);
       }
 
       return new Response("Not Found", { status: 404 });
@@ -211,10 +283,10 @@ function chatEventToSSE(event: ChatEvent): SSEEvent | null {
       return { event: "thinking", data: { content: event.content } };
 
     case "tool_use_start":
-      return { event: "tool_start", data: { name: event.name } };
+      return { event: "tool_start", data: { id: event.id, name: event.name } };
 
     case "tool_use_done":
-      return { event: "tool_done", data: { name: event.name, input: event.input } };
+      return { event: "tool_done", data: { id: event.id, name: event.name, input: event.input } };
 
     case "message_done":
       return {
@@ -237,129 +309,51 @@ function chatEventToSSE(event: ChatEvent): SSEEvent | null {
 }
 
 /**
- * 返回前端页面（MVP 内嵌 HTML）
+ * 静态文件服务 — 托管 web/dist/ 并支持 SPA fallback
  *
- * 后续重构时此处改为代理到 web/ 目录或返回 SPA 入口。
- * MVP 阶段嵌入一个最小可用页面，避免额外的前端构建步骤。
+ * 开发模式下由 Vite dev server 处理前端（端口 5173），
+ * 生产模式下 Bun.serve 直接托管 web/dist/ 静态文件。
+ * SPA fallback：找不到文件时返回 index.html，让前端路由处理。
  */
-function serveIndex(): Response {
-  const html = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>My Agent</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; padding: 20px; }
-  #app { width: 100%; max-width: 700px; display: flex; flex-direction: column; height: calc(100vh - 40px); }
-  #messages { flex: 1; overflow-y: auto; padding: 10px; }
-  .msg { margin: 8px 0; padding: 10px 14px; border-radius: 12px; max-width: 80%; }
-  .msg.user { background: #16213e; margin-left: auto; }
-  .msg.assistant { background: #0f3460; }
-  .msg.thinking { background: #333; color: #999; font-style: italic; font-size: 0.9em; }
-  .msg.tool { background: #1a3a1a; font-family: monospace; font-size: 0.85em; }
-  #input-area { display: flex; gap: 10px; padding: 10px 0; }
-  #input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #16213e; color: #e0e0e0; font-size: 16px; outline: none; }
-  #input:focus { border-color: #533483; }
-  #send { padding: 12px 20px; border-radius: 8px; border: none; background: #533483; color: white; font-size: 16px; cursor: pointer; }
-  #send:disabled { opacity: 0.5; cursor: not-allowed; }
-</style>
-</head>
-<body>
-<div id="app">
-  <div id="messages"></div>
-  <div id="input-area">
-    <input id="input" type="text" placeholder="输入消息..." autofocus>
-    <button id="send">发送</button>
-  </div>
-</div>
-<script>
-  const messages = document.getElementById("messages");
-  const input = document.getElementById("input");
-  const send = document.getElementById("send");
 
-  function addMsg(role, text, cls) {
-    const div = document.createElement("div");
-    div.className = "msg " + (cls || role);
-    div.textContent = text;
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
+const DIST_DIR = resolve(import.meta.dir, "../../web/dist");
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+};
+
+async function serveStatic(pathname: string): Promise<Response> {
+  const safePath = resolve(DIST_DIR, pathname.slice(1) || "index.html");
+  const rel = relative(DIST_DIR, safePath);
+  if (rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\")) {
+    return new Response("Forbidden", { status: 403 });
   }
 
-  async function sendMessage() {
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    send.disabled = true;
-
-    addMsg("user", text);
-
-    let currentText = "";
-    let textDiv = null;
-
+  try {
+    const fileStat = await stat(safePath);
+    if (!fileStat.isFile()) throw new Error("not a file");
+    const data = await readFile(safePath);
+    const mime = MIME_TYPES[extname(safePath)] ?? "application/octet-stream";
+    return new Response(data, {
+      headers: { "content-type": mime, "cache-control": "public, max-age=3600" },
+    });
+  } catch {
+    const indexPath = resolve(DIST_DIR, "index.html");
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
+      const data = await readFile(indexPath);
+      return new Response(data, {
+        headers: { "content-type": "text/html; charset=utf-8" },
       });
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\\n\\n");
-        buffer = parts.pop();
-
-        for (const part of parts) {
-          const lines = part.split("\\n");
-          const eventLine = lines.find(l => l.startsWith("event:"));
-          const dataLine = lines.find(l => l.startsWith("data:"));
-          if (!eventLine || !dataLine) continue;
-
-          const eventType = eventLine.slice(7).trim();
-          let data;
-          try { data = JSON.parse(dataLine.slice(6)); } catch(e) { continue; }
-
-          if (eventType === "text_delta") {
-            if (!textDiv) {
-              textDiv = document.createElement("div");
-              textDiv.className = "msg assistant";
-              messages.appendChild(textDiv);
-            }
-            currentText += data.content;
-            textDiv.textContent = currentText;
-            messages.scrollTop = messages.scrollHeight;
-          } else if (eventType === "thinking") {
-            addMsg("assistant", data.content, "thinking");
-          } else if (eventType === "tool_start") {
-            addMsg("assistant", "🔧 " + data.name, "tool");
-          } else if (eventType === "done") {
-            console.log("完成:", data.stopReason);
-          }
-        }
-      }
-    } catch (err) {
-      addMsg("assistant", "错误: " + err.message, "error");
-    } finally {
-      send.disabled = false;
-      input.focus();
+    } catch {
+      return new Response("Not Found", { status: 404 });
     }
   }
-
-  send.addEventListener("click", sendMessage);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
-</script>
-</body>
-</html>`;
-
-  return new Response(html, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
 }
