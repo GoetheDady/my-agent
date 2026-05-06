@@ -4,13 +4,13 @@ export async function extractMemories(
   userMessages: string[],
   assistantMessages: string[],
   sessionId: string,
-): Promise<void> {
+): Promise<number> {
   const conversationText = userMessages
     .map((m, i) => `用户：${m}\n助手：${assistantMessages[i] ?? ""}`)
     .join("\n\n")
     .slice(-3000);
 
-  if (!conversationText) return;
+  if (!conversationText) return 0;
 
   // 检索已有相关记忆
   const lastUserMessage = userMessages.at(-1) ?? "";
@@ -70,9 +70,9 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
     }
 
     const jsonMatch = body.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return;
+    if (!jsonMatch) return 0;
 
-    const actions = JSON.parse(jsonMatch[0]) as Array<{
+    let actions: Array<{
       action: string;
       memory_id?: string;
       memory_type?: string;
@@ -80,6 +80,12 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
       confidence?: number;
       reason?: string;
     }>;
+    try {
+      actions = JSON.parse(jsonMatch[0]);
+    } catch {
+      console.error("[memory] JSON 解析失败:", jsonMatch[0].slice(0, 200));
+      return 0;
+    }
 
     let count = 0;
     for (const act of actions) {
@@ -137,7 +143,9 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
     if (count > 0) {
       console.log(`[memory] 提取了 ${count} 条记忆`);
     }
+    return count;
   } catch (err) {
     console.error("[memory] 提取失败:", err);
+    return 0;
   }
 }
