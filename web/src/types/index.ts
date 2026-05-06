@@ -47,3 +47,10 @@ export type SSEEventData =
   | SSEToolDone
   | SSEDone
   | SSEError;
+
+export interface Session {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+}
