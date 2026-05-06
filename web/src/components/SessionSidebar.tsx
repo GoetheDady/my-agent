@@ -11,7 +11,7 @@ export default function SessionSidebar() {
     switchSession,
     deleteSession,
   } = useSessionStore();
-  const { loadSession, clearMessages } = useChatStore();
+  const { loadSession, clearMessages, setSessionId } = useChatStore();
 
   useEffect(() => {
     fetchSessions();
@@ -21,6 +21,7 @@ export default function SessionSidebar() {
     clearMessages();
     const session = await createSession();
     switchSession(session.id);
+    setSessionId(session.id);
   }
 
   async function handleSwitch(id: string) {
@@ -30,6 +31,7 @@ export default function SessionSidebar() {
       await loadSession(id);
     } catch {
       useSessionStore.getState().setActiveSessionId(null);
+      clearMessages();
     }
   }
 
