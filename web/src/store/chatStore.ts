@@ -11,10 +11,13 @@ interface ChatState {
   isLoading: boolean;
   streamingMessageId: string | null;
   streamingBlocks: DisplayBlock[];
+  sessionId: string | null;
 
   sendMessage: (text: string) => void;
   abortRequest: () => void;
   clearMessages: () => void;
+  loadSession: (sessionId: string) => Promise<void>;
+  setSessionId: (id: string | null) => void;
 }
 
 function flushTextBuffer(set: (partial: Partial<ChatState>) => void, get: () => ChatState) {
@@ -80,6 +83,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   streamingMessageId: null,
   streamingBlocks: [],
+  sessionId: null,
 
   sendMessage: (text: string) => {
     const state = get();
@@ -112,6 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     streamChat(
       apiMessages,
+      get().sessionId,
       (eventType, data) => {
         switch (eventType) {
           case "text_delta": {
@@ -159,6 +164,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           case "done": {
             flushTextBuffer(set, get);
+            if (data.sessionId && !get().sessionId) {
+              set({ sessionId: data.sessionId });
+            }
             break;
           }
           case "error": {
@@ -219,7 +227,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       throttleTimer = null;
     }
     throttledTextBuffer = "";
-    set({ messages: [], isLoading: false, streamingMessageId: null, streamingBlocks: [] });
+    set({ messages: [], isLoading: false, streamingMessageId: null, streamingBlocks: [], sessionId: null });
+  },
+
+  loadSession: async (sessionId: string) => {
+    const s = get();
+    if (s.isLoading) return;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`);
+      if (!res.ok) throw new Error("加载消息失败");
+      const rawMessages = (await res.json()) as Array<{
+        id: string;
+        role: "user" | "assistant";
+        content: string;
+      }>;
+      const messages: Message[] = rawMessages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        blocks: parseDbContent(m.content, m.role),
+      }));
+      set({ messages, sessionId, streamingMessageId: null, streamingBlocks: [] });
+    } catch (err) {
+      console.error("加载会话失败:", err);
+    }
+  },
+
+  setSessionId: (id: string | null) => {
+    set({ sessionId: id });
   },
 }));
 
@@ -249,6 +283,7 @@ function toApiMessages(messages: Message[]) {
 
 async function streamChat(
   messages: { role: string; content: unknown }[],
+  sessionId: string | null,
   onEvent: (type: string, data: any) => void,
   signal: AbortSignal,
 ) {
@@ -259,7 +294,7 @@ async function streamChat(
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, sessionId }),
       signal,
     });
   } catch (err) {
@@ -324,5 +359,28 @@ async function streamChat(
   } catch (err) {
     if (signal.aborted) return;
     onEvent("error", { message: err instanceof Error ? err.message : "连接中断" });
+  }
+}
+
+function parseDbContent(contentStr: string, role: "user" | "assistant"): DisplayBlock[] {
+  if (role === "user") {
+    try {
+      const parsed = JSON.parse(contentStr);
+      return [{ type: "text", content: typeof parsed === "string" ? parsed : contentStr }];
+    } catch {
+      return [{ type: "text", content: contentStr }];
+    }
+  }
+  try {
+    const blocks = JSON.parse(contentStr) as Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
+    return blocks
+      .map((b) => {
+        if (b.type === "text") return { type: "text" as const, content: b.text ?? "" };
+        if (b.type === "tool_use") return { type: "tool_use" as const, content: JSON.stringify(b.input, null, 2), toolName: b.name, toolInput: b.input };
+        return { type: "text" as const, content: "" };
+      })
+      .filter((b) => b.content !== "");
+  } catch {
+    return [{ type: "text", content: contentStr }];
   }
 }
