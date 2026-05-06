@@ -25,6 +25,7 @@ import {
   getSessionMessages,
   appendMessage,
 } from "./session-api";
+import { injectMemories, extractMemories } from "../memory/memory";
 
 /** SSE 事件类型 */
 type SSEEventType = "text_delta" | "thinking" | "tool_start" | "tool_done" | "done" | "title_update" | "error";
@@ -196,12 +197,20 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
     appendMessage(capturedSessionId, "user", text);
   }
 
+  const lastUserMessage = messages
+    .filter((m) => m.role === "user")
+    .at(-1);
+  const userText = typeof lastUserMessage?.content === "string"
+    ? lastUserMessage.content
+    : JSON.stringify(lastUserMessage?.content ?? "");
+  const enhancedPrompt = await injectMemories(defaultSystemPrompt, userText);
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
       const loopGen = runLoop({
-        systemPrompt: defaultSystemPrompt,
+        systemPrompt: enhancedPrompt,
         messages,
         signal: req.signal,
       });
@@ -297,6 +306,12 @@ async function handleChat(req: Request, defaultSystemPrompt: string): Promise<Re
               data: { sessionId: capturedSessionId, title },
             })));
           }
+
+          const assistantMsg = assistantBlocks
+            .filter((b) => b.type === "text")
+            .map((b) => b.text ?? "")
+            .join(" ");
+          extractMemories([userText], [assistantMsg], capturedSessionId).catch(() => {});
         }
 
         try { controller.close(); } catch { /* 已关闭 */ }
