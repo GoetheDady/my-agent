@@ -35,31 +35,14 @@ function MemoryStatusBar({ blocks }: { blocks: DisplayBlock[] }) {
   }
 
   if (lastTextBlock.memoryStatus === "success") {
-    return <FadeOutText text={`已提取 ${lastTextBlock.memoryCount ?? 0} 条记忆`} color="text-white/30" />;
+    return <div className="px-2 py-1 text-xs text-white/30">已提取 {lastTextBlock.memoryCount ?? 0} 条记忆</div>;
   }
 
   if (lastTextBlock.memoryStatus === "error") {
-    return <FadeOutText text="记忆提取失败" color="text-red-400/60" />;
+    return <div className="px-2 py-1 text-xs text-red-400/60">记忆提取失败</div>;
   }
 
   return null;
-}
-
-function FadeOutText({ text, color }: { text: string; color: string }) {
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setVisible(false), 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (!visible) return null;
-
-  return (
-    <div className={`px-2 py-1 text-xs ${color} transition-opacity duration-500`}>
-      {text}
-    </div>
-  );
 }
 
   return (
