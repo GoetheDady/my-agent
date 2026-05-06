@@ -8,13 +8,15 @@ export async function extractMemories(
   const conversationText = userMessages
     .map((m, i) => `用户：${m}\n助手：${assistantMessages[i] ?? ""}`)
     .join("\n\n")
-    .slice(0, 3000);
+    .slice(-3000);
 
   if (!conversationText) return;
 
   // 检索已有相关记忆
   const lastUserMessage = userMessages.at(-1) ?? "";
   const existingMemories = await searchMemories(lastUserMessage, 10);
+
+  const validIds = new Set(existingMemories.map((m) => m.id));
 
   const existingText = existingMemories
     .map((m) => `- [id: ${m.id}] [type: ${m.memory_type}] ${m.content}`)
@@ -83,6 +85,10 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
     for (const act of actions) {
       if (act.confidence !== undefined && act.confidence < 0.5) continue;
 
+      // 对于需要 memory_id 的操作，只允许操作本次检索到的记忆
+      const needsId = ["update", "supersede", "delete", "noop"].includes(act.action);
+      if (needsId && (!act.memory_id || !validIds.has(act.memory_id))) continue;
+
       switch (act.action) {
         case "add": {
           if (!act.content) break;
@@ -97,33 +103,32 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
           break;
         }
         case "update": {
-          if (!act.memory_id || !act.content) break;
-          await updateMemory(act.memory_id, act.content);
+          if (!act.content) break;
+          await updateMemory(act.memory_id!, act.content);
           count++;
           break;
         }
         case "supersede": {
-          if (!act.memory_id || !act.content) break;
-          supersedeMemory(act.memory_id, { content: act.content, memory_type: act.memory_type, confidence: act.confidence });
-          await addMemory({
+          if (!act.content) break;
+          const newMemory = await addMemory({
             content: act.content,
             memory_type: act.memory_type ?? "fact",
             source_session_id: sessionId,
             source_text: lastUserMessage,
             confidence: act.confidence ?? 1.0,
           });
+          if (newMemory) {
+            supersedeMemory(act.memory_id!, { content: act.content, memory_type: act.memory_type, confidence: act.confidence });
+          }
           count++;
           break;
         }
         case "delete": {
-          if (!act.memory_id) break;
-          deleteMemory(act.memory_id);
+          deleteMemory(act.memory_id!);
           break;
         }
         case "noop": {
-          if (act.memory_id) {
-            touchMemory(act.memory_id);
-          }
+          touchMemory(act.memory_id!);
           break;
         }
       }
