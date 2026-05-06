@@ -1,6 +1,8 @@
 node_modules/
 dist/
-data/
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
 .superpowers/
 .env
 .claude/settings.local.json

@@ -6,6 +6,9 @@
  */
 
 import { serve } from "./channels/http";
+import { getDb } from "./core/database";
+
+getDb();
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
