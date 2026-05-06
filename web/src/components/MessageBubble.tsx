@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Message, DisplayBlock } from "../types";
 import MarkdownContent from "./MarkdownContent";
 import { ChevronDown } from "lucide-react";
+import { useChatStore, type MemoryExtractStatus } from "../store/chatStore";
 
 export default function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
@@ -13,16 +14,29 @@ export default function MessageBubble({ message }: { message: Message }) {
           {message.blocks.map((b, i) => (
             <p key={i} className="whitespace-pre-wrap text-sm">{b.content}</p>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  const memoryStatus = useChatStore((s) => s.memoryStatusMap[message.id]);
+
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] space-y-2">
+        {message.blocks.map((block, i) => (
+          <BlockRenderer key={i} block={block} />
+        ))}
+        <MemoryStatusBar memoryStatus={memoryStatus} />
       </div>
     </div>
   );
 }
 
-function MemoryStatusBar({ blocks }: { blocks: DisplayBlock[] }) {
-  const lastTextBlock = blocks.findLast((b) => b.type === "text");
-  if (!lastTextBlock?.memoryStatus) return null;
+function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus }) {
+  if (!memoryStatus) return null;
 
-  if (lastTextBlock.memoryStatus === "loading") {
+  if (memoryStatus.status === "loading") {
     return (
       <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-white/30">
         <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -34,27 +48,15 @@ function MemoryStatusBar({ blocks }: { blocks: DisplayBlock[] }) {
     );
   }
 
-  if (lastTextBlock.memoryStatus === "success") {
-    return <div className="px-2 py-1 text-xs text-white/30">已提取 {lastTextBlock.memoryCount ?? 0} 条记忆</div>;
+  if (memoryStatus.status === "success") {
+    return <div className="px-2 py-1 text-xs text-white/30">已提取 {memoryStatus.count ?? 0} 条记忆</div>;
   }
 
-  if (lastTextBlock.memoryStatus === "error") {
+  if (memoryStatus.status === "error") {
     return <div className="px-2 py-1 text-xs text-red-400/60">记忆提取失败</div>;
   }
 
   return null;
-}
-
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[80%] space-y-2">
-        {message.blocks.map((block, i) => (
-          <BlockRenderer key={i} block={block} />
-        ))}
-        <MemoryStatusBar blocks={message.blocks} />
-      </div>
-    </div>
-  );
 }
 
 function BlockRenderer({ block }: { block: DisplayBlock }) {

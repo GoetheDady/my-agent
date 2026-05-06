@@ -37,6 +37,8 @@ export interface LoopInput {
   maxRounds?: number;
   /** 客户端断开时取消 API 调用 */
   signal?: AbortSignal;
+  /** 是否开启深度思考 */
+  thinkingEnabled?: boolean;
 }
 
 /**
@@ -66,7 +68,7 @@ export interface LoopDoneEvent {
 export async function* runLoop(
   input: LoopInput,
 ): AsyncIterable<ChatEvent | LoopDoneEvent> {
-  const { systemPrompt, messages, tools, maxRounds = 5, signal } = input;
+  const { systemPrompt, messages, tools, maxRounds = 5, signal, thinkingEnabled = false } = input;
 
   // 工作副本，每次工具调用后追加新消息
   const workingMessages: Message[] = [...messages];
@@ -100,6 +102,7 @@ export async function* runLoop(
       messages: workingMessages,
       tools,
       signal,
+      thinkingEnabled,
     })) {
       yield event;
 

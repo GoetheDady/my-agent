@@ -164,9 +164,11 @@ export async function* streamChat(params: {
   maxTokens?: number;
   /** 客户端断开时取消请求，避免浪费 token */
   signal?: AbortSignal;
+  /** 是否开启深度思考 */
+  thinkingEnabled?: boolean;
 }): AsyncIterable<ChatEvent> {
   const config = getConfig();
-  const { system, messages, tools, maxTokens = 4096, signal } = params;
+  const { system, messages, tools, maxTokens = 4096, signal, thinkingEnabled = false } = params;
 
   // 构建请求体（Anthropic Messages API 格式）
   const body: Record<string, unknown> = {
@@ -176,6 +178,10 @@ export async function* streamChat(params: {
     messages,
     stream: true,
   };
+
+  if (thinkingEnabled) {
+    body.thinking = { type: "enabled" };
+  }
 
   // 只在有工具时才传 tools 字段
   // 为什么空数组也去掉？部分 provider 对 tools: [] 行为不一致（有的报错）

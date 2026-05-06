@@ -5,8 +5,6 @@ export interface DisplayBlock {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   collapsed?: boolean;
-  memoryStatus?: "loading" | "success" | "error";
-  memoryCount?: number;
 }
 
 export interface Message {

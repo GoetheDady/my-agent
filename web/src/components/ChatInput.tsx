@@ -1,9 +1,9 @@
 import { useRef } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square, Lightbulb } from "lucide-react";
 import { useChatStore } from "../store/chatStore";
 
 export default function ChatInput() {
-  const { isLoading, sendMessage, abortRequest } = useChatStore();
+  const { isLoading, sendMessage, abortRequest, thinkingEnabled, setThinkingEnabled } = useChatStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   function handleSend() {
@@ -30,6 +30,17 @@ export default function ChatInput() {
 
   return (
     <div className="flex items-end gap-3 border-t border-white/10 bg-surface p-4">
+      <button
+        onClick={() => setThinkingEnabled(!thinkingEnabled)}
+        className={`mb-0.5 rounded-lg p-2.5 transition-colors ${
+          thinkingEnabled
+            ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+            : "text-white/30 hover:bg-white/5 hover:text-white/50"
+        }`}
+        title={thinkingEnabled ? "关闭深度思考" : "开启深度思考"}
+      >
+        <Lightbulb size={18} />
+      </button>
       <textarea
         ref={textareaRef}
         className="flex-1 resize-none rounded-lg border border-white/10 bg-background px-4 py-3 text-foreground outline-none placeholder:text-white/30 focus:border-accent disabled:opacity-50"

@@ -8,6 +8,11 @@ let memoryAbortController: AbortController | null = null;
 let throttledTextBuffer = "";
 let throttleTimer: ReturnType<typeof setTimeout> | null = null;
 
+export interface MemoryExtractStatus {
+  status: "loading" | "success" | "error";
+  count?: number;
+}
+
 interface ChatState {
   messages: Message[];
   isLoading: boolean;
@@ -15,7 +20,7 @@ interface ChatState {
   streamingBlocks: DisplayBlock[];
   sessionId: string | null;
   thinkingEnabled: boolean;
-  memoryExtractId: string | null;
+  memoryStatusMap: Record<string, MemoryExtractStatus>;
 
   sendMessage: (text: string) => void;
   abortRequest: () => void;
@@ -39,19 +44,7 @@ function triggerMemoryExtract(
   memoryAbortController = new AbortController();
   const signal = memoryAbortController.signal;
 
-  const s = get();
-  const msgIdx = s.messages.findIndex((m) => m.id === assistantMessageId);
-  if (msgIdx === -1) return;
-
-  const msg = s.messages[msgIdx];
-  const lastTextIdx = msg.blocks.findLastIndex((b) => b.type === "text");
-  if (lastTextIdx === -1) return;
-
-  const updatedBlocks = [...msg.blocks];
-  updatedBlocks[lastTextIdx] = { ...updatedBlocks[lastTextIdx], memoryStatus: "loading" as const, memoryCount: undefined };
-  const updatedMessages = [...s.messages];
-  updatedMessages[msgIdx] = { ...msg, blocks: updatedBlocks };
-  set({ messages: updatedMessages });
+  set({ memoryStatusMap: { ...get().memoryStatusMap, [assistantMessageId]: { status: "loading" } } });
 
   const controller = memoryAbortController;
 
@@ -75,44 +68,21 @@ function triggerMemoryExtract(
     .then((count) => {
       if (controller !== memoryAbortController) return;
       if (signal.aborted) return;
-
-      const s2 = get();
-      const idx = s2.messages.findIndex((m) => m.id === assistantMessageId);
-      if (idx === -1) return;
-
-      const m = s2.messages[idx];
-      const ti = m.blocks.findLastIndex((b) => b.type === "text");
-      if (ti === -1) return;
-
       if (count === undefined) return;
 
-      const blocks = [...m.blocks];
+      const map = { ...get().memoryStatusMap };
       if (count === 0) {
-        blocks[ti] = { ...blocks[ti], memoryStatus: undefined, memoryCount: undefined };
+        delete map[assistantMessageId];
       } else {
-        blocks[ti] = { ...blocks[ti], memoryStatus: "success", memoryCount: count };
+        map[assistantMessageId] = { status: "success", count };
       }
-      const msgs = [...s2.messages];
-      msgs[idx] = { ...m, blocks };
-      set({ messages: msgs });
+      set({ memoryStatusMap: map });
     })
     .catch(() => {
       if (controller !== memoryAbortController) return;
       if (signal.aborted) return;
 
-      const s2 = get();
-      const idx = s2.messages.findIndex((m) => m.id === assistantMessageId);
-      if (idx === -1) return;
-
-      const m = s2.messages[idx];
-      const ti = m.blocks.findLastIndex((b) => b.type === "text");
-      if (ti === -1) return;
-
-      const blocks = [...m.blocks];
-      blocks[ti] = { ...blocks[ti], memoryStatus: "error", memoryCount: undefined };
-      const msgs = [...s2.messages];
-      msgs[idx] = { ...m, blocks };
-      set({ messages: msgs });
+      set({ memoryStatusMap: { ...get().memoryStatusMap, [assistantMessageId]: { status: "error" } } });
     });
 }
 
@@ -181,7 +151,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingBlocks: [],
   sessionId: null,
   thinkingEnabled: false,
-  memoryExtractId: null,
+  memoryStatusMap: {},
 
   sendMessage: (text: string) => {
     const state = get();
@@ -368,7 +338,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       throttleTimer = null;
     }
     throttledTextBuffer = "";
-    set({ messages: [], isLoading: false, streamingMessageId: null, streamingBlocks: [], sessionId: null });
+    set({ messages: [], isLoading: false, streamingMessageId: null, streamingBlocks: [], sessionId: null, memoryStatusMap: {} });
   },
 
   loadSession: async (sessionId: string) => {
