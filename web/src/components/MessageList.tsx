@@ -6,7 +6,7 @@ interface MessageListProps {
   messages: Array<{
     id: string;
     role: string;
-    parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string } }>;
+    parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string } }>;
   }>;
   memoryStatusMap: Record<string, MemoryExtractStatus>;
 }

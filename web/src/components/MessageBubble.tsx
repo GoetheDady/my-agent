@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import MarkdownContent from "./MarkdownContent";
 import { ChevronDown } from "lucide-react";
+import { ToolApprovalCard } from "./ToolApprovalCard";
 import type { MemoryExtractStatus } from "../store/chatStore";
 
 interface MessagePart {
   type: string;
   text?: string;
   reasoning?: string;
-  toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string };
+  toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string };
 }
 
 interface AIMessage {
@@ -16,7 +17,17 @@ interface AIMessage {
   parts: MessagePart[];
 }
 
-export default function MessageBubble({ message, memoryStatus }: { message: AIMessage; memoryStatus?: MemoryExtractStatus }) {
+export default function MessageBubble({
+  message,
+  memoryStatus,
+  handleApprove,
+  handleDeny,
+}: {
+  message: AIMessage;
+  memoryStatus?: MemoryExtractStatus;
+  handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
+  handleDeny?: (toolCallId: string) => void;
+}) {
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -37,6 +48,22 @@ export default function MessageBubble({ message, memoryStatus }: { message: AIMe
     <div className="flex justify-start">
       <div className="max-w-[80%] space-y-2">
         {message.parts.map((part, i) => {
+          // 检测工具审批请求
+          if (part.type === 'tool-invocation' &&
+              part.toolInvocation?.state === 'approval-requested') {
+            return (
+              <ToolApprovalCard
+                key={`approval-${part.toolInvocation.toolCallId}`}
+                toolName={part.toolInvocation.toolName}
+                args={part.toolInvocation.args}
+                toolCallId={part.toolInvocation.toolCallId}
+                onApprove={(rememberChoice) =>
+                  handleApprove?.(part.toolInvocation!.toolCallId, rememberChoice)
+                }
+                onDeny={() => handleDeny?.(part.toolInvocation!.toolCallId)}
+              />
+            );
+          }
           if (part.type === "text" && part.text) {
             return (
               <div key={i} className="rounded-2xl rounded-bl-sm bg-assistant px-4 py-3 text-foreground">
