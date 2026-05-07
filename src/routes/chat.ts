@@ -70,9 +70,9 @@ app.post("/", async (c) => {
     stopWhen: stepCountIs(5),
     tools,
     abortSignal: c.req.raw.signal,
-    providerOptions: thinkingEnabled
-      ? { deepseek: { thinking: { type: "enabled" } } }
-      : undefined,
+    providerOptions: {
+      deepseek: { thinking: thinkingEnabled ? { type: "enabled" } : { type: "disabled" } },
+    },
 
     onFinish: async ({ response }) => {
       if (persisted) return;

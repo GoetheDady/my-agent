@@ -78,9 +78,14 @@ export default function ChatView() {
     setActiveSessionId(id);
   }, [setMessages, setSessionId, setActiveSessionId]);
 
+  const handleNewSession = useCallback(() => {
+    setMessages([]);
+    useChatStore.getState().clearSession();
+  }, [setMessages]);
+
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
-      {sidebarOpen && <SessionSidebar onLoadSession={handleLoadSession} />}
+      {sidebarOpen && <SessionSidebar onLoadSession={handleLoadSession} onNewSession={handleNewSession} />}
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center gap-3 border-b border-white/10 bg-[var(--color-surface)] px-6 py-3">

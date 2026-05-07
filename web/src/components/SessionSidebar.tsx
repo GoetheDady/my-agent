@@ -5,9 +5,10 @@ import { useChatStore } from "../store/chatStore";
 
 interface SessionSidebarProps {
   onLoadSession: (id: string) => Promise<void>;
+  onNewSession: () => void;
 }
 
-export default function SessionSidebar({ onLoadSession }: SessionSidebarProps) {
+export default function SessionSidebar({ onLoadSession, onNewSession }: SessionSidebarProps) {
   const {
     sessions,
     activeSessionId,
@@ -16,17 +17,17 @@ export default function SessionSidebar({ onLoadSession }: SessionSidebarProps) {
     switchSession,
     deleteSession,
   } = useSessionStore();
-  const { clearSession, setSessionId } = useChatStore();
+  const { setSessionId } = useChatStore();
 
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
   async function handleNew() {
-    clearSession();
     const session = await createSession();
     switchSession(session.id);
     setSessionId(session.id);
+    onNewSession();
   }
 
   async function handleSwitch(id: string) {
@@ -36,7 +37,7 @@ export default function SessionSidebar({ onLoadSession }: SessionSidebarProps) {
       await onLoadSession(id);
     } catch {
       useSessionStore.getState().setActiveSessionId(null);
-      clearSession();
+      onNewSession();
     }
   }
 
@@ -44,7 +45,7 @@ export default function SessionSidebar({ onLoadSession }: SessionSidebarProps) {
     e.stopPropagation();
     await deleteSession(id);
     if (id === activeSessionId) {
-      clearSession();
+      onNewSession();
     }
   }
 
