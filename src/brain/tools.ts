@@ -16,33 +16,22 @@ export const tools = {
   read_file: tool({
     description: '读取指定路径的文件内容',
     inputSchema: readFileSchema,
+    needsApproval: async (params: z.infer<typeof readFileSchema>) => {
+      return !isPathInWhitelist(params.path);
+    },
     execute: async (params: z.infer<typeof readFileSchema>) => {
-      const { path } = params;
-      const needsApproval = !isPathInWhitelist(path);
-      if (needsApproval) {
-        return {
-          needsApproval: true,
-          path,
-        };
-      }
-      return readFile(path);
+      return readFile(params.path);
     },
   }),
 
   write_file: tool({
     description: '写入内容到指定文件',
     inputSchema: writeFileSchema,
+    needsApproval: async (params: z.infer<typeof writeFileSchema>) => {
+      return !isPathInWhitelist(params.path) || params.mode === 'overwrite';
+    },
     execute: async (params: z.infer<typeof writeFileSchema>) => {
-      const { path, mode, content } = params;
-      const needsApproval = !isPathInWhitelist(path) || mode === 'overwrite';
-      if (needsApproval) {
-        return {
-          needsApproval: true,
-          path,
-          mode,
-        };
-      }
-      return writeFile(path, content, mode);
+      return writeFile(params.path, params.content, params.mode);
     },
   }),
 };
