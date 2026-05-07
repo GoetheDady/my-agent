@@ -19,6 +19,8 @@
     "typescript-eslint": "^8.59.2"
   },
   "dependencies": {
-    "@lancedb/lancedb": "^0.27.2"
+    "@ai-sdk/deepseek": "^2.0.33",
+    "@lancedb/lancedb": "^0.27.2",
+    "ai": "^6.0.175"
   }
 }

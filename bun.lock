@@ -5,7 +5,9 @@
     "": {
       "name": "my-agent",
       "dependencies": {
+        "@ai-sdk/deepseek": "^2.0.33",
         "@lancedb/lancedb": "^0.27.2",
+        "ai": "^6.0.175",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -17,6 +19,14 @@
     },
   },
   "packages": {
+    "@ai-sdk/deepseek": ["@ai-sdk/deepseek@2.0.33", "https://registry.npmmirror.com/@ai-sdk/deepseek/-/deepseek-2.0.33.tgz", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.26" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-yiy3v2hRF1MZ5TInkPBkisyPiFd+5NiXa396cdosAZaN/jYYBD24EU4rOxd37DB2ldMjimrbzgB1cQLZLqZ/AQ=="],
+
+    "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.110", "https://registry.npmmirror.com/@ai-sdk/gateway/-/gateway-3.0.110.tgz", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.26", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-sbv8+1L9/BRKydn8dMNwoMQKupA4iLJ9N+yvxgW6wMQ/94UepDf3FeYWMj/dLdzolAHZ6izRUP4s5WqQkmJ2Zg=="],
+
+    "@ai-sdk/provider": ["@ai-sdk/provider@3.0.10", "https://registry.npmmirror.com/@ai-sdk/provider/-/provider-3.0.10.tgz", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw=="],
+
+    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@4.0.26", "https://registry.npmmirror.com/@ai-sdk/provider-utils/-/provider-utils-4.0.26.tgz", { "dependencies": { "@ai-sdk/provider": "3.0.10", "@standard-schema/spec": "^1.1.0", "eventsource-parser": "^3.0.8" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-CsKNLKsOpvPujRlIYvoz+Ybw+kGn7J4/fIZa/58+R7iWLLfwn6ifE2G6Yq8K9XvH/I/3bzaDAJ3NhRwEMsLBKQ=="],
+
     "@eslint-community/eslint-utils": ["@eslint-community/eslint-utils@4.9.1", "https://registry.npmmirror.com/@eslint-community/eslint-utils/-/eslint-utils-4.9.1.tgz", { "dependencies": { "eslint-visitor-keys": "^3.4.3" }, "peerDependencies": { "eslint": "^6.0.0 || ^7.0.0 || >=8.0.0" } }, "sha512-phrYmNiYppR7znFEdqgfWHXR6NCkZEK7hwWDHZUjit/2/U0r6XvkDl0SYnoM51Hq7FhCGdLDT6zxCCOY1hexsQ=="],
 
     "@eslint-community/regexpp": ["@eslint-community/regexpp@4.12.2", "https://registry.npmmirror.com/@eslint-community/regexpp/-/regexpp-4.12.2.tgz", {}, "sha512-EriSTlt5OC9/7SXkRSCAhfSxxoSUgBm33OH+IkwbdpgoqsSsUg7y3uh+IICI/Qg4BBWr3U2i39RpmycbxMq4ew=="],
@@ -59,6 +69,10 @@
 
     "@lancedb/lancedb-win32-x64-msvc": ["@lancedb/lancedb-win32-x64-msvc@0.27.2", "https://registry.npmmirror.com/@lancedb/lancedb-win32-x64-msvc/-/lancedb-win32-x64-msvc-0.27.2.tgz", { "os": "win32", "cpu": "x64" }, "sha512-XlwiI6CK2Gkqq+FFVAStHojao/XjIJpDPTm7Tb9SpLL64IlwGw3yaT2hnWKTm90W4KlSrpfSldPly+s+y4U7JQ=="],
 
+    "@opentelemetry/api": ["@opentelemetry/api@1.9.0", "https://registry.npmmirror.com/@opentelemetry/api/-/api-1.9.0.tgz", {}, "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg=="],
+
+    "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "https://registry.npmmirror.com/@standard-schema/spec/-/spec-1.1.0.tgz", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
     "@swc/helpers": ["@swc/helpers@0.5.21", "https://registry.npmmirror.com/@swc/helpers/-/helpers-0.5.21.tgz", { "dependencies": { "tslib": "^2.8.0" } }, "sha512-jI/VAmtdjB/RnI8GTnokyX7Ug8c+g+ffD6QRLa6XQewtnGyukKkKSk3wLTM3b5cjt1jNh9x0jfVlagdN2gDKQg=="],
 
     "@types/bun": ["@types/bun@1.3.13", "https://registry.npmmirror.com/@types/bun/-/bun-1.3.13.tgz", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
@@ -95,9 +109,13 @@
 
     "@typescript-eslint/visitor-keys": ["@typescript-eslint/visitor-keys@8.59.2", "https://registry.npmmirror.com/@typescript-eslint/visitor-keys/-/visitor-keys-8.59.2.tgz", { "dependencies": { "@typescript-eslint/types": "8.59.2", "eslint-visitor-keys": "^5.0.0" } }, "sha512-NwjLUnGy8/Zfx23fl50tRC8rYaYnM52xNRYFAXvmiil9yh1+K6aRVQMnzW6gQB/1DLgWt977lYQn7C+wtgXZiA=="],
 
+    "@vercel/oidc": ["@vercel/oidc@3.2.0", "https://registry.npmmirror.com/@vercel/oidc/-/oidc-3.2.0.tgz", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
+
     "acorn": ["acorn@8.16.0", "https://registry.npmmirror.com/acorn/-/acorn-8.16.0.tgz", { "bin": "bin/acorn" }, "sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw=="],
 
     "acorn-jsx": ["acorn-jsx@5.3.2", "https://registry.npmmirror.com/acorn-jsx/-/acorn-jsx-5.3.2.tgz", { "peerDependencies": { "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
+
+    "ai": ["ai@6.0.175", "https://registry.npmmirror.com/ai/-/ai-6.0.175.tgz", { "dependencies": { "@ai-sdk/gateway": "3.0.110", "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.26", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-6fFFHzbh6FIZnYc31V6osOxq25ABJYCShfG0O6ajHiA4FB/DgnPi1mP8cO5aAU3HNSbQHiMazdlh9bIsp97mVA=="],
 
     "ajv": ["ajv@6.15.0", "https://registry.npmmirror.com/ajv/-/ajv-6.15.0.tgz", { "dependencies": { "fast-deep-equal": "^3.1.1", "fast-json-stable-stringify": "^2.0.0", "json-schema-traverse": "^0.4.1", "uri-js": "^4.2.2" } }, "sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw=="],
 
@@ -149,6 +167,8 @@
 
     "esutils": ["esutils@2.0.3", "https://registry.npmmirror.com/esutils/-/esutils-2.0.3.tgz", {}, "sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g=="],
 
+    "eventsource-parser": ["eventsource-parser@3.0.8", "https://registry.npmmirror.com/eventsource-parser/-/eventsource-parser-3.0.8.tgz", {}, "sha512-70QWGkr4snxr0OXLRWsFLeRBIRPuQOvt4s8QYjmUlmlkyTZkRqS7EDVRZtzU3TiyDbXSzaOeF0XUKy8PchzukQ=="],
+
     "fast-deep-equal": ["fast-deep-equal@3.1.3", "https://registry.npmmirror.com/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz", {}, "sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q=="],
 
     "fast-json-stable-stringify": ["fast-json-stable-stringify@2.1.0", "https://registry.npmmirror.com/fast-json-stable-stringify/-/fast-json-stable-stringify-2.1.0.tgz", {}, "sha512-lhd/wF+Lk98HZoTCtlVraHtfh5XYijIjalXck7saUtuanSDyLMxnHhSXEDJqHxD7msR8D0uCmqlkwjCV8xvwHw=="],
@@ -186,6 +206,8 @@
     "json-bignum": ["json-bignum@0.0.3", "https://registry.npmmirror.com/json-bignum/-/json-bignum-0.0.3.tgz", {}, "sha512-2WHyXj3OfHSgNyuzDbSxI1w2jgw5gkWSWhS7Qg4bWXx1nLk3jnbwfUeS0PSba3IzpTUWdHxBieELUzXRjQB2zg=="],
 
     "json-buffer": ["json-buffer@3.0.1", "https://registry.npmmirror.com/json-buffer/-/json-buffer-3.0.1.tgz", {}, "sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ=="],
+
+    "json-schema": ["json-schema@0.4.0", "https://registry.npmmirror.com/json-schema/-/json-schema-0.4.0.tgz", {}, "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="],
 
     "json-schema-traverse": ["json-schema-traverse@0.4.1", "https://registry.npmmirror.com/json-schema-traverse/-/json-schema-traverse-0.4.1.tgz", {}, "sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg=="],
 
@@ -258,6 +280,8 @@
     "wordwrapjs": ["wordwrapjs@5.1.1", "https://registry.npmmirror.com/wordwrapjs/-/wordwrapjs-5.1.1.tgz", {}, "sha512-0yweIbkINJodk27gX9LBGMzyQdBDan3s/dEAiwBOj+Mf0PPyWL6/rikalkv8EeD0E8jm4o5RXEOrFTP3NXbhJg=="],
 
     "yocto-queue": ["yocto-queue@0.1.0", "https://registry.npmmirror.com/yocto-queue/-/yocto-queue-0.1.0.tgz", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
+
+    "zod": ["zod@4.4.3", "https://registry.npmmirror.com/zod/-/zod-4.4.3.tgz", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "https://registry.npmmirror.com/eslint-visitor-keys/-/eslint-visitor-keys-3.4.3.tgz", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
