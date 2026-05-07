@@ -12,7 +12,7 @@
  *   3. 集中管理 key 名，避免字符串散落各处拼写错误
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,10 +36,16 @@ export interface EmbeddingConfig {
   model: string;
 }
 
+/** Tools 相关配置 */
+export interface ToolsConfig {
+  allowedPaths: string[];
+}
+
 /** 完整应用配置 */
 export interface AppConfig {
   provider: ProviderConfig;
   embedding: EmbeddingConfig;
+  tools: ToolsConfig;
 }
 
 // ============================================================
@@ -120,6 +126,9 @@ export function loadConfig(): AppConfig {
       apiKey: process.env.ZHIPU_API_KEY ?? "",
       model: "embedding-3",
     },
+    tools: {
+      allowedPaths: fileConfig.tools?.allowedPaths ?? [getProjectRoot()],
+    },
   };
 }
 
@@ -130,4 +139,11 @@ export function getConfig(): AppConfig {
     _config = loadConfig();
   }
   return _config;
+}
+
+export function saveConfig(config: AppConfig): void {
+  const root = getProjectRoot();
+  const configPath = resolve(root, "config.json");
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
 }
