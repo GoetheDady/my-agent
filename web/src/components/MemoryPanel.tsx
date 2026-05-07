@@ -36,7 +36,7 @@ interface Props {
 export default function MemoryPanel({ onClose }: Props) {
   const {
     memories,
-    stats,
+    stats: _stats,
     loading,
     page,
     pageSize,
@@ -178,7 +178,7 @@ export default function MemoryPanel({ onClose }: Props) {
         </div>
 
         <div className="px-4 py-2 text-xs text-white/40">
-          共 {stats?.total ?? total} 条记忆
+          共 {total} 条记忆
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -270,7 +270,7 @@ export default function MemoryPanel({ onClose }: Props) {
                   <div className="mt-2 flex items-center gap-3 text-xs text-white/30">
                     <span>置信度: {(item.confidence * 100).toFixed(0)}%</span>
                     <span>访问: {item.access_count}次</span>
-                    <span>{new Date(item.updated_at * 1000).toLocaleDateString()}</span>
+                    <span>{new Date(item.updated_at).toLocaleDateString()}</span>
                   </div>
                 </div>
               );

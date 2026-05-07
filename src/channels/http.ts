@@ -25,7 +25,7 @@ import {
   getSessionMessages,
   appendMessage,
 } from "./session-api";
-import { injectMemories, extractMemories } from "../memory/memory";
+import { extractMemories } from "../memory/memory";
 import { handleMemoryRequest } from "./memory-api";
 import { queuePrefetch, getPrefetchedMemories } from "../memory/prefetch";
 

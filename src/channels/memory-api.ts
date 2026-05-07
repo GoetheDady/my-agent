@@ -43,6 +43,20 @@ export async function handleMemoryRequest(
     })));
   }
 
+  if (method === "POST" && pathname === "/api/memories") {
+    const body = await req.json().catch(() => ({})) as {
+      content?: string;
+      memory_type?: string;
+    };
+    if (!body.content) return jsonError("缺少 content", 400);
+    const memory = await addMemory({
+      content: body.content,
+      memory_type: body.memory_type,
+    });
+    if (!memory) return jsonError("添加失败", 500);
+    return json(memory, 201);
+  }
+
   if (method === "GET" && pathname === "/api/memories") {
     const url = new URL(req.url);
     const params = {
@@ -65,20 +79,6 @@ export async function handleMemoryRequest(
     const memory = await getMemory(id);
     if (!memory) return jsonError("记忆不存在", 404);
     return json(memory);
-  }
-
-  if (method === "POST" && pathname.startsWith("/api/memories/") === false) {
-    const body = await req.json().catch(() => ({})) as {
-      content?: string;
-      memory_type?: string;
-    };
-    if (!body.content) return jsonError("缺少 content", 400);
-    const memory = await addMemory({
-      content: body.content,
-      memory_type: body.memory_type,
-    });
-    if (!memory) return jsonError("添加失败", 500);
-    return json(memory, 201);
   }
 
   if (method === "PATCH") {
