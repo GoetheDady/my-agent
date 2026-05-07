@@ -58,6 +58,23 @@ export default function ChatView() {
     addToolApprovalResponse,
   } = useChat({
     transport: chatTransport,
+    sendAutomaticallyWhen: ({ messages }) => {
+      const lastMessage = messages[messages.length - 1];
+      if (!lastMessage || lastMessage.role !== 'assistant') return false;
+
+      const toolInvocations = lastMessage.parts?.filter(
+        (part) => part.type === 'tool-invocation'
+      ) ?? [];
+
+      if (toolInvocations.length === 0) return false;
+
+      return toolInvocations.every(
+        (inv) => {
+          const toolInv = (inv as { toolInvocation?: { state?: string } }).toolInvocation;
+          return toolInv?.state === 'result' || toolInv?.state === 'partial-result';
+        }
+      );
+    },
     onFinish: ({ message, messages: finishedMessages }) => {
       const currentSessionId = useChatStore.getState().sessionId;
       const lastUserMsg = [...finishedMessages].reverse().find((m) => m.role === "user");
