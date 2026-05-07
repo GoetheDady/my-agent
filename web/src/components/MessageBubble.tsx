@@ -1,32 +1,57 @@
 import { useState, useEffect, useRef } from "react";
-import type { Message, DisplayBlock } from "../types";
 import MarkdownContent from "./MarkdownContent";
 import { ChevronDown } from "lucide-react";
-import { useChatStore, type MemoryExtractStatus } from "../store/chatStore";
+import type { MemoryExtractStatus } from "../store/chatStore";
 
-export default function MessageBubble({ message }: { message: Message }) {
+interface MessagePart {
+  type: string;
+  text?: string;
+  reasoning?: string;
+  toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string };
+}
+
+interface AIMessage {
+  id: string;
+  role: string;
+  parts: MessagePart[];
+}
+
+export default function MessageBubble({ message, memoryStatus }: { message: AIMessage; memoryStatus?: MemoryExtractStatus }) {
   const isUser = message.role === "user";
 
   if (isUser) {
+    const text = message.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("\n");
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-surface px-4 py-3 text-foreground">
-          {message.blocks.map((b, i) => (
-            <p key={i} className="whitespace-pre-wrap text-sm">{b.content}</p>
-          ))}
+          <p className="whitespace-pre-wrap text-sm">{text}</p>
         </div>
       </div>
     );
   }
 
-  const memoryStatus = useChatStore((s) => s.memoryStatusMap[message.id]);
-
   return (
     <div className="flex justify-start">
       <div className="max-w-[80%] space-y-2">
-        {message.blocks.map((block, i) => (
-          <BlockRenderer key={i} block={block} />
-        ))}
+        {message.parts.map((part, i) => {
+          if (part.type === "text" && part.text) {
+            return (
+              <div key={i} className="rounded-2xl rounded-bl-sm bg-assistant px-4 py-3 text-foreground">
+                <MarkdownContent content={part.text} />
+              </div>
+            );
+          }
+          if ((part.type === "reasoning" || part.type === "thinking") && part.text) {
+            return <ThinkingBlock key={i} content={part.text} />;
+          }
+          if (part.type === "tool-invocation" && part.toolInvocation) {
+            return null;
+          }
+          return null;
+        })}
         <MemoryStatusBar memoryStatus={memoryStatus} />
       </div>
     </div>
@@ -62,37 +87,16 @@ function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus 
   return null;
 }
 
-function BlockRenderer({ block }: { block: DisplayBlock }) {
-  switch (block.type) {
-    case "text":
-      return (
-        <div className="rounded-2xl rounded-bl-sm bg-assistant px-4 py-3 text-foreground">
-          <MarkdownContent content={block.content} />
-        </div>
-      );
-    case "thinking":
-      return <ThinkingBlock block={block} />;
-    case "tool_use":
-      return null;
-    default:
-      return null;
-  }
-}
-
-function ThinkingBlock({ block }: { block: DisplayBlock }) {
-  const [isOpen, setIsOpen] = useState(!block.collapsed);
+function ThinkingBlock({ content }: { content: string }) {
+  const [isOpen, setIsOpen] = useState(true);
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState<number | undefined>(undefined);
-
-  useEffect(() => {
-    setIsOpen(!block.collapsed);
-  }, [block.collapsed]);
 
   useEffect(() => {
     if (contentRef.current) {
       setContentHeight(contentRef.current.scrollHeight);
     }
-  }, [block.content, isOpen]);
+  }, [content, isOpen]);
 
   return (
     <div className="rounded-lg bg-thinking px-3 py-2">
@@ -114,7 +118,7 @@ function ThinkingBlock({ block }: { block: DisplayBlock }) {
           ref={contentRef}
           className="mt-2 whitespace-pre-wrap text-xs italic text-white/50"
         >
-          {block.content}
+          {content}
         </p>
       </div>
     </div>

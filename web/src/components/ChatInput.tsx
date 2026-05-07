@@ -1,15 +1,21 @@
 import { useRef } from "react";
 import { ArrowUp, Square, Lightbulb } from "lucide-react";
-import { useChatStore } from "../store/chatStore";
 
-export default function ChatInput() {
-  const { isLoading, sendMessage, abortRequest, thinkingEnabled, setThinkingEnabled } = useChatStore();
+interface ChatInputProps {
+  isLoading: boolean;
+  onSend: (text: string) => void;
+  onStop: () => void;
+  thinkingEnabled: boolean;
+  onToggleThinking: () => void;
+}
+
+export default function ChatInput({ isLoading, onSend, onStop, thinkingEnabled, onToggleThinking }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   function handleSend() {
     const text = textareaRef.current?.value.trim() ?? "";
     if (!text || isLoading) return;
-    sendMessage(text);
+    onSend(text);
     if (textareaRef.current) textareaRef.current.value = "";
     autoResize();
   }
@@ -31,7 +37,7 @@ export default function ChatInput() {
   return (
     <div className="flex items-end gap-3 border-t border-white/10 bg-surface p-4">
       <button
-        onClick={() => setThinkingEnabled(!thinkingEnabled)}
+        onClick={onToggleThinking}
         className={`mb-0.5 rounded-lg p-2.5 transition-colors ${
           thinkingEnabled
             ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
@@ -52,7 +58,7 @@ export default function ChatInput() {
       />
       {isLoading ? (
         <button
-          onClick={abortRequest}
+          onClick={onStop}
           className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-3 text-white hover:bg-red-700 disabled:opacity-50"
         >
           <Square size={16} fill="currentColor" />

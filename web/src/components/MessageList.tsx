@@ -1,9 +1,17 @@
 import { useEffect, useRef } from "react";
-import { useChatStore } from "../store/chatStore";
 import MessageBubble from "./MessageBubble";
+import type { MemoryExtractStatus } from "../store/chatStore";
 
-export default function MessageList() {
-  const { messages, streamingBlocks, streamingMessageId } = useChatStore();
+interface MessageListProps {
+  messages: Array<{
+    id: string;
+    role: string;
+    parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string } }>;
+  }>;
+  memoryStatusMap: Record<string, MemoryExtractStatus>;
+}
+
+export default function MessageList({ messages, memoryStatusMap }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
@@ -17,11 +25,7 @@ export default function MessageList() {
     if (isNearBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streamingBlocks]);
-
-  const streamingMsg = streamingMessageId && streamingBlocks.length > 0
-    ? { id: streamingMessageId, role: "assistant" as const, blocks: streamingBlocks }
-    : null;
+  }, [messages]);
 
   return (
     <div
@@ -30,15 +34,14 @@ export default function MessageList() {
       className="flex-1 overflow-y-auto px-4 py-6"
     >
       <div className="mx-auto max-w-3xl space-y-4" style={{ minHeight: "100%" }}>
-        {messages.length === 0 && !streamingMsg && (
+        {messages.length === 0 && (
           <div className="flex items-center justify-center text-gray-500" style={{ minHeight: "60vh" }}>
             <p>输入消息开始对话</p>
           </div>
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} memoryStatus={memoryStatusMap[msg.id]} />
         ))}
-        {streamingMsg && <MessageBubble message={streamingMsg} />}
       </div>
     </div>
   );

@@ -3,7 +3,11 @@ import { Plus, Trash2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { useChatStore } from "../store/chatStore";
 
-export default function SessionSidebar() {
+interface SessionSidebarProps {
+  onLoadSession: (id: string) => Promise<void>;
+}
+
+export default function SessionSidebar({ onLoadSession }: SessionSidebarProps) {
   const {
     sessions,
     activeSessionId,
@@ -12,14 +16,14 @@ export default function SessionSidebar() {
     switchSession,
     deleteSession,
   } = useSessionStore();
-  const { loadSession, clearMessages, setSessionId } = useChatStore();
+  const { clearSession, setSessionId } = useChatStore();
 
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
   async function handleNew() {
-    clearMessages();
+    clearSession();
     const session = await createSession();
     switchSession(session.id);
     setSessionId(session.id);
@@ -29,10 +33,10 @@ export default function SessionSidebar() {
     if (id === activeSessionId) return;
     switchSession(id);
     try {
-      await loadSession(id);
+      await onLoadSession(id);
     } catch {
       useSessionStore.getState().setActiveSessionId(null);
-      clearMessages();
+      clearSession();
     }
   }
 
@@ -40,7 +44,7 @@ export default function SessionSidebar() {
     e.stopPropagation();
     await deleteSession(id);
     if (id === activeSessionId) {
-      clearMessages();
+      clearSession();
     }
   }
 
