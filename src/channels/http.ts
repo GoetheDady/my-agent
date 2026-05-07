@@ -23,6 +23,7 @@ import { extractMemories } from "../memory/memory";
 import { handleMemoryRequest } from "./memory-api";
 import { queuePrefetch, getPrefetchedMemories } from "../memory/prefetch";
 import { getConfig } from "../core/config";
+import { tools } from "../brain/tools";
 
 function jsonError(message: string, status: number): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -237,6 +238,7 @@ ${lines}
     system: enhancedPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(5),
+    tools,
     abortSignal: req.signal,
     providerOptions: body.thinkingEnabled
       ? { deepseek: { thinking: { type: "enabled" } } }
@@ -286,6 +288,7 @@ ${lines}
   });
 
   return result.toUIMessageStreamResponse({
+    // consumeStream (imported from 'ai') is passed as consumeSseStream option
     consumeSseStream: consumeStream,
     headers: {
       "access-control-allow-origin": "*",
@@ -305,7 +308,7 @@ ${lines}
             .map((p: { type: string; text?: string }) => p.text!)
             .join(" ");
           if (partialText) {
-            appendMessage(capturedSessionId, "assistant", partialText);
+            appendMessage(capturedSessionId, "assistant", JSON.stringify([{ type: "text", text: partialText }]));
           }
         }
       }
