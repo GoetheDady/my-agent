@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { PanelLeft, PanelRight, Brain } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
@@ -8,17 +8,46 @@ import SessionSidebar from "./SessionSidebar";
 import MemoryPanel from "./MemoryPanel";
 import { useChatStore, triggerMemoryExtract, parseDbContent } from "../store/chatStore";
 import { useSessionStore } from "../store/sessionStore";
+import { createSessionResolver } from "../lib/sessionResolver";
+import { getSessionIdFromPath, getSessionPath } from "../lib/sessionRoute";
 
 export default function ChatView() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const { sessionId, thinkingEnabled, setSessionId, memoryStatusMap } = useChatStore();
+  const { thinkingEnabled, setSessionId, memoryStatusMap } = useChatStore();
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
 
   const chatTransport = useMemo(() => new DefaultChatTransport({
     api: "/api/chat",
   }), []);
+
+  const navigateToSession = useCallback((id: string, replace = false) => {
+    const path = getSessionPath(id);
+    if (window.location.pathname === path) return;
+    window.history[replace ? "replaceState" : "pushState"](null, "", path);
+  }, []);
+
+  const navigateToNewSession = useCallback(() => {
+    if (window.location.pathname === "/") return;
+    window.history.pushState(null, "", "/");
+  }, []);
+
+  const sessionResolver = useMemo(() => createSessionResolver({
+    getSessionId: () => useChatStore.getState().sessionId,
+    setSessionId,
+    setActiveSessionId,
+    fetchSessions,
+    createSession: async () => {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      if (!res.ok) throw new Error("创建会话失败");
+      return await res.json() as { id: string };
+    },
+    onSessionCreated: (id) => navigateToSession(id, true),
+  }), [setSessionId, setActiveSessionId, fetchSessions, navigateToSession]);
 
   const {
     messages,
@@ -28,8 +57,9 @@ export default function ChatView() {
     setMessages,
   } = useChat({
     transport: chatTransport,
-    onFinish: ({ message }) => {
-      const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+    onFinish: ({ message, messages: finishedMessages }) => {
+      const currentSessionId = useChatStore.getState().sessionId;
+      const lastUserMsg = [...finishedMessages].reverse().find((m) => m.role === "user");
       const userText = lastUserMsg?.parts
         ?.filter((p: { type: string; text?: string }) => p.type === "text" && typeof p.text === "string")
         .map((p: { type: string; text?: string }) => p.text ?? "")
@@ -39,8 +69,8 @@ export default function ChatView() {
         .map((p: { type: string; text?: string }) => p.text ?? "")
         .join("\n") || "";
 
-      if (userText && sessionId) {
-        triggerMemoryExtract(message.id, userText, assistantText, sessionId, useChatStore.setState, useChatStore.getState);
+      if (userText && currentSessionId) {
+        triggerMemoryExtract(message.id, userText, assistantText, currentSessionId, useChatStore.setState, useChatStore.getState);
       }
 
       setTimeout(() => fetchSessions(), 2000);
@@ -52,39 +82,9 @@ export default function ChatView() {
 
   const isLoading = status === "submitted" || status === "streaming";
 
-  const [creatingSession, setCreatingSession] = useState(false);
-
-  const handleSend = useCallback(async (text: string) => {
-    let currentSessionId = sessionId;
-    if (!currentSessionId && !creatingSession) {
-      setCreatingSession(true);
-      try {
-        const res = await fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" } });
-        if (res.ok) {
-          const session = await res.json() as { id: string };
-          currentSessionId = session.id;
-          setSessionId(currentSessionId);
-          setActiveSessionId(currentSessionId);
-          fetchSessions();
-        }
-      } finally {
-        setCreatingSession(false);
-      }
-    }
-    sendMessage(
-      { text },
-      {
-        body: {
-          sessionId: currentSessionId,
-          thinkingEnabled,
-        },
-      },
-    );
-  }, [sendMessage, sessionId, thinkingEnabled, creatingSession, setSessionId, setActiveSessionId, fetchSessions]);
-
-  const handleLoadSession = useCallback(async (id: string) => {
+  const loadSession = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const rawMessages = await res.json() as Array<{ id: string; role: "user" | "assistant"; content: string }>;
     const uiMessages = rawMessages.map((m) => ({
       id: m.id,
@@ -94,12 +94,60 @@ export default function ChatView() {
     setMessages(uiMessages as Parameters<typeof setMessages>[0]);
     setSessionId(id);
     setActiveSessionId(id);
+    return true;
   }, [setMessages, setSessionId, setActiveSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncFromLocation() {
+      const id = getSessionIdFromPath(window.location.pathname);
+      if (!id) {
+        setMessages([]);
+        useChatStore.getState().clearSession();
+        return;
+      }
+
+      const loaded = await loadSession(id);
+      if (!loaded && !cancelled) {
+        setMessages([]);
+        useChatStore.getState().clearSession();
+        window.history.replaceState(null, "", "/");
+      }
+    }
+
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("popstate", syncFromLocation);
+    };
+  }, [loadSession, setMessages]);
+
+  const handleSend = useCallback(async (text: string) => {
+    const currentSessionId = await sessionResolver.ensureSessionId();
+    sendMessage(
+      { text },
+      {
+        body: {
+          sessionId: currentSessionId,
+          thinkingEnabled,
+        },
+      },
+    );
+  }, [sendMessage, thinkingEnabled, sessionResolver]);
+
+  const handleLoadSession = useCallback(async (id: string) => {
+    const loaded = await loadSession(id);
+    if (loaded) navigateToSession(id);
+  }, [loadSession, navigateToSession]);
 
   const handleNewSession = useCallback(() => {
     setMessages([]);
     useChatStore.getState().clearSession();
-  }, [setMessages]);
+    navigateToNewSession();
+  }, [setMessages, navigateToNewSession]);
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">

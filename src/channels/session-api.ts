@@ -31,6 +31,11 @@ export function listSessions(): Session[] {
   return db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Session[];
 }
 
+export function getSession(id: string): Session | null {
+  const db = getDb();
+  return db.query("SELECT * FROM sessions WHERE id = ?").get(id) as Session | null;
+}
+
 export function updateSessionTitle(id: string, title: string): void {
   const db = getDb();
   const now = Date.now();

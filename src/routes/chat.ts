@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamText, generateText, stepCountIs, consumeStream, convertToModelMessages } from "ai";
 import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
-import { createSession, appendMessage, updateSessionTitle } from "../channels/session-api";
+import { createSession, appendMessage, getSession, updateSessionTitle } from "../channels/session-api";
 import { queuePrefetch, getPrefetchedMemories } from "../memory/prefetch";
 import { getConfig } from "../core/config";
 import { tools } from "../brain/tools";
@@ -19,7 +19,11 @@ app.post("/", async (c) => {
   }
 
   const { messages: uiMessages, sessionId, thinkingEnabled } = body;
+  console.log("[chat] received sessionId:", sessionId, "type:", typeof sessionId);
   const capturedSessionId = sessionId ?? createSession().id;
+  if (!sessionId) {
+    console.log("[chat] WARNING: sessionId is null/undefined, creating new session:", capturedSessionId);
+  }
 
   const lastUserMsg = [...uiMessages].reverse().find((m: { role: string }) => m.role === "user");
   const userText = (lastUserMsg as { parts?: Array<{ type: string; text?: string }>; content?: string } | undefined)?.parts
@@ -113,7 +117,8 @@ app.post("/", async (c) => {
       }
 
       queuePrefetch(assistantText.slice(0, 500));
-      generateAndSaveTitle(capturedSessionId, userText, assistantText);
+      ensureFallbackTitle(capturedSessionId, userText);
+      void generateAndSaveTitle(capturedSessionId, userText, assistantText);
     },
   });
 
@@ -145,6 +150,25 @@ app.post("/", async (c) => {
   });
 });
 
+function buildFallbackTitle(userMessage: string): string {
+  const normalized = userMessage
+    .replace(/\s+/g, " ")
+    .replace(/^["""'「『]+|["""'」』]+$/g, "")
+    .trim();
+  if (!normalized) return "新对话";
+  return normalized.slice(0, 20);
+}
+
+function ensureFallbackTitle(sessionId: string, userMessage: string): void {
+  const session = getSession(sessionId);
+  if (!session || session.title !== "新对话") return;
+
+  const title = buildFallbackTitle(userMessage);
+  if (title !== "新对话") {
+    updateSessionTitle(sessionId, title);
+  }
+}
+
 async function generateAndSaveTitle(sessionId: string, userMessage: string, assistantText: string): Promise<void> {
   try {
     const config = getConfig();
@@ -166,10 +190,12 @@ async function generateAndSaveTitle(sessionId: string, userMessage: string, assi
     });
 
     const cleaned = title.trim().replace(/^["""']+|["""']+$/g, "").slice(0, 30);
-    if (cleaned) {
+    if (cleaned && cleaned !== "新对话") {
       updateSessionTitle(sessionId, cleaned);
     }
-  } catch { /* non-critical */ }
+  } catch (err) {
+    console.warn("[chat] title generation failed:", err);
+  }
 }
 
 export default app;
