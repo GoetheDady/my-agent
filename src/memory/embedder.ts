@@ -1,9 +1,32 @@
 import { getConfig } from "../core/config";
+import { createHash } from "crypto";
+
+const cache = new Map<string, { embedding: number[]; timestamp: number }>();
+const CACHE_MAX_SIZE = 100;
+const CACHE_TTL_MS = 30 * 60 * 1000;
+
+function getCacheKey(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function cleanCache(): void {
+  if (cache.size <= CACHE_MAX_SIZE) return;
+  const entries = Array.from(cache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
+  for (const [key] of entries.slice(0, entries.length - CACHE_MAX_SIZE)) {
+    cache.delete(key);
+  }
+}
 
 export async function embedText(text: string): Promise<number[]> {
   const config = getConfig();
   if (!config.embedding.apiKey) {
     return [];
+  }
+
+  const key = getCacheKey(text);
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.embedding;
   }
 
   try {
@@ -26,7 +49,14 @@ export async function embedText(text: string): Promise<number[]> {
     }
 
     const data = await res.json() as { data: Array<{ embedding: number[] }> };
-    return data.data[0]?.embedding ?? [];
+    const embedding = data.data[0]?.embedding ?? [];
+
+    if (embedding.length > 0) {
+      cache.set(key, { embedding, timestamp: Date.now() });
+      cleanCache();
+    }
+
+    return embedding;
   } catch (err) {
     console.error("[embedder] 请求失败:", err);
     return [];
