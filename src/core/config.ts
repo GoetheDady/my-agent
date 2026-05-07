@@ -64,7 +64,7 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
  * Bun 和 Node 的 import.meta 行为不同，做兼容处理。
  * Bun 有 import.meta.dir，Node 需要用 fileURLToPath。
  */
-function getProjectRoot(): string {
+export function getProjectRoot(): string {
   const meta = import.meta as unknown as { dir?: string };
   if (meta.dir) return resolve(meta.dir, "../..");
 
