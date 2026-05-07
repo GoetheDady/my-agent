@@ -227,7 +227,8 @@ ${lines}
     return { role: m.role, parts: [] };
   });
 
-  const modelMessages = await convertToModelMessages(normalizedMessages);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const modelMessages = await convertToModelMessages(normalizedMessages as any);
 
   let persisted = false;
 
@@ -251,11 +252,14 @@ ${lines}
 
       const assistantText = response.messages
         .flatMap((m) => {
-          if (m.role === "assistant" && m.content) {
-            if (typeof m.content === "string") return [m.content];
-            return m.content
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .map((p) => p.text);
+          if (m.role === "assistant") {
+            const content = m.content as string | Array<{ type: string; text: string }> | undefined;
+            if (typeof content === "string") return [content];
+            if (Array.isArray(content)) {
+              return content
+                .filter((p: { type: string; text: string }) => p.type === "text")
+                .map((p: { type: string; text: string }) => p.text);
+            }
           }
           return [];
         })
@@ -265,13 +269,13 @@ ${lines}
         const parts = response.messages
           .filter((m) => m.role === "assistant")
           .flatMap((m) => {
-            if (typeof m.content === "string") {
-              return [{ type: "text" as const, text: m.content }];
+            const content = m.content as string | Array<{ type: string; text: string }> | undefined;
+            if (typeof content === "string") {
+              return [{ type: "text" as const, text: content }];
             }
-            return m.content.filter((p) => p.type === "text").map((p) => {
-              if (p.type === "text") return { type: "text" as const, text: p.text };
-              return p;
-            });
+            return (Array.isArray(content) ? content : [])
+              .filter((p: { type: string }) => p.type === "text")
+              .map((p: { type: string; text: string }) => p);
           });
         appendMessage(capturedSessionId, "assistant", JSON.stringify(parts));
       }
@@ -295,14 +299,11 @@ ${lines}
           appendMessage(capturedSessionId, "user", userText);
         }
         if (responseMessage) {
-          const partialText = typeof responseMessage.content === "string"
-            ? responseMessage.content
-            : Array.isArray(responseMessage.content)
-              ? responseMessage.content
-                  .filter((p): p is { type: "text"; text: string } => p.type === "text")
-                  .map((p) => p.text)
-                  .join(" ")
-              : "";
+          const msgParts = (responseMessage as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+          const partialText = msgParts
+            .filter((p: { type: string; text?: string }) => p.type === "text" && p.text)
+            .map((p: { type: string; text?: string }) => p.text!)
+            .join(" ");
           if (partialText) {
             appendMessage(capturedSessionId, "assistant", partialText);
           }
@@ -328,7 +329,7 @@ async function generateAndSaveTitle(sessionId: string, userMessage: string, assi
       model,
       system: "你是标题生成器。只返回标题文本，不要任何额外内容。",
       prompt,
-      maxTokens: 50,
+      maxOutputTokens: 50,
       abortSignal: AbortSignal.timeout(8000),
     });
 

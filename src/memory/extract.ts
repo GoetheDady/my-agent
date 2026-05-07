@@ -1,4 +1,7 @@
 import { addMemory, updateMemory, supersedeMemory, deleteMemory, searchMemories, touchMemory } from "./store";
+import { streamText } from "ai";
+import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
+import { getConfig } from "../core/config";
 
 export async function extractMemories(
   userMessages: string[],
@@ -27,7 +30,11 @@ ${conversationText}
 ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
 
   try {
-    const { streamChat: providerStream } = await import("../brain/provider");
+    const config = getConfig();
+    const provider = config.provider.baseURL
+      ? createDeepSeek({ baseURL: config.provider.baseURL })
+      : deepseek;
+    const model = provider(config.provider.model);
 
     const systemPrompt = `你是记忆提取器。审视对话，提取值得长期记住的事实。输出严格 JSON 数组。
 
@@ -58,14 +65,17 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
 4. 没有值得记录的内容时返回空数组 []`;
 
     let body = "";
-    for await (const event of providerStream({
+    const result = streamText({
+      model,
       system: systemPrompt,
       messages: [{ role: "user", content: prompt }],
-      maxTokens: 1000,
-      signal: AbortSignal.timeout(20000),
-    })) {
-      if (event.type === "text_delta") {
-        body += event.content;
+      maxOutputTokens: 1000,
+      abortSignal: AbortSignal.timeout(20000),
+    });
+
+    for await (const part of result.fullStream) {
+      if (part.type === "text-delta" && "textDelta" in part) {
+        body += (part as unknown as { textDelta: string }).textDelta;
       }
     }
 
