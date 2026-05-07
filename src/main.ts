@@ -6,6 +6,7 @@ import { getDb } from "./core/database";
 import chatRoutes from "./routes/chat";
 import sessionRoutes from "./routes/sessions";
 import memoryRoutes from "./routes/memory";
+import toolRoutes from "./routes/tools";
 
 getDb();
 
@@ -17,6 +18,7 @@ app.route("/api/chat", chatRoutes);
 app.route("/api/sessions", sessionRoutes);
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);
+app.route("/api/tools", toolRoutes);
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 
