@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { PanelLeft, PanelRight } from "lucide-react";
+import { PanelLeft, PanelRight, Brain } from "lucide-react";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import SessionSidebar from "./SessionSidebar";
+import MemoryPanel from "./MemoryPanel";
 
 export default function ChatView() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
@@ -23,10 +25,18 @@ export default function ChatView() {
           <h1 className="text-lg font-semibold text-[var(--color-text)]">
             My Agent
           </h1>
+          <button
+            onClick={() => setMemoryOpen(true)}
+            className="text-white/60 hover:text-white transition-colors"
+            title="记忆管理"
+          >
+            <Brain size={18} />
+          </button>
         </header>
         <MessageList />
         <ChatInput />
       </div>
+      {memoryOpen && <MemoryPanel onClose={() => setMemoryOpen(false)} />}
     </div>
   );
 }
