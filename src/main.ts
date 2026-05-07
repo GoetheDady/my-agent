@@ -14,8 +14,19 @@ app.use("*", cors());
 
 app.route("/api/chat", chatRoutes);
 app.route("/api/sessions", sessionRoutes);
-app.route("/api/memory", memoryRoutes);
+app.route("/api/memories", memoryRoutes);
+app.route("/api/memory", memoryRoutes); // compat: /api/memory/extract used by frontend
+
+// Standalone health check (not under /api/chat)
+app.get("/api/health", (c) => c.json({ status: "ok" }));
+
 app.route("/*", staticRoutes);
+
+// Global error handler
+app.onError((err, c) => {
+  console.error("[server]", err);
+  return c.json({ error: err instanceof Error ? err.message : "内部错误" }, 500);
+});
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 

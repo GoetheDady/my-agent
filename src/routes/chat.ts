@@ -120,6 +120,7 @@ app.post("/", async (c) => {
   return result.toUIMessageStreamResponse({
     consumeSseStream: consumeStream,
     headers: {
+      "access-control-allow-origin": "*",
       "cache-control": "no-cache",
       "connection": "keep-alive",
     },
