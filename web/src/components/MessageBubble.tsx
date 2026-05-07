@@ -75,7 +75,36 @@ export default function MessageBubble({
             return <ThinkingBlock key={i} content={part.text} />;
           }
           if (part.type === "tool-invocation" && part.toolInvocation) {
-            return null;
+            const { toolName, args, state } = part.toolInvocation;
+
+            // 审批请求已经在上面处理了，这里处理其他状态
+            if (state === 'approval-requested') return null;
+
+            return (
+              <div key={i} className="rounded-lg border border-white/10 bg-surface/50 px-3 py-2 text-xs">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-blue-400">🔧</span>
+                  <span className="font-medium text-white/70">
+                    {toolName === 'read_file' ? '读取文件' :
+                     toolName === 'write_file' ? '写入文件' : toolName}
+                  </span>
+                  {state === 'result' && <span className="text-green-400">✓</span>}
+                  {state === 'call' && <span className="text-yellow-400 animate-pulse">⋯</span>}
+                </div>
+                <div className="text-white/40 font-mono text-[10px] space-y-0.5">
+                  {Object.entries(args).map(([key, value]) => (
+                    <div key={key}>
+                      <span className="text-white/30">{key}:</span>{' '}
+                      <span className="text-white/50">
+                        {typeof value === 'string' && value.length > 60
+                          ? value.slice(0, 60) + '...'
+                          : String(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
           }
           return null;
         })}
