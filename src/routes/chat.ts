@@ -8,7 +8,13 @@ import { tools } from "../brain/tools";
 
 const app = new Hono();
 
-const DEFAULT_SYSTEM_PROMPT = "你是一个有用的 AI 助手。使用中文回复。回答简洁明了。";
+const DEFAULT_SYSTEM_PROMPT = `你是一个有用的 AI 助手。使用中文回复。回答简洁明了。
+
+当你需要使用工具（如读取文件、写入文件等）时，请先简短地告诉用户你要做什么，然后再调用工具。例如：
+- "好的，我来读取 package.json 文件的内容。" 然后调用 read_file
+- "我会将内容写入到文件中。" 然后调用 write_file
+
+这样可以让对话更自然，用户也能清楚地知道你在做什么。`;
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
