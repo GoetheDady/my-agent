@@ -8,6 +8,7 @@
         "@ai-sdk/deepseek": "^2.0.33",
         "@lancedb/lancedb": "^0.27.2",
         "ai": "^6.0.175",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
