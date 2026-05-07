@@ -1,15 +1,28 @@
-/**
- * 应用入口
- *
- * 启动 HTTP 服务（信道系统），加载配置，注册路由。
- * MVP 阶段只有一个服务进程，后续引入多 Agent 时拆分。
- */
-
-import { serve } from "./channels/http";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { getDb } from "./core/database";
+import chatRoutes from "./routes/chat";
+import sessionRoutes from "./routes/sessions";
+import memoryRoutes from "./routes/memory";
+import staticRoutes from "./routes/static";
 
 getDb();
 
+const app = new Hono();
+
+app.use("*", cors());
+
+app.route("/api/chat", chatRoutes);
+app.route("/api/sessions", sessionRoutes);
+app.route("/api/memory", memoryRoutes);
+app.route("/*", staticRoutes);
+
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
-serve(PORT);
+Bun.serve({
+  port: PORT,
+  idleTimeout: 120,
+  fetch: app.fetch,
+});
+
+console.log(`[server] 服务已启动: http://localhost:${PORT}`);
