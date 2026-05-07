@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { useChatStore } from "../store/chatStore";
 
 interface SessionSidebarProps {
   onLoadSession: (id: string) => Promise<void>;
@@ -13,20 +12,15 @@ export default function SessionSidebar({ onLoadSession, onNewSession }: SessionS
     sessions,
     activeSessionId,
     fetchSessions,
-    createSession,
     switchSession,
     deleteSession,
   } = useSessionStore();
-  const { setSessionId } = useChatStore();
 
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
   async function handleNew() {
-    const session = await createSession();
-    switchSession(session.id);
-    setSessionId(session.id);
     onNewSession();
   }
 

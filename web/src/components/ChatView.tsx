@@ -52,16 +52,23 @@ export default function ChatView() {
 
   const isLoading = status === "submitted" || status === "streaming";
 
+  const [creatingSession, setCreatingSession] = useState(false);
+
   const handleSend = useCallback(async (text: string) => {
     let currentSessionId = sessionId;
-    if (!currentSessionId) {
-      const res = await fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" } });
-      if (res.ok) {
-        const session = await res.json() as { id: string };
-        currentSessionId = session.id;
-        setSessionId(currentSessionId);
-        setActiveSessionId(currentSessionId);
-        fetchSessions();
+    if (!currentSessionId && !creatingSession) {
+      setCreatingSession(true);
+      try {
+        const res = await fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" } });
+        if (res.ok) {
+          const session = await res.json() as { id: string };
+          currentSessionId = session.id;
+          setSessionId(currentSessionId);
+          setActiveSessionId(currentSessionId);
+          fetchSessions();
+        }
+      } finally {
+        setCreatingSession(false);
       }
     }
     sendMessage(
@@ -73,7 +80,7 @@ export default function ChatView() {
         },
       },
     );
-  }, [sendMessage, sessionId, thinkingEnabled, setSessionId, setActiveSessionId, fetchSessions]);
+  }, [sendMessage, sessionId, thinkingEnabled, creatingSession, setSessionId, setActiveSessionId, fetchSessions]);
 
   const handleLoadSession = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
