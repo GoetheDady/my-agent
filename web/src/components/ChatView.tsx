@@ -55,6 +55,7 @@ export default function ChatView() {
     status,
     stop,
     setMessages,
+    addToolApprovalResponse,
   } = useChat({
     transport: chatTransport,
     onFinish: ({ message, messages: finishedMessages }) => {
@@ -149,6 +150,35 @@ export default function ChatView() {
     navigateToNewSession();
   }, [setMessages, navigateToNewSession]);
 
+  const handleApprove = useCallback(async (toolCallId: string, rememberChoice: boolean) => {
+    addToolApprovalResponse({
+      id: toolCallId,
+      approved: true,
+    });
+
+    if (rememberChoice && useChatStore.getState().sessionId) {
+      try {
+        await fetch('/api/tools/whitelist', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            toolCallId,
+            sessionId: useChatStore.getState().sessionId,
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to update whitelist:', error);
+      }
+    }
+  }, [addToolApprovalResponse]);
+
+  const handleDeny = useCallback((toolCallId: string) => {
+    addToolApprovalResponse({
+      id: toolCallId,
+      approved: false,
+    });
+  }, [addToolApprovalResponse]);
+
   return (
     <div className="flex h-screen bg-[var(--color-bg)]">
       {sidebarOpen && <SessionSidebar onLoadSession={handleLoadSession} onNewSession={handleNewSession} />}
@@ -173,7 +203,7 @@ export default function ChatView() {
             <Brain size={18} />
           </button>
         </header>
-        <MessageList messages={messages} memoryStatusMap={memoryStatusMap} />
+        <MessageList messages={messages} memoryStatusMap={memoryStatusMap} handleApprove={handleApprove} handleDeny={handleDeny} />
         <ChatInput
           isLoading={isLoading}
           onSend={handleSend}

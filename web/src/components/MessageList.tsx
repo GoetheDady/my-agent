@@ -9,9 +9,11 @@ interface MessageListProps {
     parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string } }>;
   }>;
   memoryStatusMap: Record<string, MemoryExtractStatus>;
+  handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
+  handleDeny?: (toolCallId: string) => void;
 }
 
-export default function MessageList({ messages, memoryStatusMap }: MessageListProps) {
+export default function MessageList({ messages, memoryStatusMap, handleApprove, handleDeny }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
@@ -40,7 +42,13 @@ export default function MessageList({ messages, memoryStatusMap }: MessageListPr
           </div>
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} memoryStatus={memoryStatusMap[msg.id]} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            memoryStatus={memoryStatusMap[msg.id]}
+            handleApprove={handleApprove}
+            handleDeny={handleDeny}
+          />
         ))}
       </div>
     </div>
