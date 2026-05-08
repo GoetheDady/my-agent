@@ -80,6 +80,14 @@ export function isPathInWhitelist(absolutePath: string): boolean {
   });
 }
 
+export function isInputPathAllowlisted(inputPath: string): boolean {
+  try {
+    return isPathInWhitelist(normalizePath(inputPath));
+  } catch {
+    return false;
+  }
+}
+
 // ============================================================
 // 文件操作
 // ============================================================

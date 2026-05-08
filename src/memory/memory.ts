@@ -24,6 +24,11 @@ function isSuspicious(text: string): boolean {
   return INJECTION_PATTERNS.some(p => p.test(text));
 }
 
+/**
+ * @deprecated Long-term memory must be accessed through memory tools. This helper
+ * remains only for compatibility with older tests or experiments and must not be
+ * used by the main Agent runtime path.
+ */
 export async function injectMemories(systemPrompt: string, userMessage: string): Promise<string> {
   const memories = await searchMemories(userMessage);
   if (memories.length === 0) return systemPrompt;

@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { resolve, extname, relative } from "path";
 import { readFile, stat } from "fs/promises";
-import { getDb } from "./core/database";
+import { initializeRuntime } from "./core/runtime";
 import chatRoutes from "./routes/chat";
 import sessionRoutes from "./routes/sessions";
 import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
+import { createRuntimeRoutes } from "./routes/runtime";
 
-getDb();
+initializeRuntime();
 
 const app = new Hono();
 
@@ -19,6 +20,7 @@ app.route("/api/sessions", sessionRoutes);
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);
 app.route("/api/tools", toolRoutes);
+app.route("/api/runtime", createRuntimeRoutes());
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 

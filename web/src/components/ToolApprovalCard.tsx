@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AlertTriangle, Check, ShieldQuestion, X } from 'lucide-react';
 
 interface ToolApprovalCardProps {
   toolName: string;
@@ -54,47 +55,50 @@ export function ToolApprovalCard({
     onDeny();
   };
 
-  const borderColor = riskLevel === 'high' ? 'border-red-500' :
-                      riskLevel === 'medium' ? 'border-yellow-500' :
-                      'border-blue-500';
-
-  const bgColor = riskLevel === 'high' ? 'bg-red-950' :
-                  riskLevel === 'medium' ? 'bg-yellow-950' :
-                  'bg-blue-950';
+  const toneClass = riskLevel === 'high'
+    ? 'border-[var(--color-danger)] bg-[var(--color-danger-soft)]'
+    : riskLevel === 'medium'
+      ? 'border-amber-300 bg-[var(--color-warning-soft)]'
+      : 'border-blue-200 bg-[var(--color-accent-soft)]';
 
   return (
-    <div className={`border rounded-lg p-4 my-2 ${borderColor} ${bgColor}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-xl">🔧</span>
-        <span className="font-semibold text-foreground">{toolName}</span>
+    <div className={`my-2 rounded-2xl border p-4 shadow-sm ${toneClass}`}>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/80 text-[var(--color-accent)] shadow-sm">
+          <ShieldQuestion size={17} />
+        </span>
+        <div>
+          <div className="text-sm font-semibold text-[var(--color-text)]">{toolName}</div>
+          <div className="text-xs text-[var(--color-text-muted)]">需要授权后继续执行</div>
+        </div>
       </div>
 
-      <div className="text-sm mb-3 text-foreground/90">{description}</div>
+      <div className="mb-3 text-sm text-[var(--color-text)]">{description}</div>
 
-      <div className="text-xs bg-surface rounded p-2 mb-3 font-mono text-foreground/80">
+      <div className="mb-3 rounded-lg border border-white/70 bg-white/80 p-2 font-mono text-xs text-[var(--color-text-muted)]">
         {Object.entries(args).map(([key, value]) => (
           <div key={key} className="flex gap-2">
-            <span className="text-foreground/60">{key}:</span>
-            <span className="text-foreground/90">{String(value)}</span>
+            <span className="shrink-0 text-[var(--color-text-soft)]">{key}:</span>
+            <span className="break-all text-[var(--color-text)]">{String(value)}</span>
           </div>
         ))}
       </div>
 
       {riskLevel === 'high' && (
-        <div className="text-sm text-red-400 mb-3 flex items-center gap-1">
-          <span>⚠️</span>
+        <div className="mb-3 flex items-center gap-1.5 text-sm font-medium text-[var(--color-danger)]">
+          <AlertTriangle size={15} />
           <span>此操作可能覆盖现有文件，请谨慎操作</span>
         </div>
       )}
 
       <div className="space-y-3">
-        <label className="flex items-center gap-2 text-sm text-foreground/90">
+        <label className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
           <input
             type="checkbox"
             checked={rememberChoice}
             onChange={(e) => setRememberChoice(e.target.checked)}
             disabled={processing}
-            className="rounded"
+            className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-accent)]"
           />
           <span>记住此选择（添加到白名单）</span>
         </label>
@@ -103,15 +107,17 @@ export function ToolApprovalCard({
           <button
             onClick={handleDeny}
             disabled={processing}
-            className="px-4 py-2 rounded bg-surface hover:bg-surface/80 disabled:opacity-50 text-foreground transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
+            <X size={14} />
             拒绝
           </button>
           <button
             onClick={handleApprove}
             disabled={processing}
-            className="px-4 py-2 rounded bg-accent hover:bg-accent/80 disabled:opacity-50 text-foreground transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-accent-strong)] disabled:opacity-50"
           >
+            <Check size={14} />
             批准
           </button>
         </div>

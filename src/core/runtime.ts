@@ -9,6 +9,9 @@
  *   - 检测全局对象 typeof Bun 是最稳定的判断方式
  */
 
+import { ensureDefaultAgent } from "../agents/agent-registry";
+import { getDb } from "./database";
+
 /** 当前运行环境类型 */
 export type RuntimeKind = "bun" | "node";
 
@@ -52,3 +55,9 @@ export const isBun = (): boolean => getRuntime() === "bun";
 
 /** 当前是否为 Node 运行时 */
 export const isNode = (): boolean => getRuntime() === "node";
+
+/** 初始化 Agent runtime 所需的持久状态 */
+export function initializeRuntime(): void {
+  const db = getDb();
+  ensureDefaultAgent(db);
+}

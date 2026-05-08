@@ -122,8 +122,9 @@ export async function addMemory(params: {
   source_session_id?: string;
   source_text?: string;
   confidence?: number;
+  status?: string;
 }): Promise<Memory | null> {
-  const { content, memory_type = "fact", source_session_id = "", source_text = "", confidence = 1.0 } = params;
+  const { content, memory_type = "fact", source_session_id = "", source_text = "", confidence = 1.0, status = "active" } = params;
   const embedding = await embedText(content);
   if (embedding.length === 0) return null;
 
@@ -133,7 +134,7 @@ export async function addMemory(params: {
 
   const memory: Memory = {
     id, user_id: USER_ID, agent_id: AGENT_ID, memory_type, content, embedding,
-    source_session_id, source_text, status: "active", confidence,
+    source_session_id, source_text, status, confidence,
     created_at: now, updated_at: now, last_accessed_at: now, access_count: 0,
     embedding_model: "embedding-3", embedding_dim: embedding.length,
   };
@@ -184,6 +185,19 @@ export async function supersedeMemory(oldId: string, _params: {
 export async function deleteMemory(id: string): Promise<void> {
   const table = await getTable();
   await table.delete(`id = '${id}'`);
+}
+
+export async function setMemoryStatus(id: string, status: string): Promise<Memory | null> {
+  const table = await getTable();
+  const rows = await table.query().where(`id = '${id}'`).limit(1).toArray();
+  if (rows.length === 0) return null;
+
+  const existing = toMemory(rows[0] as unknown as Record<string, unknown>);
+  const updated: Memory = { ...existing, status, updated_at: Date.now() };
+
+  await table.delete(`id = '${id}'`);
+  await table.add([toRecord(updated)]);
+  return updated;
 }
 
 export async function touchMemory(id: string): Promise<void> {

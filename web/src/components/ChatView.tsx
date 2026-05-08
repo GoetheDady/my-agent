@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { PanelLeft, PanelRight, Brain } from "lucide-react";
+import { Brain, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import SessionSidebar from "./SessionSidebar";
@@ -58,23 +58,7 @@ export default function ChatView() {
     addToolApprovalResponse,
   } = useChat({
     transport: chatTransport,
-    sendAutomaticallyWhen: ({ messages }) => {
-      const lastMessage = messages[messages.length - 1];
-      if (!lastMessage || lastMessage.role !== 'assistant') return false;
-
-      const toolInvocations = lastMessage.parts?.filter(
-        (part) => part.type === 'tool-invocation'
-      ) ?? [];
-
-      if (toolInvocations.length === 0) return false;
-
-      return toolInvocations.every(
-        (inv) => {
-          const toolInv = (inv as { toolInvocation?: { state?: string } }).toolInvocation;
-          return toolInv?.state === 'result' || toolInv?.state === 'partial-result';
-        }
-      );
-    },
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: ({ message, messages: finishedMessages }) => {
       const currentSessionId = useChatStore.getState().sessionId;
       const lastUserMsg = [...finishedMessages].reverse().find((m) => m.role === "user");
@@ -197,27 +181,42 @@ export default function ChatView() {
   }, [addToolApprovalResponse]);
 
   return (
-    <div className="flex h-screen bg-[var(--color-bg)]">
+    <div className="flex h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       {sidebarOpen && <SessionSidebar onLoadSession={handleLoadSession} onNewSession={handleNewSession} />}
 
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-white/10 bg-[var(--color-surface)] px-6 py-3">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex min-h-[56px] items-center gap-3 border-b border-[var(--color-border-soft)] bg-white/90 px-5 py-2.5 backdrop-blur">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="text-white/60 hover:text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
             title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
           >
-            {sidebarOpen ? <PanelLeft size={18} /> : <PanelRight size={18} />}
+            {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
-          <h1 className="text-lg font-semibold text-[var(--color-text)]">
-            My Agent
-          </h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-[15px] font-semibold text-[var(--color-text)]">My Agent</h1>
+              <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-muted)]">
+                Control Chat
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-[var(--color-text-soft)]">
+              Chat first, configuration-ready agent workspace
+            </p>
+          </div>
           <button
             onClick={() => setMemoryOpen(true)}
-            className="text-white/60 hover:text-white transition-colors"
+            className="hidden items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)] sm:flex"
             title="记忆管理"
           >
             <Brain size={18} />
+            记忆
+          </button>
+          <button
+            className="flex h-9 w-9 items-center justify-center rounded-md bg-[var(--color-accent)] text-white shadow-sm transition-colors hover:bg-[var(--color-accent-strong)]"
+            title="配置"
+          >
+            <Settings size={17} />
           </button>
         </header>
         <MessageList messages={messages} memoryStatusMap={memoryStatusMap} handleApprove={handleApprove} handleDeny={handleDeny} />

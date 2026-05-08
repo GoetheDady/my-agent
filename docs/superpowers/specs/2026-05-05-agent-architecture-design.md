@@ -1,5 +1,7 @@
 # Agent 架构设计 Spec
 
+> 2026-05-08 更新：本文档保留为早期总体设想。当前 MVP 架构以 `docs/superpowers/specs/2026-05-08-agent-runtime-refactor-design.md` 为准。尤其是本文中“记忆注入 System Prompt”的描述已经被替换为 Memory-as-Tool：长期记忆必须通过工具检索和写入，不再由主 Agent loop 自动注入提示词。
+
 ## 概述
 
 基于 TypeScript (Bun) 的多 Agent 协作平台。前期通过 Web 页面对话，后期扩展微信/飞书等渠道。单用户起步，可扩展多用户。

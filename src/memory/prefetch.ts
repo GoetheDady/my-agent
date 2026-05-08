@@ -4,6 +4,11 @@ import { embedText, cosineSimilarity } from "./embedder";
 let prefetchedMemories: Awaited<ReturnType<typeof searchMemories>> = [];
 let prefetchPromise: Promise<void> | null = null;
 
+/**
+ * @deprecated Long-term memory recall is tool-driven. Prefetch is kept only for
+ * compatibility with older experiments and must not be called by the main chat
+ * runtime before model execution.
+ */
 export function queuePrefetch(text: string): void {
   if (!text || text.length < 5) return;
   prefetchPromise = searchMemories(text, 5)
@@ -15,6 +20,10 @@ export function queuePrefetch(text: string): void {
     });
 }
 
+/**
+ * @deprecated Long-term memory recall is tool-driven. Do not use this helper to
+ * inject memory into the Agent system prompt.
+ */
 export async function getPrefetchedMemories(
   userMessage: string,
 ): Promise<Awaited<ReturnType<typeof searchMemories>>> {

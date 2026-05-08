@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import MarkdownContent from "./MarkdownContent";
-import { ChevronDown } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, Clock3, Wrench, XCircle } from "lucide-react";
 import { ToolApprovalCard } from "./ToolApprovalCard";
 import type { MemoryExtractStatus } from "../store/chatStore";
+import { getNormalizedToolPart } from "../lib/toolPart";
 
 interface MessagePart {
   type: string;
   text?: string;
   reasoning?: string;
+  input?: unknown;
+  toolCallId?: string;
+  state?: string;
+  approval?: { id?: string };
+  errorText?: string;
   toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string };
 }
 
@@ -37,8 +43,8 @@ export default function MessageBubble({
       .join("\n");
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-surface px-4 py-3 text-foreground">
-          <p className="whitespace-pre-wrap text-sm">{text}</p>
+        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-[var(--color-user)] px-4 py-3 text-[var(--color-text)] shadow-sm ring-1 ring-blue-100">
+          <p className="whitespace-pre-wrap text-[15px] leading-6">{text}</p>
         </div>
       </div>
     );
@@ -46,27 +52,28 @@ export default function MessageBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] space-y-2">
+      <div className="max-w-[86%] space-y-3">
         {message.parts.map((part, i) => {
+          const tool = getNormalizedToolPart(part);
+
           // 检测工具审批请求
-          if (part.type === 'tool-invocation' &&
-              part.toolInvocation?.state === 'approval-requested') {
+          if (tool?.state === 'approval-requested') {
             return (
               <ToolApprovalCard
-                key={`approval-${part.toolInvocation.toolCallId}`}
-                toolName={part.toolInvocation.toolName}
-                args={part.toolInvocation.args}
-                toolCallId={part.toolInvocation.toolCallId}
+                key={`approval-${tool.approvalId ?? tool.toolCallId ?? i}`}
+                toolName={tool.toolName}
+                args={tool.args}
+                toolCallId={tool.approvalId ?? tool.toolCallId ?? ""}
                 onApprove={(rememberChoice) =>
-                  handleApprove?.(part.toolInvocation!.toolCallId, rememberChoice)
+                  handleApprove?.(tool.approvalId ?? tool.toolCallId ?? "", rememberChoice)
                 }
-                onDeny={() => handleDeny?.(part.toolInvocation!.toolCallId)}
+                onDeny={() => handleDeny?.(tool.approvalId ?? tool.toolCallId ?? "")}
               />
             );
           }
           if (part.type === "text" && part.text) {
             return (
-              <div key={i} className="rounded-2xl rounded-bl-sm bg-assistant px-4 py-3 text-foreground">
+              <div key={i} className="rounded-2xl rounded-bl-md border border-[var(--color-border-soft)] bg-white px-4 py-3 text-[var(--color-text)] shadow-sm">
                 <MarkdownContent content={part.text} />
               </div>
             );
@@ -74,35 +81,72 @@ export default function MessageBubble({
           if ((part.type === "reasoning" || part.type === "thinking") && part.text) {
             return <ThinkingBlock key={i} content={part.text} />;
           }
-          if (part.type === "tool-invocation" && part.toolInvocation) {
-            const { toolName, args, state } = part.toolInvocation;
-
+          if (tool) {
             // 审批请求已经在上面处理了，这里处理其他状态
-            if (state === 'approval-requested') return null;
+            if (tool.state === 'approval-requested') return null;
+            const memoryTool = isMemoryTool(tool.toolName);
+            const ToolIcon = memoryTool ? Brain : Wrench;
 
             return (
-              <div key={i} className="rounded-lg border border-white/10 bg-surface/50 px-3 py-2 text-xs">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-blue-400">🔧</span>
-                  <span className="font-medium text-white/70">
-                    {toolName === 'read_file' ? '读取文件' :
-                     toolName === 'write_file' ? '写入文件' : toolName}
+              <div key={i} className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-3 text-xs shadow-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <span
+                    className={`flex h-7 w-7 items-center justify-center rounded-lg ${
+                      memoryTool
+                        ? "bg-[var(--color-success-soft)] text-[var(--color-success)]"
+                        : "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                    }`}
+                  >
+                    <ToolIcon size={14} />
                   </span>
-                  {state === 'result' && <span className="text-green-400">✓</span>}
-                  {state === 'call' && <span className="text-yellow-400 animate-pulse">⋯</span>}
+                  <span className="font-semibold text-[var(--color-text)]">
+                    {getToolDisplayName(tool.toolName)}
+                  </span>
+                  {tool.state === 'output-available' && (
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--color-success-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-success)]">
+                      <CheckCircle2 size={12} />
+                      完成
+                    </span>
+                  )}
+                  {tool.state === 'output-error' && (
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--color-danger-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-danger)]">
+                      <XCircle size={12} />
+                      失败
+                    </span>
+                  )}
+                  {tool.state === 'output-denied' && (
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--color-danger-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-danger)]">
+                      <XCircle size={12} />
+                      已拒绝
+                    </span>
+                  )}
+                  {(tool.state === 'input-available' || tool.state === 'input-streaming') && (
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--color-warning-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-warning)]">
+                      <Clock3 size={12} />
+                      运行中
+                    </span>
+                  )}
                 </div>
-                <div className="text-white/40 font-mono text-[10px] space-y-0.5">
-                  {Object.entries(args).map(([key, value]) => (
-                    <div key={key}>
-                      <span className="text-white/30">{key}:</span>{' '}
-                      <span className="text-white/50">
+                <div className="space-y-1 rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-muted)]">
+                  {Object.entries(tool.args).map(([key, value]) => (
+                    <div key={key} className="flex gap-2">
+                      <span className="shrink-0 text-[var(--color-text-soft)]">{key}:</span>
+                      <span className="min-w-0 break-all text-[var(--color-text-muted)]">
                         {typeof value === 'string' && value.length > 60
                           ? value.slice(0, 60) + '...'
                           : String(value)}
                       </span>
                     </div>
                   ))}
+                  {Object.keys(tool.args).length === 0 && (
+                    <div className="text-[var(--color-text-soft)]">无输入参数</div>
+                  )}
                 </div>
+                {tool.errorText && (
+                  <div className="mt-2 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[11px] text-[var(--color-danger)]">
+                    {tool.errorText}
+                  </div>
+                )}
               </div>
             );
           }
@@ -114,12 +158,30 @@ export default function MessageBubble({
   );
 }
 
+function isMemoryTool(toolName: string): boolean {
+  return toolName.startsWith("memory_") || toolName.startsWith("memory.");
+}
+
+function getToolDisplayName(toolName: string): string {
+  const labels: Record<string, string> = {
+    read_file: "读取文件",
+    write_file: "写入文件",
+    list_directory: "列出目录",
+    memory_search: "记忆检索",
+    memory_get: "读取记忆",
+    memory_propose: "候选记忆",
+    memory_update: "更新记忆",
+    memory_forget: "停用记忆",
+  };
+  return labels[toolName] ?? toolName.replace(/\./g, "_");
+}
+
 function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus }) {
   if (!memoryStatus) return null;
 
   if (memoryStatus.status === "loading") {
     return (
-      <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-white/30">
+      <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-[var(--color-text-soft)]">
         <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -131,13 +193,13 @@ function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus 
 
   if (memoryStatus.status === "success") {
     if (memoryStatus.count === 0) {
-      return <div className="px-2 py-1 text-xs text-white/20">无可提取记忆</div>;
+      return <div className="px-2 py-1 text-xs text-[var(--color-text-soft)]">无可提取记忆</div>;
     }
-    return <div className="px-2 py-1 text-xs text-white/30">已提取 {memoryStatus.count} 条记忆</div>;
+    return <div className="px-2 py-1 text-xs text-[var(--color-text-soft)]">已提取 {memoryStatus.count} 条记忆</div>;
   }
 
   if (memoryStatus.status === "error") {
-    return <div className="px-2 py-1 text-xs text-red-400/60">记忆提取失败</div>;
+    return <div className="px-2 py-1 text-xs text-[var(--color-danger)]">记忆提取失败</div>;
   }
 
   return null;
@@ -155,10 +217,10 @@ function ThinkingBlock({ content }: { content: string }) {
   }, [content, isOpen]);
 
   return (
-    <div className="rounded-lg bg-thinking px-3 py-2">
+    <div className="rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-thinking)] px-3 py-2">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center gap-1.5 text-left text-xs italic text-white/40 hover:text-white/60 transition-colors"
+        className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--color-text-soft)] transition-colors hover:text-[var(--color-text-muted)]"
       >
         <ChevronDown
           size={12}
@@ -172,7 +234,7 @@ function ThinkingBlock({ content }: { content: string }) {
       >
         <p
           ref={contentRef}
-          className="mt-2 whitespace-pre-wrap text-xs italic text-white/50"
+          className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[var(--color-text-muted)]"
         >
           {content}
         </p>
