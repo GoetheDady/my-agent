@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { listAgentEvents } from "../events/event-log";
+import { createTask } from "../tasks/task-store";
 import type { Memory } from "./store";
 import {
   memoryForget,
@@ -72,6 +73,48 @@ describe("memory tools", () => {
     });
   });
 
+  test("memorySearch records task and conversation context", async () => {
+    await withMemoryToolDb(async (db) => {
+      const task = createTask({
+        id: "task-1",
+        conversation_id: "conversation-1",
+        source_channel: "web",
+        input: "hello",
+      }, db);
+      const store: MemoryStorePort = {
+        searchMemories: async () => [
+          createMemory({ id: "safe", content: "用户喜欢 TypeScript" }),
+        ],
+        getMemory: async () => null,
+        addMemory: async () => null,
+        updateMemory: async () => null,
+        setMemoryStatus: async () => null,
+      };
+
+      await memorySearch(
+        { query: "TypeScript", limit: 5 },
+        {
+          agentId: "default",
+          taskId: task.id,
+          conversationId: task.conversation_id,
+          database: db,
+          store,
+        },
+      );
+
+      const [event] = listAgentEvents("default", 1, db);
+      expect(event).toMatchObject({
+        type: "memory.search",
+        task_id: "task-1",
+        conversation_id: "conversation-1",
+      });
+      expect(JSON.parse(event.payload)).toMatchObject({
+        query: "TypeScript",
+        resultIds: ["safe"],
+      });
+    });
+  });
+
   test("memoryGet returns one memory by id", async () => {
     const store: MemoryStorePort = {
       searchMemories: async () => [],
@@ -89,7 +132,7 @@ describe("memory tools", () => {
     });
   });
 
-  test("memoryPropose creates a candidate memory and records an event", async () => {
+  test("memoryPropose creates an active memory and records an event", async () => {
     await withMemoryToolDb(async (db) => {
       let capturedStatus = "";
       const store: MemoryStorePort = {
@@ -98,7 +141,7 @@ describe("memory tools", () => {
         addMemory: async (params) => {
           capturedStatus = params.status ?? "";
           return createMemory({
-            id: "candidate-1",
+            id: "memory-active-1",
             content: params.content,
             status: params.status,
           });
@@ -116,15 +159,15 @@ describe("memory tools", () => {
         { database: db, store },
       );
 
-      expect(capturedStatus).toBe("candidate");
+      expect(capturedStatus).toBe("active");
       expect(result.memory).toMatchObject({
-        id: "candidate-1",
-        status: "candidate",
+        id: "memory-active-1",
+        status: "active",
       });
       const [event] = listAgentEvents("default", 1, db);
       expect(event.type).toBe("memory.propose");
       expect(JSON.parse(event.payload)).toMatchObject({
-        memoryId: "candidate-1",
+        memoryId: "memory-active-1",
         evidenceEventIds: ["event-1"],
       });
     });
