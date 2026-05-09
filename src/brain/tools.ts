@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { readFile, writeFile, isInputPathAllowlisted } from './tool-executor';
-import { memoryTools } from '../memory/memory-tools';
+import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
 import { evaluateToolPolicy } from './tool-policy';
 import { buildAiToolSet, registerTool } from './tool-registry';
 
@@ -69,7 +69,7 @@ registerTool({
   tool: memoryTools.memory_propose,
   toolset: 'memory',
   category: 'memory_write',
-  createsCandidateMemory: true,
+  createsCandidateMemory: false,
 });
 registerTool({
   name: 'memory_update',
@@ -85,3 +85,11 @@ registerTool({
 });
 
 export const tools = buildAiToolSet('default');
+
+export function buildAgentTools(context: MemoryToolContext = {}) {
+  return {
+    read_file: readFileTool,
+    write_file: writeFileTool,
+    ...createMemoryTools(context),
+  };
+}

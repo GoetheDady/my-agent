@@ -27,12 +27,12 @@ describe("tool policy", () => {
     });
   });
 
-  test("memory write tools create candidates by default", () => {
+  test("memory write tools write active memories by default", () => {
     expect(evaluateToolPolicy({ toolName: "memory_propose" })).toEqual({
       allowed: true,
       requiresApproval: false,
-      reason: "memory_write_candidate",
-      createsCandidateMemory: true,
+      reason: "memory_write_allowed",
+      createsCandidateMemory: false,
     });
   });
 });

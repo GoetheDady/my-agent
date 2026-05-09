@@ -26,7 +26,7 @@ describe("tool registry", () => {
     expect(getTool("memory_propose")).toMatchObject({
       toolset: "memory",
       category: "memory_write",
-      createsCandidateMemory: true,
+      createsCandidateMemory: false,
     });
   });
 

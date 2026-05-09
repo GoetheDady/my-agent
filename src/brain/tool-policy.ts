@@ -36,8 +36,8 @@ export function evaluateToolPolicy(input: ToolPolicyInput): ToolPolicyDecision {
     return {
       allowed: true,
       requiresApproval: false,
-      reason: "memory_write_candidate",
-      createsCandidateMemory: registeredTool.createsCandidateMemory ?? true,
+      reason: "memory_write_allowed",
+      createsCandidateMemory: registeredTool.createsCandidateMemory ?? false,
     };
   }
 
