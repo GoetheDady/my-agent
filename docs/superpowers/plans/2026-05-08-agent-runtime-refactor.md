@@ -101,7 +101,7 @@ MVP 只实现一个 `default` agent。所有表和接口从第一天带 `agent_i
 - `memory_reconsolidate` 在旧记忆被重新检索或 worker 自主检索到后，用新证据更新原 active 记忆。`再巩固`指旧记忆被唤起后，结合新事实重新写回。
 - 新记忆写入前会检查本轮检索结果和全局 active 记忆，避免跨会话重复写入。
 - 去重会识别已有事实中包含的偏好片段，避免把同一内容跨类型再写成 preference。
-- 历史重复清理由确定性 `memory.dedupe` 处理。`确定性`指只按固定规则处理规范化后完全相同的内容，不让模型自由改写。
+- 历史重复清理由确定性 `memory.dedupe` 处理。`确定性`指只按固定规则处理规范化后完全相同或片段包含的内容，不让模型自由改写。
 - dream worker 仍是后续工作，用于定时整理近似重复、冲突摘要和长期知识沉淀。
 
 ---
@@ -155,6 +155,7 @@ MVP 只实现一个 `default` agent。所有表和接口从第一天带 `agent_i
 | 17 | Global active-memory dedupe | Done | 2026-05-09 |
 | 18 | Deterministic duplicate cleanup | Done | 2026-05-09 |
 | 19 | Cross-type memory fragment dedupe | Done | 2026-05-09 |
+| 20 | Historical fragment duplicate cleanup | Done | 2026-05-09 |
 
 ---
 
@@ -1140,6 +1141,37 @@ Expected: all pass.
 
 ---
 
+## Task 20: Historical Fragment Duplicate Cleanup
+
+**Files:**
+
+- Modify: `src/memory/dedupe.ts`
+- Test: `src/memory/dedupe.test.ts`
+
+- [x] **Step 1: Extend historical duplicate grouping**
+
+Use the shared duplicate detector inside `memory.dedupe`, so cleanup covers exact duplicates and fact/preference fragment duplicates.
+
+- [x] **Step 2: Keep the broader memory**
+
+When a broader fact contains a shorter preference fragment, keep the broader memory and mark the shorter duplicate inactive.
+
+- [x] **Step 3: Avoid false merge on opposite preferences**
+
+Do not dedupe “喜欢 X” and “不喜欢 X”; those are preference changes or conflicts, not duplicates.
+
+- [x] **Step 4: Verify**
+
+Run:
+
+```bash
+bun test src/memory/dedupe.test.ts
+```
+
+Expected: all pass.
+
+---
+
 ## Deferred Work
 
 These are important, but not required for the first Agent Runtime MVP:
@@ -1290,6 +1322,11 @@ MVP is complete when:
   - Updated `memory_propose` to return the existing active memory instead of creating a duplicate when the user explicitly asks to remember the same preference.
   - Added regression tests for both worker extraction and direct memory tool writes.
   - Verified with targeted memory tests, `bun test` (77 pass, 0 fail), `bun run typecheck`, and `bun run lint`.
+- Task 20 Historical fragment duplicate cleanup completed:
+  - Extended `memory.dedupe` to use the shared duplicate detector, covering exact duplicates and embedded preference fragments.
+  - Updated retention sorting so a broader fact is kept over a shorter duplicate preference fragment.
+  - Added tests confirming opposite preferences are not merged as duplicates.
+  - Verified with `bun test src/memory/dedupe.test.ts`.
 
 ---
 
@@ -1360,3 +1397,9 @@ Reason: Exact duplicate cleanup is safe enough for the current MVP. Approximate 
 Decision: New memory writes use shared duplicate detection that can treat a preference fragment embedded in a broader fact as already remembered.
 
 Reason: The model may split one user statement into both a `fact` and a `preference`. Without cross-type fragment dedupe, the system avoids exact duplicate facts but still creates redundant preference memories.
+
+### 2026-05-09: Historical dedupe keeps broader facts over preference fragments
+
+Decision: When historical cleanup sees a broad fact and a shorter preference fragment that mean the same thing, it keeps the broader fact and marks the fragment inactive.
+
+Reason: Existing dirty data can contain the same user statement split across memory types. Keeping the broader fact preserves more context while removing redundant recall noise.

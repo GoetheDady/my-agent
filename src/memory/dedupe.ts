@@ -3,7 +3,10 @@ import {
   setMemoryStatus,
   type Memory,
 } from "./store";
-import { normalizeMemoryContent } from "./duplicate";
+import {
+  isDuplicateMemoryContent,
+  normalizeMemoryContent,
+} from "./duplicate";
 
 export interface MemoryDedupeStore {
   listMemories: typeof listMemories;
@@ -39,7 +42,7 @@ export async function dedupeActiveMemories(
   const store = options.store ?? defaultStore;
   const dryRun = options.dryRun ?? false;
   const { memories } = await store.listMemories({ status: "active", pageSize: 1000 });
-  const grouped = groupExactDuplicates(memories);
+  const grouped = groupDuplicateMemories(memories);
   const duplicateGroups: MemoryDedupeGroup[] = [];
   const inactiveMemoryIds: string[] = [];
 
@@ -74,21 +77,37 @@ export async function dedupeActiveMemories(
   };
 }
 
-function groupExactDuplicates(memories: Memory[]): Memory[][] {
-  const byContent = new Map<string, Memory[]>();
+function groupDuplicateMemories(memories: Memory[]): Memory[][] {
+  const groups: Memory[][] = [];
+  const visited = new Set<string>();
 
   for (const memory of memories) {
-    const normalized = normalizeMemoryContent(memory.content);
-    if (!normalized) continue;
-    const existing = byContent.get(normalized) ?? [];
-    existing.push(memory);
-    byContent.set(normalized, existing);
+    if (visited.has(memory.id)) continue;
+    const group = [memory];
+    visited.add(memory.id);
+
+    for (let index = 0; index < group.length; index += 1) {
+      const current = group[index];
+      if (!current) continue;
+
+      for (const candidate of memories) {
+        if (visited.has(candidate.id)) continue;
+        if (!isDuplicateMemoryContent(current.content, candidate.content)) continue;
+        group.push(candidate);
+        visited.add(candidate.id);
+      }
+    }
+
+    if (group.length > 1) groups.push(group);
   }
 
-  return Array.from(byContent.values()).filter((group) => group.length > 1);
+  return groups;
 }
 
 function compareMemoryForRetention(a: Memory, b: Memory): number {
+  const aLength = normalizeMemoryContent(a.content).length;
+  const bLength = normalizeMemoryContent(b.content).length;
+  if (Math.abs(aLength - bLength) >= 8) return bLength - aLength;
   if (b.confidence !== a.confidence) return b.confidence - a.confidence;
   if (a.created_at !== b.created_at) return a.created_at - b.created_at;
   if (b.access_count !== a.access_count) return b.access_count - a.access_count;

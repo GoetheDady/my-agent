@@ -76,4 +76,62 @@ describe("memory dedupe", () => {
     expect(result.inactiveMemoryIds).toEqual([]);
     expect(inactiveIds).toEqual([]);
   });
+
+  test("marks preference fragments inactive when already embedded in a broader fact", async () => {
+    const memories = [
+      createMemory({
+        id: "fact",
+        memory_type: "fact",
+        content: "用户正在开发 my-agent 项目，偏好浅色、舒服、密度适中的 Web UI。",
+        confidence: 0.8,
+        created_at: 2,
+      }),
+      createMemory({
+        id: "preference",
+        memory_type: "preference",
+        content: "用户偏好浅色、舒服、密度适中的 Web UI。",
+        confidence: 0.95,
+        created_at: 1,
+      }),
+    ];
+    const inactiveIds: string[] = [];
+    const store: MemoryDedupeStore = {
+      listMemories: async () => ({ memories, total: memories.length }),
+      setMemoryStatus: async (id, status) => {
+        inactiveIds.push(id);
+        return createMemory({ id, status });
+      },
+    };
+
+    const result = await dedupeActiveMemories({ store });
+
+    expect(result.duplicateGroups).toEqual([{
+      content: "用户正在开发 my-agent 项目，偏好浅色、舒服、密度适中的 Web UI。",
+      keptMemoryId: "fact",
+      duplicateMemoryIds: ["preference"],
+    }]);
+    expect(result.inactiveMemoryIds).toEqual(["preference"]);
+    expect(inactiveIds).toEqual(["preference"]);
+  });
+
+  test("does not merge opposite preference changes", async () => {
+    const memories = [
+      createMemory({ id: "likes", content: "用户喜欢西红柿" }),
+      createMemory({ id: "dislikes", content: "用户不喜欢西红柿" }),
+    ];
+    const inactiveIds: string[] = [];
+    const store: MemoryDedupeStore = {
+      listMemories: async () => ({ memories, total: memories.length }),
+      setMemoryStatus: async (id, status) => {
+        inactiveIds.push(id);
+        return createMemory({ id, status });
+      },
+    };
+
+    const result = await dedupeActiveMemories({ store });
+
+    expect(result.duplicateGroups).toEqual([]);
+    expect(result.inactiveMemoryIds).toEqual([]);
+    expect(inactiveIds).toEqual([]);
+  });
 });
