@@ -9,6 +9,8 @@ import {
   searchMemories,
 } from "../memory/store";
 import { extractMemories } from "../memory/memory";
+import { dedupeActiveMemories } from "../memory/dedupe";
+import { appendEvent } from "../events/event-log";
 
 const app = new Hono();
 
@@ -31,6 +33,38 @@ app.post("/search", async (c) => {
     created_at: m.created_at,
     access_count: m.access_count,
   })));
+});
+
+// POST /api/memory/dedupe
+app.post("/dedupe", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { dryRun?: boolean };
+  const dryRun = body.dryRun ?? false;
+
+  appendEvent({
+    type: "memory.dedupe.started",
+    payload: { dryRun },
+  });
+
+  try {
+    const result = await dedupeActiveMemories({ dryRun });
+    appendEvent({
+      type: "memory.dedupe.completed",
+      payload: {
+        dryRun,
+        scannedCount: result.scannedCount,
+        duplicateGroupCount: result.duplicateGroups.length,
+        inactiveMemoryIds: result.inactiveMemoryIds,
+      },
+    });
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendEvent({
+      type: "memory.dedupe.failed",
+      payload: { dryRun, error: message },
+    });
+    return c.json({ error: message }, 500);
+  }
 });
 
 // GET /api/memory

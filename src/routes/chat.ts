@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { generateText } from "ai";
 import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
-import { createSession, appendMessage, getSession, updateSessionTitle } from "../channels/session-api";
+import { createSession, appendMessage, getSession, updateSessionTitle, type SessionMessage } from "../channels/session-api";
 import { getConfig } from "../core/config";
 import { extractAssistantText, serializeAssistantPartsForStorage } from "../channels/message-parts";
 import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../agents/agent-runner";
 import { WebChannelAdapter } from "../channels/web-channel";
+import { emitLifecycleHook } from "../lifecycle/hooks";
 
 const app = new Hono();
 const webChannel = new WebChannelAdapter();
@@ -61,11 +62,28 @@ app.post("/", async (c) => {
   return toAgentUiMessageStreamResponse(run, ({ responseMessage }) => {
       if (persisted) return;
       persisted = true;
-      persistUiConversation(capturedSessionId, userText, responseMessage);
+      const persistedAssistant = persistUiConversation(capturedSessionId, userText, responseMessage);
+      if (persistedAssistant) {
+        emitLifecycleHook({
+          type: "assistant.message.persisted",
+          agentId: task.agent_id,
+          taskId: task.id,
+          conversationId: task.conversation_id,
+          sessionId: capturedSessionId,
+          assistantMessageId: persistedAssistant.id,
+          userText,
+          assistantText: persistedAssistant.assistantText,
+          createdAt: Date.now(),
+        });
+      }
   });
 });
 
-function persistUiConversation(sessionId: string, userText: string, responseMessage: unknown): void {
+function persistUiConversation(
+  sessionId: string,
+  userText: string,
+  responseMessage: unknown,
+): (SessionMessage & { assistantText: string }) | null {
   if (userText) {
     appendMessage(sessionId, "user", userText);
   }
@@ -73,12 +91,14 @@ function persistUiConversation(sessionId: string, userText: string, responseMess
   const parts = serializeAssistantPartsForStorage((responseMessage as { parts?: unknown[] } | undefined)?.parts);
   const assistantText = extractAssistantText(parts);
 
-  if (parts.length > 0) {
-    appendMessage(sessionId, "assistant", JSON.stringify(parts));
-  }
+  const assistantMessage = parts.length > 0
+    ? appendMessage(sessionId, "assistant", JSON.stringify(parts))
+    : null;
 
   ensureFallbackTitle(sessionId, userText);
   void generateAndSaveTitle(sessionId, userText, assistantText);
+
+  return assistantMessage ? { ...assistantMessage, assistantText } : null;
 }
 
 function buildFallbackTitle(userMessage: string): string {

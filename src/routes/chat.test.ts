@@ -15,4 +15,9 @@ describe("chat route memory behavior", () => {
     expect(DEFAULT_AGENT_SYSTEM_PROMPT).toContain("记忆工具");
     expect(DEFAULT_AGENT_SYSTEM_PROMPT).not.toContain("<relevant-memories>");
   });
+
+  test("emits lifecycle hook after assistant message is persisted", () => {
+    expect(chatRouteSource).toContain("assistant.message.persisted");
+    expect(chatRouteSource).toContain("assistantMessageId");
+  });
 });
