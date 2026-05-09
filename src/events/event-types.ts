@@ -10,7 +10,16 @@ export type RuntimeEventType =
   | "tool.result"
   | "memory.search"
   | "memory.propose"
-  | "memory.update";
+  | "memory.update"
+  | "memory.extract.started"
+  | "memory.extract.completed"
+  | "memory.extract.failed"
+  | "memory.reconsolidate.started"
+  | "memory.reconsolidate.completed"
+  | "memory.reconsolidate.failed"
+  | "memory.dedupe.started"
+  | "memory.dedupe.completed"
+  | "memory.dedupe.failed";
 
 export interface RuntimeEvent {
   id: string;
