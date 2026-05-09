@@ -602,7 +602,7 @@ Cover:
 
 - `memory.search` returns ranked memories without exposing raw system content.
 - `memory.get` returns one memory by id.
-- `memory.propose` creates a candidate memory, not active long-term memory.
+- `memory.propose` now writes active long-term memory directly. Earlier candidate behavior has been superseded.
 - `memory.update` records evidence event ids.
 - `memory.forget` marks memory inactive instead of deleting by default.
 
@@ -745,7 +745,7 @@ Cover:
 
 - Read-only tools allowed by default.
 - Write tools require approval unless allowlisted.
-- Memory write tools create candidates by default.
+- Memory write tools write active memories by default.
 
 - [x] **Step 3: Implement registry and policy**
 
@@ -997,12 +997,37 @@ MVP is complete when:
   - Added `web/src/store/runtimeStore.test.ts` covering runtime status fetch, task queue derivation, and persisted memory/tool event display metadata.
   - Updated `web/src/components/SessionSidebar.tsx` to replace duplicate static control links with a runtime panel showing agent status, current task, queue length, recent runtime events, refresh, and cancel action.
   - Updated `web/src/components/MessageBubble.tsx` so persisted memory tools render as memory actions instead of raw generic tool names.
-  - Updated `web/src/components/MemoryPanel.tsx` to surface candidate-memory counts from memory stats.
+  - Updated `web/src/components/MemoryPanel.tsx` to surface memory stats.
   - Verified with `bun test web/src/store/runtimeStore.test.ts web/src/store/chatStore.test.ts web/src/lib/toolPart.test.ts`, `bun run build` from `web/`, and `bun run typecheck`.
 - Task 13 Documentation and cleanup completed:
   - Added `docs/superpowers/specs/2026-05-08-agent-runtime-refactor-design.md` as the current MVP architecture source of truth.
   - Updated `docs/superpowers/specs/2026-05-05-agent-architecture-design.md` to mark early memory-injection assumptions as superseded by Memory-as-Tool.
   - Final verification passed with `bun test` (65 pass, 0 fail) and `bun run check`.
+- Task 14 Lifecycle hook memory worker completed:
+  - Added a backend lifecycle hook boundary for `assistant.message.persisted`.
+  - Added an internal memory extraction worker that runs after assistant message persistence instead of being triggered by the frontend.
+  - Added synthetic `memory_extract` and `memory_reconsolidate` tool parts so background memory work can render in chat history like tool calls.
+  - Updated memory tools so `memory.search` events carry task and conversation context for later reconsolidation.
+  - Removed the frontend per-message legacy extraction status flow.
+  - Verified with targeted backend tests, `bun test` (71 pass, 0 fail), `bun run typecheck`, `bun run lint`, and `cd web && bun run build`.
+- Task 15 Candidate-memory UI and policy cleanup completed:
+  - Updated `memory_propose` so model-proposed memories are written as active memories.
+  - Updated memory tool policy metadata so memory writes no longer advertise candidate creation.
+  - Removed the candidate-memory count from the memory management panel.
+  - Renamed memory-propose UI labels from candidate wording to active memory writing wording.
+  - Verified with targeted tests, `bun test` (71 pass, 0 fail), `bun run typecheck`, `bun run lint`, and `cd web && bun run build`.
+- Task 16 Memory worker risk hardening completed:
+  - Updated the memory worker to run its own related-memory search every turn, so reconsolidation no longer depends on the main Agent choosing to call `memory_search`.
+  - Merged main-Agent memory search results with worker search results before planning extraction and reconsolidation.
+  - Added active-memory write quality gates for confidence, suspicious content, and duplicate content.
+  - Updated the worker prompt so duplicate facts should update old memory instead of creating another active memory.
+  - Extended frontend polling so background memory tool cards do not stop refreshing while `memory_extract` or `memory_reconsolidate` is still running.
+  - Verified with `bun test src/memory/extraction-worker.test.ts`, `bun test` (73 pass, 0 fail), `bun run typecheck`, `bun run lint`, and `cd web && bun run build`.
+- Task 17 Global active-memory dedupe completed:
+  - Updated the memory worker so new active-memory writes check both retrieved memories and the global active-memory list before calling `addMemory`.
+  - Added a regression test for cross-session duplicate facts when related-memory search misses the existing active memory.
+  - New memories saved earlier in the same worker run are added to the local duplicate set, preventing duplicate writes within one extraction plan.
+  - Verified with `bun test src/memory/extraction-worker.test.ts`, `bun test` (74 pass, 0 fail), `bun run typecheck`, `bun run lint`, and `cd web && bun run build`.
 
 ---
 
@@ -1037,3 +1062,27 @@ Reason: This avoids mixing old Web session persistence with the new channel-neut
 Decision: The sidebar no longer duplicates the top-right memory/config entry points. It now focuses on runtime observability: agent status, task queue, current task, and event history.
 
 Reason: The Web UI is primarily a debug/control surface for the Agent runtime, and repeated memory/tool/permission/config controls were confusing before those configuration screens exist.
+
+### 2026-05-08: Memory extraction runs through lifecycle hooks
+
+Decision: Memory extraction is triggered by the backend `assistant.message.persisted` lifecycle hook, not by the frontend after chat completion.
+
+Reason: This keeps memory behavior inside the runtime, makes future lifecycle hooks reusable, and lets the Web UI display memory work as persisted synthetic tool parts.
+
+### 2026-05-08: Reconsolidation updates active memories in place
+
+Decision: When a retrieved active memory conflicts with new user evidence, the memory worker updates the original active memory and preserves the change history in the memory text.
+
+Reason: This matches the desired human-like memory model: recalled memories can be rewritten by new evidence without losing the fact that the preference or fact changed over time.
+
+### 2026-05-09: Candidate memories are no longer part of the MVP path
+
+Decision: `memory_propose` writes active memories directly, and the Web memory panel no longer displays candidate-memory counts.
+
+Reason: The current product direction favors a simpler MVP rule: hook worker extraction and explicit memory write tools both produce active long-term memories. Existing old candidate rows may remain in storage, but new runtime flows should not create or surface them.
+
+### 2026-05-09: Memory worker owns retrieval, dedupe, and reconsolidation
+
+Decision: The memory worker now performs its own related-memory search after every assistant reply and merges those results with any `memory_search` calls made by the main Agent.
+
+Reason: Reconsolidation should not depend on whether the main Agent remembered to search. The worker is responsible for finding related old memories, avoiding duplicate active memories, and updating recalled memories when new user evidence changes them.
