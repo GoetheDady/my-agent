@@ -3,6 +3,7 @@ import {
   setMemoryStatus,
   type Memory,
 } from "./store";
+import { normalizeMemoryContent } from "./duplicate";
 
 export interface MemoryDedupeStore {
   listMemories: typeof listMemories;
@@ -92,12 +93,4 @@ function compareMemoryForRetention(a: Memory, b: Memory): number {
   if (a.created_at !== b.created_at) return a.created_at - b.created_at;
   if (b.access_count !== a.access_count) return b.access_count - a.access_count;
   return a.id.localeCompare(b.id);
-}
-
-function normalizeMemoryContent(content: string): string {
-  return content
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[，。,.；;：:"“”'‘’]/g, "")
-    .trim();
 }

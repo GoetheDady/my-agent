@@ -285,7 +285,7 @@ describe("memory extraction worker", () => {
     }
   });
 
-  test("skips duplicate active memories even when related-memory search misses them", async () => {
+  test("skips duplicate active memory fragments even when related-memory search misses them", async () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     let addCalls = 0;
     const existing = createMemory({
@@ -306,7 +306,7 @@ describe("memory extraction worker", () => {
       store,
       planner: async () => ({
         new_memories: [{
-          content: "用户正在开发 my-agent 项目，偏好浅色、舒服、密度适中的 Web UI。",
+          content: "用户偏好浅色、舒服、密度适中的 Web UI。",
           memory_type: "preference",
           confidence: 0.95,
         }],

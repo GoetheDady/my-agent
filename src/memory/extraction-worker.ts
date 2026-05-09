@@ -9,6 +9,7 @@ import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
 import type { RuntimeEvent } from "../events/event-types";
+import { findDuplicateMemoryContent } from "./duplicate";
 import {
   addMemory,
   getMemory,
@@ -343,7 +344,7 @@ export class MemoryExtractionWorker {
       const content = memory.content.trim();
       const confidence = memory.confidence ?? 0.8;
       if (!isAllowedMemoryContent(content, confidence)) continue;
-      if (hasDuplicateMemoryContent(content, knownActiveMemories)) continue;
+      if (findDuplicateMemoryContent(content, knownActiveMemories)) continue;
 
       const saved = await this.store.addMemory({
         content,
@@ -510,22 +511,4 @@ function isAllowedMemoryContent(content: string, confidence: number): boolean {
   if (confidence < MIN_WRITE_CONFIDENCE) return false;
   if (content.length < MIN_MEMORY_CONTENT_LENGTH) return false;
   return !suspiciousMemoryPatterns.some((pattern) => pattern.test(content));
-}
-
-function hasDuplicateMemoryContent(content: string, retrievedMemories: Memory[]): boolean {
-  const normalized = normalizeMemoryContent(content);
-  if (!normalized) return true;
-
-  return retrievedMemories.some((memory) => {
-    const existing = normalizeMemoryContent(memory.content);
-    return existing === normalized || existing.includes(normalized) || normalized.includes(existing);
-  });
-}
-
-function normalizeMemoryContent(content: string): string {
-  return content
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[，。,.；;：:"“”'‘’]/g, "")
-    .trim();
 }

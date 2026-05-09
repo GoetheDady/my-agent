@@ -5,15 +5,18 @@ import { appendEvent } from "../events/event-log";
 import {
   addMemory,
   getMemory,
+  listMemories,
   searchMemories,
   setMemoryStatus,
   updateMemory,
   type Memory,
 } from "./store";
+import { findDuplicateMemoryContent } from "./duplicate";
 
 export interface MemoryStorePort {
   searchMemories(query: string, limit?: number): Promise<Memory[]>;
   getMemory(id: string): Promise<Memory | null>;
+  listMemories(params: Parameters<typeof listMemories>[0]): ReturnType<typeof listMemories>;
   addMemory(params: Parameters<typeof addMemory>[0]): Promise<Memory | null>;
   updateMemory(id: string, content: string): Promise<Memory | null>;
   setMemoryStatus(id: string, status: string): Promise<Memory | null>;
@@ -30,6 +33,7 @@ export interface MemoryToolContext {
 const defaultStore: MemoryStorePort = {
   searchMemories,
   getMemory,
+  listMemories,
   addMemory,
   updateMemory,
   setMemoryStatus,
@@ -125,7 +129,10 @@ export async function memoryPropose(
   },
   context: MemoryToolContext = {},
 ): Promise<{ memory: ToolMemory | null }> {
-  const memory = await getStore(context).addMemory({
+  const store = getStore(context);
+  const { memories: activeMemories } = await store.listMemories({ status: "active", pageSize: 1000 });
+  const duplicate = findDuplicateMemoryContent(input.content, activeMemories);
+  const memory = duplicate ?? (await store.addMemory({
     content: input.content,
     memory_type: input.memory_type ?? "fact",
     confidence: input.confidence ?? 0.8,
@@ -134,13 +141,15 @@ export async function memoryPropose(
       reason: input.reason,
       evidenceEventIds: input.evidenceEventIds ?? [],
     }),
-  });
+  }));
 
   appendEvent({
     ...contextIds(context),
     type: "memory.propose",
     payload: {
       memoryId: memory?.id ?? null,
+      skippedDuplicate: duplicate !== null,
+      duplicateOfMemoryId: duplicate?.id ?? null,
       reason: input.reason,
       evidenceEventIds: input.evidenceEventIds ?? [],
     },
