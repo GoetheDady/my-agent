@@ -89,6 +89,13 @@ function getString(payload: Record<string, unknown>, key: string): string | null
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function getDisplayValue(payload: Record<string, unknown>, key: string): string | null {
+  const value = payload[key];
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
 export function getQueuedTasks(tasks: RuntimeTask[]): RuntimeTask[] {
   return tasks
     .filter((task) => task.status === "queued")
@@ -108,6 +115,69 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   const payload = payloadRecord(event);
 
   if (event.type.startsWith("memory.")) {
+    if (event.type === "memory.extract.started") {
+      return {
+        label: "记忆提取开始",
+        detail: getString(payload, "assistantMessageId") ?? "memory.extract.started",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.extract.completed") {
+      return {
+        label: "记忆提取完成",
+        detail: getString(payload, "summary") ?? getDisplayValue(payload, "count") ?? "memory.extract.completed",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.extract.failed") {
+      return {
+        label: "记忆提取失败",
+        detail: getString(payload, "error") ?? "memory.extract.failed",
+        tone: "error",
+      };
+    }
+    if (event.type === "memory.reconsolidate.started") {
+      return {
+        label: "记忆再巩固开始",
+        detail: getString(payload, "memoryId") ?? "memory.reconsolidate.started",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.reconsolidate.completed") {
+      return {
+        label: "记忆再巩固完成",
+        detail: getString(payload, "summary") ?? getDisplayValue(payload, "updatedCount") ?? "memory.reconsolidate.completed",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.reconsolidate.failed") {
+      return {
+        label: "记忆再巩固失败",
+        detail: getString(payload, "error") ?? "memory.reconsolidate.failed",
+        tone: "error",
+      };
+    }
+    if (event.type === "memory.dedupe.started") {
+      return {
+        label: "记忆去重开始",
+        detail: getDisplayValue(payload, "dryRun") ?? "memory.dedupe.started",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.dedupe.completed") {
+      return {
+        label: "记忆去重完成",
+        detail: getDisplayValue(payload, "duplicateGroupCount") ?? "memory.dedupe.completed",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.dedupe.failed") {
+      return {
+        label: "记忆去重失败",
+        detail: getString(payload, "error") ?? "memory.dedupe.failed",
+        tone: "error",
+      };
+    }
     if (event.type === "memory.search") {
       return {
         label: "记忆检索",
@@ -117,7 +187,7 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
     }
     if (event.type === "memory.propose") {
       return {
-        label: "候选记忆",
+        label: "写入记忆",
         detail: getString(payload, "reason") ?? getString(payload, "memoryId") ?? "memory.propose",
         tone: "memory",
       };

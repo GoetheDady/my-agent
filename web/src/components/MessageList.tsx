@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import MessageBubble from "./MessageBubble";
-import type { MemoryExtractStatus } from "../store/chatStore";
 
 interface MessageListProps {
   messages: Array<{
@@ -8,12 +7,11 @@ interface MessageListProps {
     role: string;
     parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string } }>;
   }>;
-  memoryStatusMap: Record<string, MemoryExtractStatus>;
   handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
   handleDeny?: (toolCallId: string) => void;
 }
 
-export default function MessageList({ messages, memoryStatusMap, handleApprove, handleDeny }: MessageListProps) {
+export default function MessageList({ messages, handleApprove, handleDeny }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
@@ -45,7 +43,6 @@ export default function MessageList({ messages, memoryStatusMap, handleApprove, 
           <MessageBubble
             key={msg.id}
             message={msg}
-            memoryStatus={memoryStatusMap[msg.id]}
             handleApprove={handleApprove}
             handleDeny={handleDeny}
           />

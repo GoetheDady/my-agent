@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import MarkdownContent from "./MarkdownContent";
 import { Brain, CheckCircle2, ChevronDown, Clock3, Wrench, XCircle } from "lucide-react";
 import { ToolApprovalCard } from "./ToolApprovalCard";
-import type { MemoryExtractStatus } from "../store/chatStore";
 import { getNormalizedToolPart } from "../lib/toolPart";
 
 interface MessagePart {
@@ -14,6 +13,7 @@ interface MessagePart {
   state?: string;
   approval?: { id?: string };
   errorText?: string;
+  output?: unknown;
   toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string };
 }
 
@@ -25,12 +25,10 @@ interface AIMessage {
 
 export default function MessageBubble({
   message,
-  memoryStatus,
   handleApprove,
   handleDeny,
 }: {
   message: AIMessage;
-  memoryStatus?: MemoryExtractStatus;
   handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
   handleDeny?: (toolCallId: string) => void;
 }) {
@@ -147,12 +145,14 @@ export default function MessageBubble({
                     {tool.errorText}
                   </div>
                 )}
+                {tool.state === "output-available" && tool.output !== undefined && (
+                  <ToolOutput output={tool.output} />
+                )}
               </div>
             );
           }
           return null;
         })}
-        <MemoryStatusBar memoryStatus={memoryStatus} />
       </div>
     </div>
   );
@@ -169,40 +169,13 @@ function getToolDisplayName(toolName: string): string {
     list_directory: "列出目录",
     memory_search: "记忆检索",
     memory_get: "读取记忆",
-    memory_propose: "候选记忆",
+    memory_propose: "写入记忆",
     memory_update: "更新记忆",
     memory_forget: "停用记忆",
+    memory_extract: "记忆提取",
+    memory_reconsolidate: "记忆再巩固",
   };
   return labels[toolName] ?? toolName.replace(/\./g, "_");
-}
-
-function MemoryStatusBar({ memoryStatus }: { memoryStatus?: MemoryExtractStatus }) {
-  if (!memoryStatus) return null;
-
-  if (memoryStatus.status === "loading") {
-    return (
-      <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-[var(--color-text-soft)]">
-        <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        记忆提取中...
-      </div>
-    );
-  }
-
-  if (memoryStatus.status === "success") {
-    if (memoryStatus.count === 0) {
-      return <div className="px-2 py-1 text-xs text-[var(--color-text-soft)]">无可提取记忆</div>;
-    }
-    return <div className="px-2 py-1 text-xs text-[var(--color-text-soft)]">已提取 {memoryStatus.count} 条记忆</div>;
-  }
-
-  if (memoryStatus.status === "error") {
-    return <div className="px-2 py-1 text-xs text-[var(--color-danger)]">记忆提取失败</div>;
-  }
-
-  return null;
 }
 
 function ThinkingBlock({ content }: { content: string }) {
@@ -241,4 +214,41 @@ function ThinkingBlock({ content }: { content: string }) {
       </div>
     </div>
   );
+}
+
+function ToolOutput({ output }: { output: unknown }) {
+  const rows = outputToRows(output);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1 rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+      {rows.map(([key, value]) => (
+        <div key={key} className="flex gap-2">
+          <span className="shrink-0 text-[var(--color-text-soft)]">{key}:</span>
+          <span className="min-w-0 break-words">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function outputToRows(output: unknown): Array<[string, string]> {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return [["结果", String(output)]];
+  }
+
+  return Object.entries(output as Record<string, unknown>)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => [key, formatOutputValue(value)]);
+}
+
+function formatOutputValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "无";
+    return value.map((item) => String(item)).join(", ");
+  }
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }

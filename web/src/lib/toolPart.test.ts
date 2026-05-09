@@ -38,7 +38,13 @@ describe("toolPart", () => {
   });
 
   test("normalizes output and error states for display", () => {
-    expect(getNormalizedToolPart({ type: "tool-read_file", state: "output-available" })?.state).toBe("output-available");
+    const outputTool = getNormalizedToolPart({
+      type: "tool-memory_extract",
+      state: "output-available",
+      output: { addedCount: 1 },
+    });
+    expect(outputTool?.state).toBe("output-available");
+    expect(outputTool?.output).toEqual({ addedCount: 1 });
     expect(getNormalizedToolPart({ type: "tool-write_file", state: "output-error", errorText: "failed" })?.errorText).toBe("failed");
     expect(getNormalizedToolPart({ type: "tool-invocation", toolInvocation: { state: "result" } })?.state).toBe("output-available");
   });

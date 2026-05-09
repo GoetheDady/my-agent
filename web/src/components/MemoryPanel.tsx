@@ -122,7 +122,6 @@ export default function MemoryPanel({ onClose }: Props) {
 
   const totalPages = Math.ceil(total / pageSize);
   const activeCount = stats?.byStatus.active ?? total;
-  const candidateCount = stats?.byStatus.candidate ?? 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -179,14 +178,10 @@ export default function MemoryPanel({ onClose }: Props) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 px-4 py-3 text-xs">
+        <div className="px-4 py-3 text-xs">
           <div className="rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2">
             <div className="text-[var(--color-text-soft)]">已生效</div>
             <div className="mt-0.5 text-sm font-semibold text-[var(--color-text)]">{activeCount}</div>
-          </div>
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2">
-            <div className="text-[var(--color-warning)]">候选记忆</div>
-            <div className="mt-0.5 text-sm font-semibold text-[var(--color-text)]">{candidateCount}</div>
           </div>
         </div>
 

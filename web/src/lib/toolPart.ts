@@ -5,6 +5,7 @@ export interface NormalizedToolPart {
   toolCallId?: string;
   approvalId?: string;
   errorText?: string;
+  output?: unknown;
 }
 
 interface UnknownToolPart {
@@ -42,6 +43,10 @@ function normalizeState(state: string | undefined): string {
   return legacyStateMap[state] ?? state;
 }
 
+function outputProperty(output: unknown): Pick<NormalizedToolPart, "output"> | Record<string, never> {
+  return output === undefined ? {} : { output };
+}
+
 export function getNormalizedToolPart(part: unknown): NormalizedToolPart | null {
   const candidate = part as UnknownToolPart;
 
@@ -52,6 +57,7 @@ export function getNormalizedToolPart(part: unknown): NormalizedToolPart | null 
       state: normalizeState(candidate.toolInvocation.state),
       toolCallId: candidate.toolInvocation.toolCallId,
       approvalId: candidate.toolInvocation.toolCallId,
+      ...outputProperty((candidate.toolInvocation as { output?: unknown }).output),
     };
   }
 
@@ -63,6 +69,7 @@ export function getNormalizedToolPart(part: unknown): NormalizedToolPart | null 
       toolCallId: candidate.toolCallId,
       approvalId: candidate.approval?.id ?? candidate.toolCallId,
       errorText: candidate.errorText,
+      ...outputProperty(candidate.output),
     };
   }
 
@@ -74,6 +81,7 @@ export function getNormalizedToolPart(part: unknown): NormalizedToolPart | null 
       toolCallId: candidate.toolCallId,
       approvalId: candidate.approval?.id ?? candidate.toolCallId,
       errorText: candidate.errorText,
+      ...outputProperty(candidate.output),
     };
   }
 
