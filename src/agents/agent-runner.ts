@@ -9,7 +9,7 @@ import { createDeepSeek, deepseek } from "@ai-sdk/deepseek";
 import type { Database } from "bun:sqlite";
 import { appendEvent } from "../events/event-log";
 import { buildAgentSystemPrompt } from "../brain/prompt-builder";
-import { tools } from "../brain/tools";
+import { buildAgentTools, tools } from "../brain/tools";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
@@ -18,6 +18,7 @@ import type { TaskRecord } from "../tasks/task-types";
 
 type StreamTextRunner = typeof streamText;
 type StreamTextRunResult = ReturnType<typeof streamText<typeof tools, never>>;
+const MODEL_RUN_TIMEOUT_MS = 45_000;
 
 export interface AgentRunInput {
   task: TaskRecord;
@@ -69,9 +70,29 @@ export async function toModelMessages(uiMessages: Array<{
 export function runAgentTask(input: AgentRunInput): AgentRunResult {
   const database = input.database ?? getDb();
   let eventTimestamp = Date.now();
+  let settled = false;
+  const runAbortSignal = createRunAbortSignal(input.abortSignal, MODEL_RUN_TIMEOUT_MS);
   const nextEventTimestamp = (): number => {
     eventTimestamp += 1;
     return eventTimestamp;
+  };
+
+  const failTaskOnce = (message: string): void => {
+    if (settled) return;
+    settled = true;
+    runAbortSignal.cleanup();
+    const latest = getTask(input.task.id, database);
+    if (!latest || latest.status !== "running") return;
+
+    markTaskFailed(input.task.id, message, database);
+    appendEvent({
+      agent_id: input.task.agent_id,
+      task_id: input.task.id,
+      conversation_id: input.task.conversation_id,
+      type: "task.failed",
+      payload: { error: message },
+      created_at: nextEventTimestamp(),
+    }, database);
   };
 
   ensureTaskCanRun(input.task, database);
@@ -83,16 +104,30 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
     payload: { input: input.task.input },
     created_at: nextEventTimestamp(),
   }, database);
+  if (runAbortSignal.signal.aborted) {
+    const message = runAbortSignal.reason();
+    failTaskOnce(message);
+    throw new Error(message);
+  }
+  runAbortSignal.signal.addEventListener("abort", () => failTaskOnce(runAbortSignal.reason()), {
+    once: true,
+  });
 
   try {
     const runner = input.streamTextRunner ?? streamText;
+    const taskTools = buildAgentTools({
+      agentId: input.task.agent_id,
+      taskId: input.task.id,
+      conversationId: input.task.conversation_id,
+      database,
+    });
     const result = runner({
       model: getModel(),
       system: buildAgentSystemPrompt(input.task, database),
       messages: input.messages,
       stopWhen: stepCountIs(5),
-      tools,
-      abortSignal: input.abortSignal,
+      tools: taskTools,
+      abortSignal: runAbortSignal.signal,
       providerOptions: {
         deepseek: { thinking: input.thinkingEnabled ? { type: "enabled" } : { type: "disabled" } },
       },
@@ -109,6 +144,9 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
         }
       },
       onFinish: ({ text }) => {
+        if (settled) return;
+        settled = true;
+        runAbortSignal.cleanup();
         appendEvent({
           agent_id: input.task.agent_id,
           task_id: input.task.id,
@@ -129,30 +167,14 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       },
       onError: ({ error }) => {
         const message = error instanceof Error ? error.message : String(error);
-        markTaskFailed(input.task.id, message, database);
-        appendEvent({
-          agent_id: input.task.agent_id,
-          task_id: input.task.id,
-          conversation_id: input.task.conversation_id,
-          type: "task.failed",
-          payload: { error: message },
-          created_at: nextEventTimestamp(),
-        }, database);
+        failTaskOnce(message);
       },
-    }) as StreamTextRunResult;
+    }) as unknown as StreamTextRunResult;
 
     return { result, taskId: input.task.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    markTaskFailed(input.task.id, message, database);
-    appendEvent({
-      agent_id: input.task.agent_id,
-      task_id: input.task.id,
-      conversation_id: input.task.conversation_id,
-      type: "task.failed",
-      payload: { error: message },
-      created_at: nextEventTimestamp(),
-    }, database);
+    failTaskOnce(message);
     throw error;
   }
 }
@@ -175,6 +197,39 @@ function ensureTaskCanRun(task: TaskRecord, database: Database): void {
   if (!claimed) {
     throw new AgentBusyError(task.agent_id);
   }
+}
+
+function createRunAbortSignal(
+  clientSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; reason: () => string; cleanup: () => void } {
+  const controller = new AbortController();
+  let reason = "";
+  const timeout = setTimeout(() => {
+    reason = `Model run timed out after ${timeoutMs}ms`;
+    controller.abort();
+  }, timeoutMs);
+
+  const abortFromClient = () => {
+    reason = "Client aborted stream";
+    clearTimeout(timeout);
+    controller.abort();
+  };
+
+  if (clientSignal?.aborted) {
+    abortFromClient();
+  } else {
+    clientSignal?.addEventListener("abort", abortFromClient, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    reason: () => reason || "Model run aborted",
+    cleanup: () => {
+      clearTimeout(timeout);
+      clientSignal?.removeEventListener("abort", abortFromClient);
+    },
+  };
 }
 
 export function toAgentUiMessageStreamResponse(

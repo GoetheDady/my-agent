@@ -114,6 +114,35 @@ describe("agent runner", () => {
     });
   });
 
+  test("marks task failed and releases agent when the client aborts the stream", () => {
+    withRunnerDb((db, task) => {
+      const controller = new AbortController();
+
+      runAgentTask({
+        task,
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        abortSignal: controller.signal,
+        streamTextRunner: fakeStreamTextSuccess as never,
+        database: db,
+      });
+
+      controller.abort();
+
+      expect(getTask(task.id, db)).toMatchObject({
+        status: "failed",
+        error: "Client aborted stream",
+      });
+      expect(getAgent("default", db)).toMatchObject({
+        status: "idle",
+        current_task_id: null,
+      });
+      expect(listTaskEvents(task.id, db).map((event) => event.type)).toEqual([
+        "task.started",
+        "task.failed",
+      ]);
+    });
+  });
+
   test("leaves task queued when agent is busy", () => {
     withRunnerDb((db, task) => {
       updateAgentStatus("default", "running", "other-task", db);
