@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Brain, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
@@ -6,7 +6,7 @@ import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import SessionSidebar from "./SessionSidebar";
 import MemoryPanel from "./MemoryPanel";
-import { useChatStore, triggerMemoryExtract, parseDbContent } from "../store/chatStore";
+import { useChatStore, parseDbContent } from "../store/chatStore";
 import { useSessionStore } from "../store/sessionStore";
 import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionIdFromPath, getSessionPath } from "../lib/sessionRoute";
@@ -14,9 +14,11 @@ import { getSessionIdFromPath, getSessionPath } from "../lib/sessionRoute";
 export default function ChatView() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const { thinkingEnabled, setSessionId, memoryStatusMap } = useChatStore();
+  const { thinkingEnabled, setSessionId } = useChatStore();
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
+  const workerPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLoadingRef = useRef(false);
 
   const chatTransport = useMemo(() => new DefaultChatTransport({
     api: "/api/chat",
@@ -59,20 +61,10 @@ export default function ChatView() {
   } = useChat({
     transport: chatTransport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
-    onFinish: ({ message, messages: finishedMessages }) => {
+    onFinish: () => {
       const currentSessionId = useChatStore.getState().sessionId;
-      const lastUserMsg = [...finishedMessages].reverse().find((m) => m.role === "user");
-      const userText = lastUserMsg?.parts
-        ?.filter((p: { type: string; text?: string }) => p.type === "text" && typeof p.text === "string")
-        .map((p: { type: string; text?: string }) => p.text ?? "")
-        .join("\n") || "";
-      const assistantText = message.parts
-        ?.filter((p: { type: string; text?: string }) => p.type === "text" && typeof p.text === "string")
-        .map((p: { type: string; text?: string }) => p.text ?? "")
-        .join("\n") || "";
-
-      if (userText && currentSessionId) {
-        triggerMemoryExtract(message.id, userText, assistantText, currentSessionId, useChatStore.setState, useChatStore.getState);
+      if (currentSessionId) {
+        startWorkerMessagePolling(currentSessionId);
       }
 
       setTimeout(() => fetchSessions(), 2000);
@@ -83,6 +75,17 @@ export default function ChatView() {
   });
 
   const isLoading = status === "submitted" || status === "streaming";
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  const stopWorkerMessagePolling = useCallback(() => {
+    if (workerPollTimerRef.current) {
+      clearTimeout(workerPollTimerRef.current);
+      workerPollTimerRef.current = null;
+    }
+  }, []);
 
   const loadSession = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
@@ -98,6 +101,49 @@ export default function ChatView() {
     setActiveSessionId(id);
     return true;
   }, [setMessages, setSessionId, setActiveSessionId]);
+
+  const fetchSessionUiMessages = useCallback(async (id: string) => {
+    const res = await fetch("/api/sessions/" + id + "/messages");
+    if (!res.ok) return null;
+    const rawMessages = await res.json() as Array<{ id: string; role: "user" | "assistant"; content: string }>;
+    return rawMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parts: parseDbContent(m.content, m.role),
+    }));
+  }, []);
+
+  const startWorkerMessagePolling = useCallback((sessionId: string) => {
+    stopWorkerMessagePolling();
+    let attempts = 0;
+    const maxAttempts = 75;
+
+    const poll = async () => {
+      attempts += 1;
+      const activeSessionId = useChatStore.getState().sessionId;
+      if (activeSessionId !== sessionId || isLoadingRef.current) {
+        stopWorkerMessagePolling();
+        return;
+      }
+
+      const uiMessages = await fetchSessionUiMessages(sessionId);
+      if (uiMessages) {
+        setMessages(uiMessages as Parameters<typeof setMessages>[0]);
+        if (hasCompletedMemoryWorkerPart(uiMessages) || attempts >= maxAttempts) {
+          stopWorkerMessagePolling();
+          return;
+        }
+      }
+
+      if (attempts >= maxAttempts) {
+        stopWorkerMessagePolling();
+        return;
+      }
+      workerPollTimerRef.current = setTimeout(poll, 1000);
+    };
+
+    workerPollTimerRef.current = setTimeout(poll, 700);
+  }, [fetchSessionUiMessages, setMessages, stopWorkerMessagePolling]);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,11 +169,13 @@ export default function ChatView() {
 
     return () => {
       cancelled = true;
+      stopWorkerMessagePolling();
       window.removeEventListener("popstate", syncFromLocation);
     };
-  }, [loadSession, setMessages]);
+  }, [loadSession, setMessages, stopWorkerMessagePolling]);
 
   const handleSend = useCallback(async (text: string) => {
+    stopWorkerMessagePolling();
     const currentSessionId = await sessionResolver.ensureSessionId();
     sendMessage(
       { text },
@@ -138,7 +186,7 @@ export default function ChatView() {
         },
       },
     );
-  }, [sendMessage, thinkingEnabled, sessionResolver]);
+  }, [sendMessage, thinkingEnabled, sessionResolver, stopWorkerMessagePolling]);
 
   const handleLoadSession = useCallback(async (id: string) => {
     const loaded = await loadSession(id);
@@ -146,10 +194,11 @@ export default function ChatView() {
   }, [loadSession, navigateToSession]);
 
   const handleNewSession = useCallback(() => {
+    stopWorkerMessagePolling();
     setMessages([]);
     useChatStore.getState().clearSession();
     navigateToNewSession();
-  }, [setMessages, navigateToNewSession]);
+  }, [setMessages, navigateToNewSession, stopWorkerMessagePolling]);
 
   const handleApprove = useCallback(async (toolCallId: string, rememberChoice: boolean) => {
     addToolApprovalResponse({
@@ -219,7 +268,7 @@ export default function ChatView() {
             <Settings size={17} />
           </button>
         </header>
-        <MessageList messages={messages} memoryStatusMap={memoryStatusMap} handleApprove={handleApprove} handleDeny={handleDeny} />
+        <MessageList messages={messages} handleApprove={handleApprove} handleDeny={handleDeny} />
         <ChatInput
           isLoading={isLoading}
           onSend={handleSend}
@@ -231,4 +280,16 @@ export default function ChatView() {
       {memoryOpen && <MemoryPanel onClose={() => setMemoryOpen(false)} />}
     </div>
   );
+}
+
+function hasCompletedMemoryWorkerPart(messages: Array<{ role: string; parts: Array<{ type: string; state?: string }> }>): boolean {
+  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  if (!latestAssistant) return false;
+
+  const workerParts = latestAssistant.parts.filter((part) =>
+    part.type === "tool-memory_extract" || part.type === "tool-memory_reconsolidate"
+  );
+  if (workerParts.length === 0) return false;
+
+  return workerParts.every((part) => part.state === "output-available" || part.state === "output-error");
 }

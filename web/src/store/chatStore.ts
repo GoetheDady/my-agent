@@ -1,85 +1,22 @@
 import { create } from "zustand";
 
-let memoryAbortController: AbortController | null = null;
-
-export interface MemoryExtractStatus {
-  status: "loading" | "success" | "error";
-  count?: number;
-}
-
 interface ChatState {
   sessionId: string | null;
   thinkingEnabled: boolean;
-  memoryStatusMap: Record<string, MemoryExtractStatus>;
 
   setSessionId: (id: string | null) => void;
   setThinkingEnabled: (enabled: boolean) => void;
   clearSession: () => void;
 }
 
-export function triggerMemoryExtract(
-  assistantMessageId: string,
-  userText: string,
-  assistantText: string,
-  sessionId: string | null,
-  set: (partial: Partial<ChatState>) => void,
-  get: () => ChatState,
-) {
-  if (memoryAbortController) {
-    memoryAbortController.abort();
-  }
-  memoryAbortController = new AbortController();
-  const signal = memoryAbortController.signal;
-
-  set({ memoryStatusMap: { ...get().memoryStatusMap, [assistantMessageId]: { status: "loading" } } });
-
-  const controller = memoryAbortController;
-
-  fetch("/api/memory/extract", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sessionId, userText, assistantText }),
-    signal,
-  })
-    .then(async (res) => {
-      if (controller !== memoryAbortController) return;
-      if (signal.aborted) return;
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "提取失败" })) as { error?: string };
-        throw new Error(err.error ?? "提取失败");
-      }
-      const data = await res.json() as { count: number };
-      return data.count;
-    })
-    .then((count) => {
-      if (controller !== memoryAbortController) return;
-      if (signal.aborted) return;
-      if (count === undefined) return;
-
-      const map = { ...get().memoryStatusMap };
-      map[assistantMessageId] = { status: "success", count };
-      set({ memoryStatusMap: map });
-    })
-    .catch(() => {
-      if (controller !== memoryAbortController) return;
-      if (signal.aborted) return;
-
-      set({ memoryStatusMap: { ...get().memoryStatusMap, [assistantMessageId]: { status: "error" } } });
-    });
-}
-
 export const useChatStore = create<ChatState>((set) => ({
   sessionId: null,
   thinkingEnabled: false,
-  memoryStatusMap: {},
 
   setSessionId: (id) => set({ sessionId: id }),
   setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
   clearSession: () => {
-    memoryAbortController?.abort();
-    memoryAbortController = null;
-    set({ sessionId: null, memoryStatusMap: {} });
+    set({ sessionId: null });
   },
 }));
 
