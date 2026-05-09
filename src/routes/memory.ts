@@ -10,6 +10,9 @@ import {
 } from "../memory/store";
 import { extractMemories } from "../memory/memory";
 import { dedupeActiveMemories } from "../memory/dedupe";
+import { listDailySummaries, runDreamWorker } from "../memory/dream-worker";
+import { searchEpisodes } from "../memory/episode-store";
+import { listReviewItems, updateReviewStatus } from "../memory/review-store";
 import { appendEvent } from "../events/event-log";
 
 const app = new Hono();
@@ -18,6 +21,65 @@ const app = new Hono();
 app.get("/stats", async (c) => {
   const stats = await getMemoryStats();
   return c.json(stats);
+});
+
+// GET /api/memory/episodes
+app.get("/episodes", (c) => {
+  const agentId = c.req.query("agentId") ?? "default";
+  const query = c.req.query("query") ?? undefined;
+  const limit = parseInt(c.req.query("limit") ?? "10", 10);
+  const from = c.req.query("from") ? parseInt(c.req.query("from")!, 10) : undefined;
+  const to = c.req.query("to") ? parseInt(c.req.query("to")!, 10) : undefined;
+  return c.json({ episodes: searchEpisodes({ agentId, query, from, to, limit }) });
+});
+
+// GET /api/memory/daily-summaries
+app.get("/daily-summaries", (c) => {
+  const agentId = c.req.query("agentId") ?? "default";
+  const limit = parseInt(c.req.query("limit") ?? "7", 10);
+  return c.json({ summaries: listDailySummaries({ agentId, limit }) });
+});
+
+// GET /api/memory/reviews
+app.get("/reviews", (c) => {
+  const agentId = c.req.query("agentId") ?? "default";
+  const status = c.req.query("status") as "pending" | "accepted" | "rejected" | undefined;
+  const limit = parseInt(c.req.query("limit") ?? "20", 10);
+  return c.json({ items: listReviewItems({ agentId, status, limit }) });
+});
+
+// POST /api/memory/reviews/:id/accept
+app.post("/reviews/:id/accept", (c) => {
+  const item = updateReviewStatus(c.req.param("id"), "accepted");
+  if (!item) return c.json({ error: "review item 不存在" }, 404);
+  return c.json({ item });
+});
+
+// POST /api/memory/reviews/:id/reject
+app.post("/reviews/:id/reject", (c) => {
+  const item = updateReviewStatus(c.req.param("id"), "rejected");
+  if (!item) return c.json({ error: "review item 不存在" }, 404);
+  return c.json({ item });
+});
+
+// POST /api/memory/dream/run
+app.post("/dream/run", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    agentId?: string;
+    date?: string;
+    dryRun?: boolean;
+  };
+  try {
+    const result = await runDreamWorker({
+      agentId: body.agentId ?? "default",
+      date: body.date,
+      dryRun: body.dryRun ?? true,
+    });
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 500);
+  }
 });
 
 // POST /api/memory/search

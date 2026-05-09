@@ -81,3 +81,19 @@ export function listAgentEvents(
     )
     .all(agentId, limit);
 }
+
+export function listAgentEventsInRange(
+  agentId: string,
+  from: number,
+  to: number,
+  database: Database = getDb(),
+): RuntimeEvent[] {
+  return database
+    .query<RuntimeEvent, [string, number, number]>(
+      `SELECT id, agent_id, task_id, conversation_id, type, payload, created_at
+       FROM events
+       WHERE agent_id = ? AND created_at >= ? AND created_at <= ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .all(agentId, from, to);
+}

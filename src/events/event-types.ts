@@ -19,7 +19,16 @@ export type RuntimeEventType =
   | "memory.reconsolidate.failed"
   | "memory.dedupe.started"
   | "memory.dedupe.completed"
-  | "memory.dedupe.failed";
+  | "memory.dedupe.failed"
+  | "episode.created"
+  | "episode.updated"
+  | "episode.failed"
+  | "dream.started"
+  | "dream.completed"
+  | "dream.failed"
+  | "memory.review.created"
+  | "memory.review.accepted"
+  | "memory.review.rejected";
 
 export interface RuntimeEvent {
   id: string;

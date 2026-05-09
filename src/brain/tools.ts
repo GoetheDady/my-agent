@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { readFile, writeFile, isInputPathAllowlisted } from './tool-executor';
 import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
+import { createHumanMemoryTools } from '../memory/human-memory-tools';
 import { evaluateToolPolicy } from './tool-policy';
 import { buildAiToolSet, registerTool } from './tool-registry';
 
@@ -84,6 +85,38 @@ registerTool({
   category: 'memory_write',
 });
 
+const humanMemoryTools = createHumanMemoryTools();
+registerTool({
+  name: 'memory_recall',
+  tool: humanMemoryTools.memory_recall,
+  toolset: 'memory',
+  category: 'memory_read',
+});
+registerTool({
+  name: 'memory_evidence',
+  tool: humanMemoryTools.memory_evidence,
+  toolset: 'memory',
+  category: 'memory_read',
+});
+registerTool({
+  name: 'memory_remember',
+  tool: humanMemoryTools.memory_remember,
+  toolset: 'memory',
+  category: 'memory_write',
+});
+registerTool({
+  name: 'memory_plan',
+  tool: humanMemoryTools.memory_plan,
+  toolset: 'memory',
+  category: 'memory_write',
+});
+registerTool({
+  name: 'memory_reflect',
+  tool: humanMemoryTools.memory_reflect,
+  toolset: 'memory',
+  category: 'memory_write',
+});
+
 export const tools = buildAiToolSet('default');
 
 export function buildAgentTools(context: MemoryToolContext = {}) {
@@ -91,5 +124,6 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     read_file: readFileTool,
     write_file: writeFileTool,
     ...createMemoryTools(context),
+    ...createHumanMemoryTools(context),
   };
 }

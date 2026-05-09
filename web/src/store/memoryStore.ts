@@ -17,10 +17,74 @@ export interface MemoryStats {
   byStatus: Record<string, number>;
 }
 
+export interface EpisodeItem {
+  id: string;
+  agent_id: string;
+  conversation_id: string | null;
+  task_id: string;
+  title: string;
+  summary: string;
+  outcome: string;
+  time_range_start: number;
+  time_range_end: number;
+  tools_used: string[];
+  files_touched: string[];
+  importance: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DailySummaryItem {
+  id: string;
+  agent_id: string;
+  date: string;
+  timezone: string;
+  summary: string;
+  highlights: string[];
+  episode_ids: string[];
+  memory_change_ids: string[];
+  open_questions: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MemoryReviewItem {
+  id: string;
+  agent_id: string;
+  type: string;
+  status: "pending" | "accepted" | "rejected";
+  title: string;
+  proposed_content: string;
+  target_memory_ids: string[];
+  source_event_ids: string[];
+  confidence: number;
+  reason: string;
+  created_at: number;
+  reviewed_at: number | null;
+}
+
+export interface DreamRunResult {
+  dryRun: boolean;
+  date: string;
+  summary: DailySummaryItem;
+  dedupe: {
+    scannedCount: number;
+    duplicateGroups: unknown[];
+    inactiveMemoryIds: string[];
+  };
+  pendingReviewCount: number;
+}
+
 interface MemoryState {
   memories: MemoryItem[];
   stats: MemoryStats | null;
+  episodes: EpisodeItem[];
+  dailySummaries: DailySummaryItem[];
+  reviewItems: MemoryReviewItem[];
+  dreamResult: DreamRunResult | null;
   loading: boolean;
+  detailsLoading: boolean;
+  dreamLoading: boolean;
   page: number;
   pageSize: number;
   total: number;
@@ -29,6 +93,13 @@ interface MemoryState {
 
   fetchMemories: () => Promise<void>;
   fetchStats: () => Promise<void>;
+  fetchEpisodes: () => Promise<void>;
+  fetchDailySummaries: () => Promise<void>;
+  fetchReviewItems: (status?: MemoryReviewItem["status"]) => Promise<void>;
+  fetchMemoryWorkspace: () => Promise<void>;
+  runDreamDryRun: () => Promise<void>;
+  acceptReviewItem: (id: string) => Promise<void>;
+  rejectReviewItem: (id: string) => Promise<void>;
   searchMemories: (query: string) => Promise<void>;
   setFilterType: (type: string | null) => void;
   setPage: (page: number) => void;
@@ -40,7 +111,13 @@ interface MemoryState {
 export const useMemoryStore = create<MemoryState>((set, get) => ({
   memories: [],
   stats: null,
+  episodes: [],
+  dailySummaries: [],
+  reviewItems: [],
+  dreamResult: null,
   loading: false,
+  detailsLoading: false,
+  dreamLoading: false,
   page: 1,
   pageSize: 20,
   total: 0,
@@ -77,6 +154,80 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     } catch {
       // silent
     }
+  },
+
+  fetchEpisodes: async () => {
+    set({ detailsLoading: true });
+    try {
+      const res = await fetch("/api/memories/episodes?limit=20");
+      if (!res.ok) throw new Error("获取经历记录失败");
+      const data = (await res.json()) as { episodes: EpisodeItem[] };
+      set({ episodes: data.episodes, detailsLoading: false });
+    } catch {
+      set({ detailsLoading: false });
+    }
+  },
+
+  fetchDailySummaries: async () => {
+    set({ detailsLoading: true });
+    try {
+      const res = await fetch("/api/memories/daily-summaries?limit=7");
+      if (!res.ok) throw new Error("获取每日总结失败");
+      const data = (await res.json()) as { summaries: DailySummaryItem[] };
+      set({ dailySummaries: data.summaries, detailsLoading: false });
+    } catch {
+      set({ detailsLoading: false });
+    }
+  },
+
+  fetchReviewItems: async (status = "pending") => {
+    set({ detailsLoading: true });
+    try {
+      const params = new URLSearchParams({ status, limit: "20" });
+      const res = await fetch(`/api/memories/reviews?${params}`);
+      if (!res.ok) throw new Error("获取待审查建议失败");
+      const data = (await res.json()) as { items: MemoryReviewItem[] };
+      set({ reviewItems: data.items, detailsLoading: false });
+    } catch {
+      set({ detailsLoading: false });
+    }
+  },
+
+  fetchMemoryWorkspace: async () => {
+    await Promise.all([
+      get().fetchMemories(),
+      get().fetchStats(),
+      get().fetchEpisodes(),
+      get().fetchDailySummaries(),
+      get().fetchReviewItems(),
+    ]);
+  },
+
+  runDreamDryRun: async () => {
+    set({ dreamLoading: true, dreamResult: null });
+    try {
+      const res = await fetch("/api/memories/dream/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      if (!res.ok) throw new Error("梦整理试运行失败");
+      const result = (await res.json()) as DreamRunResult;
+      set({ dreamResult: result, dreamLoading: false });
+      await Promise.all([get().fetchDailySummaries(), get().fetchReviewItems()]);
+    } catch {
+      set({ dreamLoading: false });
+    }
+  },
+
+  acceptReviewItem: async (id) => {
+    await fetch(`/api/memories/reviews/${id}/accept`, { method: "POST" });
+    await get().fetchReviewItems();
+  },
+
+  rejectReviewItem: async (id) => {
+    await fetch(`/api/memories/reviews/${id}/reject`, { method: "POST" });
+    await get().fetchReviewItems();
   },
 
   searchMemories: async (query: string) => {

@@ -138,5 +138,33 @@ describe("runtimeStore", () => {
       detail: "read_file",
       tone: "tool",
     });
+    expect(getRuntimeEventView({
+      id: "event-episode",
+      agent_id: "default",
+      task_id: "task-running",
+      conversation_id: "conversation-1",
+      type: "episode.created",
+      payload: JSON.stringify({ title: "总结记忆系统" }),
+      payloadJson: { title: "总结记忆系统" },
+      created_at: 40,
+    })).toMatchObject({
+      label: "经历记录创建",
+      detail: "总结记忆系统",
+      tone: "memory",
+    });
+    expect(getRuntimeEventView({
+      id: "event-dream",
+      agent_id: "default",
+      task_id: null,
+      conversation_id: null,
+      type: "dream.completed",
+      payload: JSON.stringify({ episodeCount: 3 }),
+      payloadJson: { episodeCount: 3 },
+      created_at: 50,
+    })).toMatchObject({
+      label: "梦整理完成",
+      detail: "3",
+      tone: "memory",
+    });
   });
 });

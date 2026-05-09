@@ -115,6 +115,27 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   const payload = payloadRecord(event);
 
   if (event.type.startsWith("memory.")) {
+    if (event.type === "memory.review.created") {
+      return {
+        label: "审查建议创建",
+        detail: getString(payload, "title") ?? getString(payload, "reviewItemId") ?? "memory.review.created",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.review.accepted") {
+      return {
+        label: "审查建议接受",
+        detail: getString(payload, "title") ?? getString(payload, "reviewItemId") ?? "memory.review.accepted",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.review.rejected") {
+      return {
+        label: "审查建议拒绝",
+        detail: getString(payload, "title") ?? getString(payload, "reviewItemId") ?? "memory.review.rejected",
+        tone: "memory",
+      };
+    }
     if (event.type === "memory.extract.started") {
       return {
         label: "记忆提取开始",
@@ -196,6 +217,46 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
       label: "记忆更新",
       detail: getString(payload, "reason") ?? getString(payload, "memoryId") ?? event.type,
       tone: "memory",
+    };
+  }
+
+  if (event.type === "episode.created" || event.type === "episode.updated") {
+    return {
+      label: event.type === "episode.created" ? "经历记录创建" : "经历记录更新",
+      detail: getString(payload, "title") ?? getString(payload, "episodeId") ?? event.type,
+      tone: "memory",
+    };
+  }
+
+  if (event.type === "episode.failed") {
+    return {
+      label: "经历记录失败",
+      detail: getString(payload, "error") ?? event.type,
+      tone: "error",
+    };
+  }
+
+  if (event.type === "dream.started") {
+    return {
+      label: "梦整理开始",
+      detail: getString(payload, "date") ?? "dream.started",
+      tone: "memory",
+    };
+  }
+
+  if (event.type === "dream.completed") {
+    return {
+      label: "梦整理完成",
+      detail: getDisplayValue(payload, "episodeCount") ?? getString(payload, "date") ?? "dream.completed",
+      tone: "memory",
+    };
+  }
+
+  if (event.type === "dream.failed") {
+    return {
+      label: "梦整理失败",
+      detail: getString(payload, "error") ?? "dream.failed",
+      tone: "error",
     };
   }
 

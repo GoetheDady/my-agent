@@ -12,6 +12,7 @@ import { buildAgentSystemPrompt } from "../brain/prompt-builder";
 import { buildAgentTools, tools } from "../brain/tools";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
+import { upsertEpisodeForTask } from "../memory/episode-store";
 import { getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
 import { claimTask } from "../tasks/task-queue";
 import type { TaskRecord } from "../tasks/task-types";
@@ -164,6 +165,18 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
           payload: { result: text },
           created_at: nextEventTimestamp(),
         }, database);
+        try {
+          upsertEpisodeForTask(input.task.id, database);
+        } catch (error) {
+          appendEvent({
+            agent_id: input.task.agent_id,
+            task_id: input.task.id,
+            conversation_id: input.task.conversation_id,
+            type: "episode.failed",
+            payload: { error: error instanceof Error ? error.message : String(error) },
+            created_at: nextEventTimestamp(),
+          }, database);
+        }
       },
       onError: ({ error }) => {
         const message = error instanceof Error ? error.message : String(error);

@@ -82,6 +82,7 @@ describe("agent runner", () => {
         "task.started",
         "assistant.message",
         "task.completed",
+        "episode.created",
       ]);
     });
   });
