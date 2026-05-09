@@ -17,4 +17,5 @@ tsconfig.tsbuildinfo
 .opencode/node_modules/
 .opencode/package-lock.json
 .test-backups/
-.sisyphus/
+.sisyphus
+.opencode

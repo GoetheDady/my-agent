@@ -25,7 +25,7 @@
 | 4 | Episode v1 | Done | 2026-05-09 |
 | 5 | Prospective v1 | Done | 2026-05-09 |
 | 6 | Procedural / reflective v1 | Partial | 2026-05-09 |
-| 7 | Dream worker v1 | Partial | 2026-05-09 |
+| 7 | Dream worker autonomous loop | Done | 2026-05-09 |
 | 8 | Light UI | Done | 2026-05-09 |
 | 9 | Chrome DevTools MCP acceptance matrix | Documented | 2026-05-09 |
 
@@ -35,7 +35,9 @@
 - `episodes` 是从 task/events/messages 派生出的情景记忆。
 - LanceDB active memories 继续承载 semantic/procedural/prospective/reflective/social 记忆。
 - `memory_recall` 是主 Agent 优先使用的统一回忆入口。
-- `dream_worker` 只自动执行低风险整理；高风险改写生成 review item。
+- `dream_worker` 默认自主整理记忆：低风险确定性操作自动应用；高风险或证据不足时记录 skipped decision，不再把用户审批当作主流程。
+- `memory_decisions` 是自动整理审计记录，保存原因、置信度、before/after 快照，并支持撤销。
+- `memory_review_items` 保留兼容读取，但后续不再作为 Dream Worker 主流程。
 - 长期记忆仍坚持 Memory-as-Tool，不自动注入 prompt。
 
 ## 已落地范围
@@ -43,7 +45,9 @@
 - 新增 SQLite 表：
   - `episodes`：情景记忆，记录一次任务/对话经历摘要。
   - `daily_summaries`：每日总结，保存梦整理生成的日摘要。
-  - `memory_review_items`：待审查建议，承载高风险记忆变更。
+  - `memory_review_items`：兼容旧的待审查建议。
+  - `dream_runs`：记录每次 Dream Worker 运行，避免 scheduled real-run 重复执行。
+  - `memory_decisions`：记录 Agent 自主整理动作、证据、快照和撤销状态。
 - 新增 Runtime 事件：
   - `episode.created`
   - `episode.updated`
@@ -54,24 +58,32 @@
   - `memory.review.created`
   - `memory.review.accepted`
   - `memory.review.rejected`
+  - `memory.decision.created`
+  - `memory.decision.applied`
+  - `memory.decision.skipped`
+  - `memory.decision.failed`
+  - `memory.decision.undone`
 - 新增统一记忆工具：
   - `memory_recall`：统一回忆入口。
   - `memory_remember`：写入类人记忆。
   - `memory_plan`：管理未来计划和待办。
   - `memory_evidence`：查看记忆或 episode 的证据来源。
-  - `memory_reflect`：生成程序记忆/反思记忆的待审查建议。
+  - `memory_reflect`：保留旧接口，仍可生成程序记忆/反思记忆的兼容审查建议。
 - task 完成后自动生成 episode。
 - `memory_recall` 支持按 intent 回忆 semantic、episodic、procedural、prospective、reflective、social。
-- dream worker 支持手动 dry-run、每日摘要、确定性去重和串行执行。
-- Memory Panel 增加长期记忆、经历、待审查、梦整理四个视图。
-- Runtime Panel 增加 episode、dream、review 事件中文展示。
+- dream worker 支持手动 dry-run、手动真实整理、每日 `03:30 Asia/Shanghai` 自动调度、启动后补跑、每日摘要、确定性去重、偏好冲突轨迹合并和串行执行。
+- 确定重复会自动停用重复项，并生成 `exact_dedupe` decision。
+- 明确偏好冲突会自动写成变化轨迹，并把旧记忆标记为 `superseded`。
+- 反复 episode 命中明确模式时，可自动沉淀 procedural / reflective memory；证据不足则跳过。
+- Memory Panel 增加长期记忆、经历、整理记录、梦整理四个视图。
+- Runtime Panel 增加 episode、dream、review、memory decision 事件中文展示。
 
 ## 未完成范围
 
-- dream worker 还没有接入每日 `03:30 Asia/Shanghai` 自动调度。
 - memory strength 强化/衰减还没有落库到 active memory metadata。
-- repeated episodes 自动提炼 procedural / reflective review item 还只是后续任务。
-- review item 接受后目前只更新审查状态，复杂合并/冲突应用仍需要下一阶段实现。
+- procedural / reflective 目前只实现了少量确定性模式，后续需要引入更稳的模型判断和证据评分。
+- 近似语义合并 `semantic_merge` 目前有 schema 和撤销闭环，尚未接入模型自动应用。
+- 自然语言撤销某条记忆还没接主 Agent 工具链，本阶段先提供 UI/API 撤销。
 - Chrome DevTools MCP 验收矩阵已经写入文档，但还没有完整自动执行。
 
 ## 验收反馈记录
@@ -137,14 +149,19 @@
 
 ### Task 6: Dream Worker v1
 
-- 默认每天 `03:30 Asia/Shanghai` 运行。
+- 默认每天 `03:30 Asia/Shanghai` 运行，服务启动后每分钟检查一次。
+- 如果服务在 03:30 后启动且当天没有完成过 scheduled real-run，则补跑一次。
+- `DREAM_SCHEDULER_ENABLED=false` 可以关闭进程内调度。
 - 支持手动 dry-run。
+- 支持手动真实整理，前端保留二次确认。
 - 串行运行。
 - 自动执行：
   - daily summary
   - deterministic dedupe
-  - memory strength reinforcement / decay
-- 高风险操作生成 review item。
+  - explicit preference conflict update
+  - limited procedural / reflective extraction
+- 每次自动应用都写入 memory decision，保存 before/after 快照并支持撤销。
+- 证据不足时记录 skipped decision 或不创建 decision，不再打断用户审批。
 
 ### Task 7: Light UI
 
@@ -152,9 +169,47 @@
   - kind 过滤
   - episodes
   - prospective 待办
-  - review items
-  - dream dry-run
+  - memory decisions 整理记录
+  - dream dry-run / real-run
+  - dream run history
+  - undo applied decision
 - Runtime Panel 展示新增事件。
+
+## 2026-05-09 自主记忆整理闭环更新
+
+本次把旧的“Review Item 人工审批”改为“Memory Decision 自主整理”。术语说明：
+
+- `Memory Decision`：Agent 对记忆做出的整理决定，比如停用重复项、合并变化轨迹、跳过低置信建议。
+- `审计`：把这次整理为什么发生、改了哪些记忆、改前改后是什么都记录下来。
+- `撤销`：根据 before snapshot 恢复旧状态，并把自动新建的记忆标记为 inactive。
+
+新增后端模块：
+
+- `src/memory/dream-run-store.ts`：保存 dream run 运行记录。
+- `src/memory/decision-store.ts`：保存 memory decision，并提供 undo。
+- `src/memory/dream-scheduler.ts`：进程内自动调度，每分钟检查是否需要 scheduled real-run。
+
+新增 API：
+
+- `GET /api/memory/dream/runs`
+- `GET /api/memory/decisions`
+- `POST /api/memory/decisions/:id/undo`
+- `POST /api/memory/dream/run` 继续保留，支持 dry-run 和 real-run。
+
+前端变化：
+
+- `待审查` 标签改为 `整理记录`。
+- Dream tab 同时提供 `dry-run` 和 `真实整理`。
+- 整理记录展示 applied / skipped / failed / undone，并允许撤销 applied decision。
+
+验证结果：
+
+```bash
+bun test
+bun run typecheck
+bun run lint
+cd web && bun run build
+```
 
 ## Chrome DevTools MCP Acceptance Matrix
 

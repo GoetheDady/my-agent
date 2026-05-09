@@ -10,7 +10,8 @@ import {
 } from "../memory/store";
 import { extractMemories } from "../memory/memory";
 import { dedupeActiveMemories } from "../memory/dedupe";
-import { listDailySummaries, runDreamWorker } from "../memory/dream-worker";
+import { listDailySummaries, listDreamRuns, runDreamWorker } from "../memory/dream-worker";
+import { listMemoryDecisions, undoMemoryDecision } from "../memory/decision-store";
 import { searchEpisodes } from "../memory/episode-store";
 import { listReviewItems, updateReviewStatus } from "../memory/review-store";
 import { appendEvent } from "../events/event-log";
@@ -38,6 +39,33 @@ app.get("/daily-summaries", (c) => {
   const agentId = c.req.query("agentId") ?? "default";
   const limit = parseInt(c.req.query("limit") ?? "7", 10);
   return c.json({ summaries: listDailySummaries({ agentId, limit }) });
+});
+
+// GET /api/memory/dream/runs
+app.get("/dream/runs", (c) => {
+  const agentId = c.req.query("agentId") ?? "default";
+  const limit = parseInt(c.req.query("limit") ?? "20", 10);
+  return c.json({ runs: listDreamRuns({ agentId, limit }) });
+});
+
+// GET /api/memory/decisions
+app.get("/decisions", (c) => {
+  const agentId = c.req.query("agentId") ?? "default";
+  const status = c.req.query("status") as "applied" | "skipped" | "failed" | "undone" | undefined;
+  const limit = parseInt(c.req.query("limit") ?? "30", 10);
+  return c.json({ decisions: listMemoryDecisions({ agentId, status, limit }) });
+});
+
+// POST /api/memory/decisions/:id/undo
+app.post("/decisions/:id/undo", async (c) => {
+  try {
+    const result = await undoMemoryDecision(c.req.param("id"));
+    if (!result.decision) return c.json({ error: "memory decision 不存在" }, 404);
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 409);
+  }
 });
 
 // GET /api/memory/reviews
@@ -68,12 +96,14 @@ app.post("/dream/run", async (c) => {
     agentId?: string;
     date?: string;
     dryRun?: boolean;
+    trigger?: "manual" | "scheduled";
   };
   try {
     const result = await runDreamWorker({
       agentId: body.agentId ?? "default",
       date: body.date,
       dryRun: body.dryRun ?? true,
+      trigger: body.trigger ?? "manual",
     });
     return c.json(result);
   } catch (error) {

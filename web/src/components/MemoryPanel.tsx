@@ -18,12 +18,13 @@ import {
   Check,
   Ban,
   RefreshCw,
+  Undo2,
   ClipboardList,
   Route,
   UserRound,
 } from "lucide-react";
 import { useMemoryStore } from "../store/memoryStore";
-import type { MemoryItem, MemoryReviewItem } from "../store/memoryStore";
+import type { MemoryDecisionItem, MemoryItem } from "../store/memoryStore";
 
 const TYPE_CONFIG: Record<string, { label: string; icon: LucideIcon; color: string }> = {
   fact: { label: "事实", icon: BookOpen, color: "text-blue-700" },
@@ -51,7 +52,7 @@ const TYPE_TABS = [
 const SECTION_TABS = [
   { key: "memories", label: "长期记忆", icon: Brain },
   { key: "episodes", label: "经历", icon: History },
-  { key: "reviews", label: "待审查", icon: ShieldQuestion },
+  { key: "decisions", label: "整理记录", icon: ShieldQuestion },
   { key: "dream", label: "梦整理", icon: Sparkles },
 ] as const;
 
@@ -67,7 +68,8 @@ export default function MemoryPanel({ onClose }: Props) {
     stats,
     episodes,
     dailySummaries,
-    reviewItems,
+    memoryDecisions,
+    dreamRuns,
     dreamResult,
     loading,
     detailsLoading,
@@ -85,8 +87,8 @@ export default function MemoryPanel({ onClose }: Props) {
     updateMemory,
     addMemory,
     runDreamDryRun,
-    acceptReviewItem,
-    rejectReviewItem,
+    runDreamRealRun,
+    undoMemoryDecision,
   } = useMemoryStore();
 
   const [section, setSection] = useState<SectionKey>("memories");
@@ -156,9 +158,15 @@ export default function MemoryPanel({ onClose }: Props) {
     }
   }, [addContent, addType, addMemory]);
 
+  const handleRunDreamRealRun = useCallback(() => {
+    const confirmed = window.confirm("真实整理会自动改写本地长期记忆，但可在整理记录里撤销。确认运行吗？");
+    if (confirmed) void runDreamRealRun();
+  }, [runDreamRealRun]);
+
   const totalPages = Math.ceil(total / pageSize);
   const activeCount = stats?.byStatus.active ?? total;
-  const pendingReviewCount = reviewItems.filter((item) => item.status === "pending").length;
+  const appliedDecisionCount = memoryDecisions.filter((item) => item.status === "applied").length;
+  const skippedDecisionCount = memoryDecisions.filter((item) => item.status === "skipped").length;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -168,7 +176,7 @@ export default function MemoryPanel({ onClose }: Props) {
           <div>
             <h2 className="text-lg font-semibold text-[var(--color-text)]">记忆管理</h2>
             <p className="mt-0.5 text-xs text-[var(--color-text-soft)]">
-              长期记忆、经历、审查建议和梦整理
+              长期记忆、经历、自动整理记录和梦整理
             </p>
           </div>
           <button
@@ -266,20 +274,20 @@ export default function MemoryPanel({ onClose }: Props) {
           </div>
         )}
 
-        {section === "reviews" && (
+        {section === "decisions" && (
           <div className="flex-1 overflow-y-auto px-4 py-4">
             <div className="mb-3 rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
-              待审查建议用于高风险记忆变更，例如冲突处理、近似合并和经验提炼。当前待审查 {pendingReviewCount} 条。
+              Agent 会自主整理记忆。这里保留每次整理的原因、依据和变更结果，发现判断错误时可以撤销。
+              当前已应用 {appliedDecisionCount} 条，已跳过 {skippedDecisionCount} 条。
             </div>
-            {detailsLoading && reviewItems.length === 0 && <EmptyState text="建议加载中..." />}
-            {!detailsLoading && reviewItems.length === 0 && <EmptyState text="暂无待审查建议" />}
+            {detailsLoading && memoryDecisions.length === 0 && <EmptyState text="整理记录加载中..." />}
+            {!detailsLoading && memoryDecisions.length === 0 && <EmptyState text="暂无整理记录" />}
             <div className="flex flex-col gap-3">
-              {reviewItems.map((item) => (
-                <ReviewCard
+              {memoryDecisions.map((item) => (
+                <DecisionCard
                   key={item.id}
                   item={item}
-                  onAccept={acceptReviewItem}
-                  onReject={rejectReviewItem}
+                  onUndo={undoMemoryDecision}
                 />
               ))}
             </div>
@@ -288,31 +296,41 @@ export default function MemoryPanel({ onClose }: Props) {
 
         {section === "dream" && (
           <div className="flex-1 overflow-y-auto px-4 py-4">
-            <div className="mb-4 flex items-center justify-between rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] p-4">
+            <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] p-4">
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
                   <Sparkles size={16} className="text-[var(--color-accent)]" />
-                  梦整理试运行
+                  梦整理
                 </div>
                 <p className="mt-1 text-xs text-[var(--color-text-soft)]">
-                  汇总当天经历、做确定性去重，并展示待审查数量；试运行不会改写长期记忆。
+                  dry-run 只预览；真实运行会自动应用高置信整理，并在整理记录里保留撤销入口。
                 </p>
               </div>
-              <button
-                onClick={runDreamDryRun}
-                disabled={dreamLoading}
-                className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw size={14} className={dreamLoading ? "animate-spin" : ""} />
-                {dreamLoading ? "运行中" : "运行"}
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  onClick={runDreamDryRun}
+                  disabled={dreamLoading}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={dreamLoading ? "animate-spin" : ""} />
+                  {dreamLoading ? "运行中" : "dry-run"}
+                </button>
+                <button
+                  onClick={handleRunDreamRealRun}
+                  disabled={dreamLoading}
+                  className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Sparkles size={14} />
+                  真实整理
+                </button>
+              </div>
             </div>
 
             {dreamResult && (
               <div className="mb-4 rounded-xl border border-[var(--color-border-soft)] bg-white p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
                   <CalendarDays size={15} className="text-[var(--color-accent)]" />
-                  {dreamResult.date} 试运行结果
+                  {dreamResult.date} {dreamResult.dryRun ? "dry-run" : "真实整理"}结果
                 </div>
                 <p className="mt-3 text-sm leading-relaxed text-[var(--color-text)]">
                   {dreamResult.summary.summary}
@@ -320,10 +338,27 @@ export default function MemoryPanel({ onClose }: Props) {
                 <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                   <Metric label="经历数" value={dreamResult.summary.episode_ids.length} />
                   <Metric label="重复组" value={dreamResult.dedupe.duplicateGroups.length} />
-                  <Metric label="待审查" value={dreamResult.pendingReviewCount} />
+                  <Metric label="整理决策" value={dreamResult.decisionCount} />
                 </div>
               </div>
             )}
+
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-soft)]">
+              运行历史
+            </div>
+            {dreamRuns.length === 0 && <EmptyState text="暂无运行记录" />}
+            <div className="mb-4 flex flex-col gap-2">
+              {dreamRuns.slice(0, 5).map((run) => (
+                <div key={run.id} className="flex items-center justify-between rounded-lg border border-[var(--color-border-soft)] bg-white px-3 py-2 text-xs">
+                  <div className="text-[var(--color-text)]">
+                    {run.date} · {run.trigger === "scheduled" ? "自动" : "手动"} · {run.dry_run ? "dry-run" : "真实整理"}
+                  </div>
+                  <span className="rounded-md bg-[var(--color-surface-subtle)] px-2 py-1 text-[var(--color-text-muted)]">
+                    {getDreamRunStatusLabel(run.status)}
+                  </span>
+                </div>
+              ))}
+            </div>
 
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-soft)]">
               已保存每日总结
@@ -553,12 +588,13 @@ function MemoriesSection(props: {
   );
 }
 
-function ReviewCard(props: {
-  item: MemoryReviewItem;
-  onAccept: (id: string) => Promise<void>;
-  onReject: (id: string) => Promise<void>;
+function DecisionCard(props: {
+  item: MemoryDecisionItem;
+  onUndo: (id: string) => Promise<void>;
 }) {
   const { item } = props;
+  const status = getDecisionStatusLabel(item.status);
+  const StatusIcon = item.status === "applied" ? Check : Ban;
   return (
     <div className="rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] p-4">
       <div className="flex items-start justify-between gap-3">
@@ -568,36 +604,49 @@ function ReviewCard(props: {
             <h3 className="text-sm font-semibold text-[var(--color-text)]">{item.title}</h3>
           </div>
           <div className="mt-1 text-xs text-[var(--color-text-soft)]">
-            {getReviewTypeLabel(item.type)} · 置信度 {(item.confidence * 100).toFixed(0)}% · {formatDateTime(item.created_at)}
+            {getDecisionTypeLabel(item.type)} · 置信度 {(item.confidence * 100).toFixed(0)}% · {formatDateTime(item.created_at)}
           </div>
         </div>
-        <span className="rounded-md bg-white px-2 py-1 text-xs text-[var(--color-text-muted)] shadow-sm">
-          {getReviewStatusLabel(item.status)}
+        <span className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs text-[var(--color-text-muted)] shadow-sm">
+          <StatusIcon size={12} />
+          {status}
         </span>
       </div>
       <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text)]">
-        {item.proposed_content}
+        {item.reason || "Agent 已记录本次整理动作。"}
       </p>
-      {item.reason && (
-        <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
-          原因：{item.reason}
+      {(item.target_memory_ids.length > 0 || item.created_memory_ids.length > 0) && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--color-text-muted)]">
+          {item.target_memory_ids.slice(0, 4).map((id) => (
+            <span key={id} className="rounded-md bg-white px-2 py-1 shadow-sm">
+              目标：{shortId(id)}
+            </span>
+          ))}
+          {item.created_memory_ids.slice(0, 4).map((id) => (
+            <span key={id} className="rounded-md bg-white px-2 py-1 shadow-sm">
+              新建：{shortId(id)}
+            </span>
+          ))}
+        </div>
+      )}
+      {item.after_snapshot.length > 0 && (
+        <div className="mt-3 rounded-lg bg-white px-3 py-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
+          {summarizeDecisionSnapshots(item)}
+        </div>
+      )}
+      {item.error && (
+        <p className="mt-2 text-xs leading-relaxed text-[var(--color-danger)]">
+          错误：{item.error}
         </p>
       )}
-      {item.status === "pending" && (
+      {item.status === "applied" && (
         <div className="mt-3 flex justify-end gap-2">
           <button
-            onClick={() => props.onReject(item.id)}
-            className="flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-danger)]"
+            onClick={() => props.onUndo(item.id)}
+            className="flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors hover:text-[var(--color-danger)]"
           >
-            <Ban size={13} />
-            拒绝
-          </button>
-          <button
-            onClick={() => props.onAccept(item.id)}
-            className="flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-strong)]"
-          >
-            <Check size={13} />
-            接受
+            <Undo2 size={13} />
+            撤销
           </button>
         </div>
       )}
@@ -679,22 +728,53 @@ function formatDateTime(timestamp: number) {
   return new Date(timestamp).toLocaleString();
 }
 
-function getReviewTypeLabel(type: string) {
+function shortId(id: string) {
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+function summarizeDecisionSnapshots(item: MemoryDecisionItem) {
+  if (item.type === "exact_dedupe") {
+    const inactive = item.after_snapshot.filter((snapshot) => snapshot.status === "inactive");
+    return inactive.length > 0
+      ? `已停用 ${inactive.length} 条重复记忆。`
+      : "未发现需要停用的重复记忆。";
+  }
+  if (item.type === "conflict_update") {
+    const superseded = item.after_snapshot.filter((snapshot) => snapshot.status === "superseded");
+    return superseded.length > 0
+      ? "已保留偏好变化轨迹，并把旧记忆标记为被替代。"
+      : "已更新冲突记忆。";
+  }
+  if (item.created_memory_ids.length > 0) return `已沉淀 ${item.created_memory_ids.length} 条新记忆。`;
+  return `涉及 ${item.after_snapshot.length} 条记忆。`;
+}
+
+function getDecisionTypeLabel(type: string) {
   const labels: Record<string, string> = {
-    merge: "近似合并",
-    semantic_update: "语义更新",
-    procedural_memory: "流程记忆",
-    conflict: "冲突处理",
-    reflective_memory: "反思记忆",
+    exact_dedupe: "确定去重",
+    semantic_merge: "语义合并",
+    conflict_update: "冲突更新",
+    procedural_extract: "流程沉淀",
+    reflective_extract: "复盘沉淀",
   };
   return labels[type] ?? type;
 }
 
-function getReviewStatusLabel(status: MemoryReviewItem["status"]) {
-  const labels: Record<MemoryReviewItem["status"], string> = {
-    pending: "待审查",
-    accepted: "已接受",
-    rejected: "已拒绝",
+function getDecisionStatusLabel(status: MemoryDecisionItem["status"]) {
+  const labels: Record<MemoryDecisionItem["status"], string> = {
+    applied: "已应用",
+    skipped: "已跳过",
+    failed: "失败",
+    undone: "已撤销",
+  };
+  return labels[status];
+}
+
+function getDreamRunStatusLabel(status: "running" | "completed" | "failed") {
+  const labels: Record<"running" | "completed" | "failed", string> = {
+    running: "运行中",
+    completed: "完成",
+    failed: "失败",
   };
   return labels[status];
 }

@@ -21,6 +21,15 @@ export interface Memory {
   embedding_dim: number;
 }
 
+export interface MemorySnapshotRestore {
+  id: string;
+  content: string;
+  memory_type: string;
+  status: string;
+  confidence: number;
+  updated_at?: number;
+}
+
 const USER_ID = "default";
 const AGENT_ID = "";
 const TABLE_NAME = "memories";
@@ -162,6 +171,31 @@ export async function updateMemory(id: string, content: string): Promise<Memory 
   };
 
   await table.delete(`id = '${id}'`);
+  await table.add([toRecord(updated)]);
+  return updated;
+}
+
+export async function restoreMemorySnapshot(snapshot: MemorySnapshotRestore): Promise<Memory | null> {
+  const table = await getTable();
+  const rows = await table.query().where(`id = '${snapshot.id}'`).limit(1).toArray();
+  if (rows.length === 0) return null;
+
+  const existing = toMemory(rows[0] as unknown as Record<string, unknown>);
+  const embedding = await embedText(snapshot.content);
+  if (embedding.length === 0) return null;
+
+  const updated: Memory = {
+    ...existing,
+    content: snapshot.content,
+    memory_type: snapshot.memory_type,
+    status: snapshot.status,
+    confidence: snapshot.confidence,
+    embedding,
+    updated_at: snapshot.updated_at ?? Date.now(),
+    embedding_dim: embedding.length,
+  };
+
+  await table.delete(`id = '${snapshot.id}'`);
   await table.add([toRecord(updated)]);
   return updated;
 }

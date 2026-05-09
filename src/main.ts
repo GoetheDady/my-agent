@@ -9,9 +9,11 @@ import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
 import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
+import { startDreamScheduler } from "./memory/dream-scheduler";
 
 initializeRuntime();
 registerMemoryLifecycleHooks();
+startDreamScheduler();
 
 const app = new Hono();
 

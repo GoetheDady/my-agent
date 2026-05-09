@@ -183,6 +183,39 @@ describe("runtime database schema", () => {
         ["created_at", "INTEGER", 1, null, 0],
         ["reviewed_at", "INTEGER", 0, null, 0],
       ]);
+
+      expect(readTableColumns(db, "dream_runs")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["agent_id", "TEXT", 1, null, 0],
+        ["date", "TEXT", 1, null, 0],
+        ["timezone", "TEXT", 1, "'Asia/Shanghai'", 0],
+        ["trigger", "TEXT", 1, null, 0],
+        ["dry_run", "INTEGER", 1, "0", 0],
+        ["status", "TEXT", 1, null, 0],
+        ["started_at", "INTEGER", 1, null, 0],
+        ["completed_at", "INTEGER", 0, null, 0],
+        ["error", "TEXT", 0, null, 0],
+      ]);
+
+      expect(readTableColumns(db, "memory_decisions")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["agent_id", "TEXT", 1, null, 0],
+        ["dream_run_id", "TEXT", 0, null, 0],
+        ["type", "TEXT", 1, null, 0],
+        ["status", "TEXT", 1, null, 0],
+        ["title", "TEXT", 1, null, 0],
+        ["reason", "TEXT", 1, "''", 0],
+        ["confidence", "REAL", 1, "0.5", 0],
+        ["target_memory_ids", "TEXT", 1, "'[]'", 0],
+        ["created_memory_ids", "TEXT", 1, "'[]'", 0],
+        ["source_event_ids", "TEXT", 1, "'[]'", 0],
+        ["before_snapshot", "TEXT", 1, "'[]'", 0],
+        ["after_snapshot", "TEXT", 1, "'[]'", 0],
+        ["created_at", "INTEGER", 1, null, 0],
+        ["applied_at", "INTEGER", 0, null, 0],
+        ["undone_at", "INTEGER", 0, null, 0],
+        ["error", "TEXT", 0, null, 0],
+      ]);
     });
   });
 
@@ -220,6 +253,15 @@ describe("runtime database schema", () => {
       expect(readForeignKeys(db, "memory_review_items")).toEqual([
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
       ]);
+
+      expect(readForeignKeys(db, "dream_runs")).toEqual([
+        { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
+      ]);
+
+      expect(readForeignKeys(db, "memory_decisions")).toEqual([
+        { table: "dream_runs", from: "dream_run_id", to: "id", on_delete: "NO ACTION" },
+        { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
+      ]);
     });
   });
 
@@ -251,6 +293,25 @@ describe("runtime database schema", () => {
         "status",
         "created_at",
       ]);
+      expect(readIndexColumns(db, "idx_dream_runs_agent_date")).toEqual([
+        "agent_id",
+        "date",
+        "trigger",
+        "dry_run",
+        "status",
+      ]);
+      expect(readIndexColumns(db, "idx_dream_runs_scheduled_completed")).toEqual([
+        "agent_id",
+        "date",
+        "trigger",
+        "dry_run",
+      ]);
+      expect(readIndexColumns(db, "idx_memory_decisions_agent_status")).toEqual([
+        "agent_id",
+        "status",
+        "created_at",
+      ]);
+      expect(readIndexColumns(db, "idx_memory_decisions_dream_run")).toEqual(["dream_run_id"]);
     });
   });
 });

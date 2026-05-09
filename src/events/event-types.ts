@@ -26,6 +26,11 @@ export type RuntimeEventType =
   | "dream.started"
   | "dream.completed"
   | "dream.failed"
+  | "memory.decision.created"
+  | "memory.decision.applied"
+  | "memory.decision.skipped"
+  | "memory.decision.failed"
+  | "memory.decision.undone"
   | "memory.review.created"
   | "memory.review.accepted"
   | "memory.review.rejected";

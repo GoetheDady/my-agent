@@ -181,6 +181,46 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS dream_runs (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+      trigger TEXT NOT NULL,
+      dry_run INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      error TEXT,
+      FOREIGN KEY (agent_id) REFERENCES agents(id)
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS memory_decisions (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      dream_run_id TEXT,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      title TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      target_memory_ids TEXT NOT NULL DEFAULT '[]',
+      created_memory_ids TEXT NOT NULL DEFAULT '[]',
+      source_event_ids TEXT NOT NULL DEFAULT '[]',
+      before_snapshot TEXT NOT NULL DEFAULT '[]',
+      after_snapshot TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      applied_at INTEGER,
+      undone_at INTEGER,
+      error TEXT,
+      FOREIGN KEY (agent_id) REFERENCES agents(id),
+      FOREIGN KEY (dream_run_id) REFERENCES dream_runs(id)
+    )
+  `);
+
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_tasks_agent_status ON tasks(agent_id, status, priority, created_at)`,
   );
@@ -196,6 +236,21 @@ export function initializeDatabaseSchema(database: Database): void {
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_memory_review_agent_status ON memory_review_items(agent_id, status, created_at)`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_dream_runs_agent_date ON dream_runs(agent_id, date, trigger, dry_run, status)`,
+  );
+  database.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_dream_runs_scheduled_completed
+     ON dream_runs(agent_id, date, trigger, dry_run)
+     WHERE trigger = 'scheduled' AND dry_run = 0 AND status = 'completed'`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_memory_decisions_agent_status
+     ON memory_decisions(agent_id, status, created_at)`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_memory_decisions_dream_run ON memory_decisions(dream_run_id)`,
   );
 }
 

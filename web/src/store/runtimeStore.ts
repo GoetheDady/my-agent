@@ -115,6 +115,41 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   const payload = payloadRecord(event);
 
   if (event.type.startsWith("memory.")) {
+    if (event.type === "memory.decision.created") {
+      return {
+        label: "记忆整理决策",
+        detail: getString(payload, "title") ?? getString(payload, "decisionId") ?? "memory.decision.created",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.decision.applied") {
+      return {
+        label: "记忆整理应用",
+        detail: getString(payload, "title") ?? getString(payload, "decisionId") ?? "memory.decision.applied",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.decision.skipped") {
+      return {
+        label: "记忆整理跳过",
+        detail: getString(payload, "reason") ?? getString(payload, "title") ?? "memory.decision.skipped",
+        tone: "memory",
+      };
+    }
+    if (event.type === "memory.decision.failed") {
+      return {
+        label: "记忆整理失败",
+        detail: getString(payload, "error") ?? getString(payload, "title") ?? "memory.decision.failed",
+        tone: "error",
+      };
+    }
+    if (event.type === "memory.decision.undone") {
+      return {
+        label: "记忆整理撤销",
+        detail: getString(payload, "title") ?? getString(payload, "decisionId") ?? "memory.decision.undone",
+        tone: "memory",
+      };
+    }
     if (event.type === "memory.review.created") {
       return {
         label: "审查建议创建",

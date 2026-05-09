@@ -1,11 +1,38 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
-import { dedupeActiveMemories, type MemoryDedupeStore } from "./dedupe";
+import { dedupeActiveMemories, type MemoryDedupeGroup, type MemoryDedupeStore } from "./dedupe";
+import {
+  captureMemorySnapshots,
+  createMemoryDecision,
+  listMemoryDecisions,
+  type MemoryDecisionMemoryStore,
+  type MemoryDecisionRecord,
+} from "./decision-store";
+import {
+  completeDreamRun,
+  createDreamRun,
+  failDreamRun,
+  listDreamRuns,
+  type DreamRunRecord,
+  type DreamRunTrigger,
+} from "./dream-run-store";
+import { findDuplicateMemoryContent } from "./duplicate";
 import { searchEpisodes } from "./episode-store";
 import { listReviewItems } from "./review-store";
+import {
+  addMemory,
+  getMemory,
+  listMemories,
+  restoreMemorySnapshot,
+  setMemoryStatus,
+  updateMemory,
+  type Memory,
+} from "./store";
 
 const DEFAULT_TIMEZONE = "Asia/Shanghai";
+
+export { listDreamRuns };
 
 export interface DailySummaryRecord {
   id: string;
@@ -38,10 +65,28 @@ interface DailySummaryRow {
 export interface DreamRunResult {
   dryRun: boolean;
   date: string;
+  dreamRun: DreamRunRecord;
   summary: DailySummaryRecord;
   dedupe: Awaited<ReturnType<typeof dedupeActiveMemories>>;
+  decisions: MemoryDecisionRecord[];
+  decisionCount: number;
   pendingReviewCount: number;
 }
+
+export interface DreamMemoryStore extends MemoryDedupeStore, MemoryDecisionMemoryStore {
+  listMemories: typeof listMemories;
+  addMemory: typeof addMemory;
+  updateMemory: typeof updateMemory;
+}
+
+const defaultMemoryStore: DreamMemoryStore = {
+  listMemories,
+  getMemory,
+  addMemory,
+  updateMemory,
+  setMemoryStatus,
+  restoreMemorySnapshot,
+};
 
 let running = false;
 
@@ -51,8 +96,10 @@ export async function runDreamWorker(
     date?: string;
     dryRun?: boolean;
     timezone?: string;
+    trigger?: DreamRunTrigger;
     database?: Database;
     dedupeStore?: MemoryDedupeStore;
+    memoryStore?: DreamMemoryStore;
   } = {},
 ): Promise<DreamRunResult> {
   if (running) throw new Error("Dream worker is already running");
@@ -63,18 +110,79 @@ export async function runDreamWorker(
   const timezone = options.timezone ?? DEFAULT_TIMEZONE;
   const date = options.date ?? dateKey(Date.now(), timezone);
   const dryRun = options.dryRun ?? false;
+  const trigger = options.trigger ?? "manual";
+  const memoryStore = options.memoryStore ?? defaultMemoryStore;
+  const dreamRun = createDreamRun({ agentId, date, timezone, trigger, dryRun }, database);
 
   appendEvent({
     agent_id: agentId,
     type: "dream.started",
-    payload: { date, dryRun, timezone },
+    payload: { date, dryRun, timezone, trigger, dreamRunId: dreamRun.id },
   }, database);
 
   try {
     const summary = upsertDailySummary({ agentId, date, timezone, dryRun }, database);
-    const dedupe = await dedupeActiveMemories({ dryRun, store: options.dedupeStore });
+    const dedupePreview = await dedupeActiveMemories({
+      dryRun: true,
+      store: options.dedupeStore ?? memoryStore,
+    });
+    const decisions = dryRun
+      ? []
+      : [
+        ...await applyExactDedupeDecisions({
+          agentId,
+          dreamRunId: dreamRun.id,
+          groups: dedupePreview.duplicateGroups,
+          database,
+          store: memoryStore,
+        }),
+        ...await applyConflictUpdateDecisions({
+          agentId,
+          dreamRunId: dreamRun.id,
+          database,
+          store: memoryStore,
+        }),
+        ...await applyEpisodeDerivedMemoryDecisions({
+          agentId,
+          dreamRunId: dreamRun.id,
+          date,
+          timezone,
+          database,
+          store: memoryStore,
+        }),
+      ];
+    const inactiveMemoryIds = decisions
+      .filter((decision) => decision.status === "applied")
+      .flatMap((decision) =>
+        decision.after_snapshot
+          .filter((snapshot) => snapshot.status === "inactive" || snapshot.status === "superseded")
+          .map((snapshot) => snapshot.id),
+      );
+    const dedupe = {
+      ...dedupePreview,
+      dryRun,
+      inactiveMemoryIds,
+    };
+    if (!dryRun && decisions.length > 0) {
+      summary.memory_change_ids = decisions.map((decision) => decision.id);
+      updateDailySummaryMemoryChanges(summary.id, summary.memory_change_ids, database);
+    }
     const pendingReviewCount = listReviewItems({ agentId, status: "pending", limit: 1000 }, database).length;
-    const result: DreamRunResult = { dryRun, date, summary, dedupe, pendingReviewCount };
+    const completedRun = completeDreamRun(dreamRun.id, database) ?? dreamRun;
+    const persistedDecisions = dryRun
+      ? []
+      : listMemoryDecisions({ agentId, limit: Math.max(decisions.length, 1) }, database)
+        .filter((decision) => decision.dream_run_id === dreamRun.id);
+    const result: DreamRunResult = {
+      dryRun,
+      date,
+      dreamRun: completedRun,
+      summary,
+      dedupe,
+      decisions: persistedDecisions,
+      decisionCount: persistedDecisions.length,
+      pendingReviewCount,
+    };
 
     appendEvent({
       agent_id: agentId,
@@ -82,23 +190,210 @@ export async function runDreamWorker(
       payload: {
         date,
         dryRun,
+        trigger,
+        dreamRunId: dreamRun.id,
         episodeCount: summary.episode_ids.length,
         duplicateGroupCount: dedupe.duplicateGroups.length,
-        pendingReviewCount,
+        decisionCount: persistedDecisions.length,
+        appliedDecisionCount: persistedDecisions.filter((decision) => decision.status === "applied").length,
+        skippedDecisionCount: persistedDecisions.filter((decision) => decision.status === "skipped").length,
       },
     }, database);
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    failDreamRun(dreamRun.id, message, database);
     appendEvent({
       agent_id: agentId,
       type: "dream.failed",
-      payload: { date, dryRun, error: message },
+      payload: { date, dryRun, trigger, dreamRunId: dreamRun.id, error: message },
     }, database);
     throw error;
   } finally {
     running = false;
   }
+}
+
+async function applyExactDedupeDecisions(input: {
+  agentId: string;
+  dreamRunId: string;
+  groups: MemoryDedupeGroup[];
+  database: Database;
+  store: DreamMemoryStore;
+}): Promise<MemoryDecisionRecord[]> {
+  const decisions: MemoryDecisionRecord[] = [];
+
+  for (const group of input.groups) {
+    const targetMemoryIds = [group.keptMemoryId, ...group.duplicateMemoryIds];
+    const beforeSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
+    if (beforeSnapshot.length !== targetMemoryIds.length) {
+      decisions.push(createMemoryDecision({
+        agentId: input.agentId,
+        dreamRunId: input.dreamRunId,
+        type: "exact_dedupe",
+        status: "skipped",
+        title: "跳过重复记忆整理",
+        reason: "部分目标记忆不存在，无法安全应用去重。",
+        confidence: 0.6,
+        targetMemoryIds,
+        beforeSnapshot,
+      }, input.database));
+      continue;
+    }
+
+    for (const duplicateId of group.duplicateMemoryIds) {
+      await input.store.setMemoryStatus(duplicateId, "inactive");
+    }
+    const afterSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
+    decisions.push(createMemoryDecision({
+      agentId: input.agentId,
+      dreamRunId: input.dreamRunId,
+      type: "exact_dedupe",
+      status: "applied",
+      title: "停用重复记忆",
+      reason: `确定为重复记忆，保留 ${group.keptMemoryId}，停用 ${group.duplicateMemoryIds.join("、")}。`,
+      confidence: 0.95,
+      targetMemoryIds,
+      beforeSnapshot,
+      afterSnapshot,
+    }, input.database));
+  }
+
+  return decisions;
+}
+
+async function applyConflictUpdateDecisions(input: {
+  agentId: string;
+  dreamRunId: string;
+  database: Database;
+  store: DreamMemoryStore;
+}): Promise<MemoryDecisionRecord[]> {
+  const { memories } = await input.store.listMemories({ status: "active", pageSize: 1000 });
+  const byObject = new Map<string, { memory: Memory; polarity: "positive" | "negative"; object: string }[]>();
+  for (const memory of memories) {
+    const fact = extractPreferenceFact(memory.content);
+    if (!fact) continue;
+    const group = byObject.get(fact.object) ?? [];
+    group.push({ memory, ...fact });
+    byObject.set(fact.object, group);
+  }
+
+  const decisions: MemoryDecisionRecord[] = [];
+  const usedMemoryIds = new Set<string>();
+  for (const facts of byObject.values()) {
+    const positives = facts.filter((fact) => fact.polarity === "positive");
+    const negatives = facts.filter((fact) => fact.polarity === "negative");
+    if (positives.length === 0 || negatives.length === 0) continue;
+
+    const sorted = [...facts].sort((a, b) =>
+      b.memory.updated_at - a.memory.updated_at
+      || b.memory.created_at - a.memory.created_at
+      || a.memory.id.localeCompare(b.memory.id),
+    );
+    const newest = sorted[0];
+    const previous = sorted.find((fact) => fact.polarity !== newest?.polarity);
+    if (!newest || !previous) continue;
+    if (usedMemoryIds.has(newest.memory.id) || usedMemoryIds.has(previous.memory.id)) continue;
+    usedMemoryIds.add(newest.memory.id);
+    usedMemoryIds.add(previous.memory.id);
+
+    const targetMemoryIds = [newest.memory.id, previous.memory.id];
+    const beforeSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
+    const nextContent = hasChangeTrace(newest.memory.content)
+      ? newest.memory.content
+      : `用户曾经${formatPreferenceFact(previous)}；现在明确表示${formatPreferenceFact(newest)}。`;
+    await input.store.updateMemory(newest.memory.id, nextContent);
+    await input.store.setMemoryStatus(previous.memory.id, "superseded");
+    const afterSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
+
+    decisions.push(createMemoryDecision({
+      agentId: input.agentId,
+      dreamRunId: input.dreamRunId,
+      type: "conflict_update",
+      status: "applied",
+      title: "合并偏好变化轨迹",
+      reason: "检测到同一对象的正反偏好冲突，自动保留变化轨迹并停用被覆盖的旧记忆。",
+      confidence: 0.85,
+      targetMemoryIds,
+      beforeSnapshot,
+      afterSnapshot,
+    }, input.database));
+  }
+
+  return decisions;
+}
+
+async function applyEpisodeDerivedMemoryDecisions(input: {
+  agentId: string;
+  dreamRunId: string;
+  date: string;
+  timezone: string;
+  database: Database;
+  store: DreamMemoryStore;
+}): Promise<MemoryDecisionRecord[]> {
+  const range = dayRange(input.date, input.timezone);
+  const episodes = searchEpisodes({
+    agentId: input.agentId,
+    from: range.from,
+    to: range.to,
+    limit: 100,
+  }, input.database);
+  const joined = episodes.map((episode) => `${episode.title}\n${episode.summary}\n${episode.outcome}`).join("\n");
+  if (episodes.length < 2 || joined.length === 0) return [];
+
+  const active = await input.store.listMemories({ status: "active", pageSize: 1000 });
+  const candidates = [
+    {
+      type: "procedural_extract" as const,
+      memoryType: "procedural",
+      content: "修改记忆系统时，应同步更新计划文档，并运行 bun test、bun run typecheck、bun run lint 做验证。",
+      matches: [/记忆系统/, /计划文档|文档/, /bun test|typecheck|lint|验证/],
+      title: "沉淀记忆系统修改流程",
+      reason: "多个 episode 反复出现记忆系统修改、计划文档同步和验证命令。",
+    },
+    {
+      type: "reflective_extract" as const,
+      memoryType: "reflective",
+      content: "记忆系统出现重复记忆时，不能只做整条文本去重；还要处理事实里包含偏好的拆分重复。",
+      matches: [/重复记忆|去重/, /偏好/, /事实/],
+      title: "沉淀重复记忆风险",
+      reason: "多个 episode 提到重复记忆、事实和偏好拆分问题。",
+    },
+  ];
+
+  const decisions: MemoryDecisionRecord[] = [];
+  for (const candidate of candidates) {
+    if (!candidate.matches.every((pattern) => pattern.test(joined))) continue;
+    if (findDuplicateMemoryContent(candidate.content, active.memories)) continue;
+
+    const saved = await input.store.addMemory({
+      content: candidate.content,
+      memory_type: candidate.memoryType,
+      status: "active",
+      confidence: 0.78,
+      source_text: JSON.stringify({
+        source: "dream_worker",
+        episodeIds: episodes.map((episode) => episode.id),
+      }),
+    });
+    if (!saved) continue;
+    active.memories.push(saved);
+    const afterSnapshot = await captureMemorySnapshots([saved.id], input.store);
+    decisions.push(createMemoryDecision({
+      agentId: input.agentId,
+      dreamRunId: input.dreamRunId,
+      type: candidate.type,
+      status: "applied",
+      title: candidate.title,
+      reason: candidate.reason,
+      confidence: 0.78,
+      createdMemoryIds: [saved.id],
+      sourceEventIds: episodes.flatMap((episode) => episode.source_event_ids),
+      afterSnapshot,
+    }, input.database));
+  }
+
+  return decisions;
 }
 
 export function getDailySummary(
@@ -209,6 +504,20 @@ function upsertDailySummary(
   return summary;
 }
 
+function updateDailySummaryMemoryChanges(
+  id: string,
+  memoryChangeIds: string[],
+  database: Database,
+): void {
+  database
+    .query(
+      `UPDATE daily_summaries
+       SET memory_change_ids = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(JSON.stringify(memoryChangeIds), Date.now(), id);
+}
+
 function toDailySummary(row: DailySummaryRow): DailySummaryRecord {
   return {
     ...row,
@@ -244,4 +553,45 @@ function dayRange(date: string, timezone: string): { from: number; to: number } 
   const from = new Date(`${date}T00:00:00.000${offset}`).getTime();
   const to = new Date(`${date}T23:59:59.999${offset}`).getTime();
   return { from, to };
+}
+
+function extractPreferenceFact(content: string): { polarity: "positive" | "negative"; object: string } | null {
+  const normalized = content
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[，。,.；;：:"“”'‘’、！!？?（）()【】[\]《》<>]/g, "");
+  const negativeMarkers = ["不喜欢", "不偏好", "不需要", "不想要", "讨厌"];
+  for (const marker of negativeMarkers) {
+    const index = normalized.lastIndexOf(marker);
+    if (index < 0) continue;
+    const object = cleanupPreferenceObject(normalized.slice(index + marker.length));
+    return object.length >= 2 ? { polarity: "negative", object } : null;
+  }
+
+  const positiveMarkers = ["喜欢", "偏好", "需要", "想要", "希望", "倾向"];
+  for (const marker of positiveMarkers) {
+    const index = normalized.lastIndexOf(marker);
+    if (index < 0) continue;
+    const previous = normalized[index - 1];
+    if (previous === "不" || previous === "没" || previous === "无" || previous === "無") continue;
+    const object = cleanupPreferenceObject(normalized.slice(index + marker.length));
+    return object.length >= 2 ? { polarity: "positive", object } : null;
+  }
+
+  return null;
+}
+
+function cleanupPreferenceObject(object: string): string {
+  return object
+    .replace(/^(用户|本人|我|现在|已经|明确表示|改为|变成|了)+/g, "")
+    .replace(/(了|。|\.|；|;)+$/g, "")
+    .slice(0, 40);
+}
+
+function hasChangeTrace(content: string): boolean {
+  return /(曾经|曾表示|以前).*(现在|改为|不再|不喜欢|变化)/.test(content);
+}
+
+function formatPreferenceFact(fact: { polarity: "positive" | "negative"; object: string }): string {
+  return `${fact.polarity === "positive" ? "喜欢" : "不喜欢"}${fact.object}`;
 }
