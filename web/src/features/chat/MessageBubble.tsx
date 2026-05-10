@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import MarkdownContent from "./MarkdownContent";
 import { Brain, CheckCircle2, ChevronDown, Clock3, Wrench, XCircle } from "lucide-react";
 import { ToolApprovalCard } from "./ToolApprovalCard";
-import { getNormalizedToolPart } from "../lib/toolPart";
+import { getNormalizedToolPart } from "../../lib/toolPart";
 
 interface MessagePart {
   type: string;

@@ -11,7 +11,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { useSessionStore } from "../store/sessionStore";
+import { useSessionStore } from "../../store/sessionStore";
 import {
   getCurrentTask,
   getQueuedTasks,
@@ -19,7 +19,7 @@ import {
   useRuntimeStore,
   type RuntimeAgentStatus,
   type RuntimeTask,
-} from "../store/runtimeStore";
+} from "../../store/runtimeStore";
 
 interface SessionSidebarProps {
   onLoadSession: (id: string) => Promise<void>;

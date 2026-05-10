@@ -9,7 +9,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 1. Backend `src/routes/chat.ts` emits `assistant.message.persisted` lifecycle hook after saving the assistant message.
 2. `src/memory/lifecycle-hooks.ts` listens for this hook and enqueues `MemoryExtractionWorker`.
 3. Worker extracts memories, injects synthetic `memory_extract`/`memory_reconsolidate` tool parts into the message content, and runs deduplication.
-4. Frontend `ChatView.tsx` polls for new tool parts via `startWorkerPolling` (no longer calls `triggerMemoryExtract`).
+4. Frontend `pages/ChatPage.tsx` polls for new tool parts via `startWorkerMessagePolling` (no longer calls `triggerMemoryExtract`).
 5. `chatStore` no longer has `memoryStatusMap` or `triggerMemoryExtract` — these were removed.
 
 ## Architecture: What CLAUDE.md Doesn't Cover
@@ -82,7 +82,9 @@ bun run build        # tsc -b && vite build → web/dist
 
 ## Frontend Conventions
 
-- **No React Router.** Single `App.tsx` → `ChatView.tsx`. Session "routing" is done via `window.history.pushState` and `getSessionIdFromPath()`.
+- **React Router is enabled.** `App.tsx` owns the route tree, `layouts/AppShell.tsx` owns the engineering-console shell, and route pages live in `web/src/pages/`.
+- **Frontend directory boundaries**: page-level route components go in `pages/`; shared layout goes in `layouts/`; feature-owned UI goes in `features/`; generic reusable UI goes in `components/common/`.
+- **Session routing**: chat uses `/` for a new conversation entry and `/sessions/:sessionId` for persisted sessions. Use `getSessionPath()` for session URLs.
 - **Zustand stores**: `chatStore` (sessionId, thinkingEnabled), `sessionStore` (session list CRUD), `memoryStore` (memory panel data), `runtimeStore` (agent status, task queue, events).
 - **Session creation must happen before first message.** Frontend `sessionStore.createSession()` → backend returns sessionId → stored in `chatStore.sessionId`.
 - **DB content format**: Messages stored as JSON string in `messages.content`. Use `parseDbContent(content, role)` to parse into typed blocks (text, reasoning, tool-*, memory_*).

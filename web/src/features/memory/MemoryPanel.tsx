@@ -23,8 +23,8 @@ import {
   Route,
   UserRound,
 } from "lucide-react";
-import { useMemoryStore } from "../store/memoryStore";
-import type { MemoryDecisionItem, MemoryItem } from "../store/memoryStore";
+import { useMemoryStore } from "../../store/memoryStore";
+import type { MemoryDecisionItem, MemoryItem } from "../../store/memoryStore";
 
 const TYPE_CONFIG: Record<string, { label: string; icon: LucideIcon; color: string }> = {
   fact: { label: "事实", icon: BookOpen, color: "text-blue-700" },
@@ -59,10 +59,11 @@ const SECTION_TABS = [
 type SectionKey = (typeof SECTION_TABS)[number]["key"];
 
 interface Props {
-  onClose: () => void;
+  onClose?: () => void;
+  variant?: "drawer" | "page";
 }
 
-export default function MemoryPanel({ onClose }: Props) {
+export default function MemoryPanel({ onClose, variant = "drawer" }: Props) {
   const {
     memories,
     stats,
@@ -168,24 +169,24 @@ export default function MemoryPanel({ onClose }: Props) {
   const appliedDecisionCount = memoryDecisions.filter((item) => item.status === "applied").length;
   const skippedDecisionCount = memoryDecisions.filter((item) => item.status === "skipped").length;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-[1px]" onClick={onClose} />
-      <div className="relative flex w-full max-w-3xl flex-col border-l border-[var(--color-border)] bg-white shadow-[var(--shadow-panel)]">
-        <div className="flex items-center justify-between border-b border-[var(--color-border-soft)] px-6 py-4">
+  const content = (
+    <>
+      <div className="flex items-center justify-between border-b border-[var(--color-border-soft)] px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-[var(--color-text)]">记忆管理</h2>
             <p className="mt-0.5 text-xs text-[var(--color-text-soft)]">
               长期记忆、经历、自动整理记录和梦整理
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
-            title="关闭"
-          >
-            <X size={20} />
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
+              title="关闭"
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
 
         <div className="flex gap-1 border-b border-[var(--color-border-soft)] px-4 py-2">
@@ -398,6 +399,22 @@ export default function MemoryPanel({ onClose }: Props) {
             onAdd={handleAdd}
           />
         )}
+    </>
+  );
+
+  if (variant === "page") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-[var(--color-border-soft)] bg-white shadow-sm">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-[1px]" onClick={onClose} />
+      <div className="relative flex w-full max-w-3xl flex-col border-l border-[var(--color-border)] bg-white shadow-[var(--shadow-panel)]">
+        {content}
       </div>
     </div>
   );
