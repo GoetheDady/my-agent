@@ -67,6 +67,7 @@ app.post("/", async (c) => {
         emitLifecycleHook({
           type: "assistant.message.persisted",
           agentId: task.agent_id,
+          userId: task.source_user_id,
           taskId: task.id,
           conversationId: task.conversation_id,
           sessionId: capturedSessionId,

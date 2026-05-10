@@ -46,7 +46,7 @@ describe("dream worker", () => {
         id: "task-dream",
         source_channel: "web",
         input: "实现人类式记忆计划",
-        created_at: new Date("2026-05-09T02:00:00.000Z").getTime(),
+        created_at: new Date("2026-05-08T18:00:00.000Z").getTime(),
       }, db);
       markTaskRunning(task.id, db);
       markTaskCompleted(task.id, "完成了 schema 和工具基础", db);
@@ -65,7 +65,7 @@ describe("dream worker", () => {
 
       const result = await runDreamWorker({
         database: db,
-        date: "2026-05-09",
+        date: dateKeyForTest(Date.now(), "Asia/Shanghai"),
         dryRun: true,
         dedupeStore,
       });
@@ -91,6 +91,7 @@ describe("dream worker", () => {
         date: "2026-05-09",
         dryRun: false,
         memoryStore: store,
+        profileSync: async () => ({ status: "skipped", applied: [] }),
       });
 
       expect(result.dedupe.duplicateGroups).toHaveLength(1);
@@ -115,11 +116,36 @@ describe("dream worker", () => {
         date: "2026-05-09",
         dryRun: false,
         memoryStore: store,
+        profileSync: async () => ({ status: "skipped", applied: [] }),
       });
 
       expect(result.decisions.map((decision) => decision.type)).toContain("conflict_update");
       expect(memories.get("new")?.content).toContain("曾经喜欢西红柿");
       expect(memories.get("old")?.status).toBe("superseded");
+    });
+  });
+
+  test("syncs active memories after dream decisions are applied", async () => {
+    await withDreamDb(async (db) => {
+      const memories = new Map<string, Memory>([
+        ["old", createMemory({ id: "old", content: "用户喜欢西红柿", updated_at: 1, created_at: 1 })],
+        ["new", createMemory({ id: "new", content: "用户不喜欢西红柿", updated_at: 2, created_at: 2 })],
+      ]);
+      const store = createMemoryStore(memories);
+      let syncedIds: string[] = [];
+
+      await runDreamWorker({
+        database: db,
+        date: "2026-05-09",
+        dryRun: false,
+        memoryStore: store,
+        profileSync: async (input) => {
+          syncedIds = input.memories.map((memory) => memory.id);
+          return { status: "completed", applied: [] };
+        },
+      });
+
+      expect(syncedIds).toEqual(["new"]);
     });
   });
 });
@@ -174,4 +200,13 @@ function createMemoryStore(memories: Map<string, Memory>): DreamMemoryStore {
       return restored;
     },
   };
+}
+
+function dateKeyForTest(timestamp: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(timestamp));
 }

@@ -2,6 +2,10 @@ import type { Database } from "bun:sqlite";
 import { generateText } from "ai";
 import { createDeepSeek, deepseek } from "@ai-sdk/deepseek";
 import {
+  syncProfileFromMemories,
+  type ProfileSyncPort,
+} from "../agents/profile-sync";
+import {
   appendAssistantToolPart,
   updateAssistantToolPart,
 } from "../channels/session-api";
@@ -35,6 +39,7 @@ const suspiciousMemoryPatterns = [
 
 export interface MemoryExtractionJob {
   agentId: string;
+  userId?: string;
   taskId: string;
   conversationId: string | null;
   sessionId: string;
@@ -88,6 +93,7 @@ export type MemoryChangePlanner = (input: {
 export interface MemoryExtractionWorkerOptions {
   planner?: MemoryChangePlanner;
   store?: MemoryWorkerStore;
+  profileSync?: ProfileSyncPort;
 }
 
 const defaultStore: MemoryWorkerStore = {
@@ -109,10 +115,12 @@ export class MemoryExtractionWorker {
   private running = false;
   private readonly planner: MemoryChangePlanner;
   private readonly store: MemoryWorkerStore;
+  private readonly profileSync: ProfileSyncPort;
 
   constructor(options: MemoryExtractionWorkerOptions = {}) {
     this.planner = options.planner ?? planMemoryChangesWithModel;
     this.store = options.store ?? defaultStore;
+    this.profileSync = options.profileSync ?? syncProfileFromMemories;
   }
 
   enqueue(job: MemoryExtractionJob): Promise<MemoryWorkerResult> {
@@ -198,10 +206,24 @@ export class MemoryExtractionWorker {
       }
       const retrievedMemories = await this.getRetrievedMemories(retrievedMemoryIds, autonomousSearch.memories);
       const plan = normalizePlan(await this.planner({ job, retrievedMemories, evidenceEventIds: allEvidenceEventIds }));
-      const addedMemoryIds = await this.applyNewMemories(job, plan.new_memories, retrievedMemories);
-      const updatedMemoryIds = await this.applyMemoryUpdates(plan.updates, new Set(retrievedMemoryIds));
+      const addedMemories = await this.applyNewMemories(job, plan.new_memories, retrievedMemories);
+      const updatedMemories = await this.applyMemoryUpdates(plan.updates, new Set(retrievedMemoryIds));
+      const addedMemoryIds = addedMemories.map((memory) => memory.id);
+      const updatedMemoryIds = updatedMemories.map((memory) => memory.id);
       const summary = plan.summary
         || buildSummary(addedMemoryIds.length, updatedMemoryIds.length);
+
+      await this.syncProfileSafely({
+        agentId: job.agentId,
+        userId: job.userId ?? "default",
+        taskId: job.taskId,
+        conversationId: job.conversationId,
+        database,
+        source: "memory_worker",
+        memories: [...addedMemories, ...updatedMemories],
+        reason: summary,
+        sourceEventIds: allEvidenceEventIds,
+      });
 
       updateAssistantToolPart(
         job.assistantMessageId,
@@ -308,6 +330,24 @@ export class MemoryExtractionWorker {
     return memories;
   }
 
+  private async syncProfileSafely(input: Parameters<ProfileSyncPort>[0]): Promise<void> {
+    try {
+      await this.profileSync(input);
+    } catch (error) {
+      appendEvent({
+        agent_id: input.agentId ?? "default",
+        task_id: input.taskId ?? null,
+        conversation_id: input.conversationId ?? null,
+        type: "profile.sync.failed",
+        payload: {
+          source: input.source,
+          memoryIds: input.memories.map((memory) => memory.id),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      }, input.database);
+    }
+  }
+
   private async searchRelatedMemories(
     job: MemoryExtractionJob,
     database: Database,
@@ -335,9 +375,9 @@ export class MemoryExtractionWorker {
     job: MemoryExtractionJob,
     memories: PlannedNewMemory[],
     retrievedMemories: Memory[],
-  ): Promise<string[]> {
-    const ids: string[] = [];
-    if (memories.length === 0) return ids;
+  ): Promise<Memory[]> {
+    const savedMemories: Memory[] = [];
+    if (memories.length === 0) return savedMemories;
 
     const knownActiveMemories = await this.getKnownActiveMemories(retrievedMemories);
     for (const memory of memories) {
@@ -355,11 +395,11 @@ export class MemoryExtractionWorker {
         status: "active",
       });
       if (saved) {
-        ids.push(saved.id);
+        savedMemories.push(saved);
         knownActiveMemories.push(saved);
       }
     }
-    return ids;
+    return savedMemories;
   }
 
   private async getKnownActiveMemories(retrievedMemories: Memory[]): Promise<Memory[]> {
@@ -376,17 +416,17 @@ export class MemoryExtractionWorker {
     return Array.from(byId.values());
   }
 
-  private async applyMemoryUpdates(updates: PlannedMemoryUpdate[], allowedIds: Set<string>): Promise<string[]> {
-    const ids: string[] = [];
+  private async applyMemoryUpdates(updates: PlannedMemoryUpdate[], allowedIds: Set<string>): Promise<Memory[]> {
+    const updatedMemories: Memory[] = [];
     for (const update of updates) {
       if (!allowedIds.has(update.memory_id)) continue;
       const content = update.content.trim();
       const confidence = update.confidence ?? 0.8;
       if (!isAllowedMemoryContent(content, confidence)) continue;
       const saved = await this.store.updateMemory(update.memory_id, content);
-      if (saved) ids.push(saved.id);
+      if (saved) updatedMemories.push(saved);
     }
-    return ids;
+    return updatedMemories;
   }
 }
 

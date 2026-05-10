@@ -153,7 +153,7 @@ describe("human memory tools", () => {
 
       const remembered = await memoryRemember(
         { content: "修改记忆系统后要同步计划文档", kind: "procedural" },
-        { store },
+        { store, profileSync: async () => ({ status: "skipped", applied: [] }) },
       );
       const review = memoryReflect({
         title: "重复记忆风险",
@@ -165,5 +165,34 @@ describe("human memory tools", () => {
       expect(review.reviewItem.status).toBe("pending");
       expect(evidence.source).toEqual({ reason: "test" });
     });
+  });
+
+  test("memoryRemember sends saved active memory to profile sync", async () => {
+    let syncedContent = "";
+    const store: HumanMemoryStorePort = {
+      searchMemories: async () => [],
+      listMemories: async () => ({ memories: [], total: 0 }),
+      getMemory: async () => null,
+      addMemory: async (params) => createMemory({
+        id: "identity",
+        memory_type: params.memory_type,
+        content: params.content,
+      }),
+      setMemoryStatus: async () => null,
+    };
+
+    const result = await memoryRemember(
+      { content: "用户名字叫张三", kind: "identity" },
+      {
+        store,
+        profileSync: async (input) => {
+          syncedContent = input.memories[0]?.content ?? "";
+          return { status: "completed", applied: [] };
+        },
+      },
+    );
+
+    expect(result.memory?.id).toBe("identity");
+    expect(syncedContent).toBe("用户名字叫张三");
   });
 });

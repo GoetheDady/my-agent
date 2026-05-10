@@ -88,6 +88,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async () => ({
         new_memories: [{ content: "用户正在开发自己的 agent runtime", memory_type: "project" }],
         updates: [],
@@ -144,6 +145,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async () => ({
         new_memories: [],
         updates: [{
@@ -197,6 +199,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async ({ retrievedMemories }) => {
         plannerSawOldMemory = retrievedMemories.some((memory) => memory.id === "memory-old");
         return {
@@ -250,6 +253,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async () => ({
         new_memories: [
           { content: "用户偏好浅色 UI", confidence: 0.95 },
@@ -304,6 +308,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async () => ({
         new_memories: [{
           content: "用户偏好浅色、舒服、密度适中的 Web UI。",
@@ -340,6 +345,55 @@ describe("memory extraction worker", () => {
     }
   });
 
+  test("runs profile sync after memory changes without adding chat tool cards", async () => {
+    const { db, session, task, assistantMessage } = createWorkerDb();
+    let syncedContents: string[] = [];
+    const store: MemoryWorkerStore = {
+      addMemory: async (params) => createMemory({
+        id: "identity-memory",
+        content: params.content,
+        memory_type: params.memory_type,
+        status: params.status,
+      }),
+      getMemory: async () => null,
+      listMemories: async () => ({ memories: [], total: 0 }),
+      searchMemories: async () => [],
+      updateMemory: async () => null,
+    };
+    const worker = new MemoryExtractionWorker({
+      store,
+      profileSync: async (input) => {
+        syncedContents = input.memories.map((memory) => memory.content);
+        return { status: "completed", applied: [] };
+      },
+      planner: async () => ({
+        new_memories: [{ content: "用户名字叫张三", memory_type: "identity", confidence: 0.95 }],
+        updates: [],
+        summary: "新增身份记忆",
+      }),
+    });
+
+    try {
+      const result = await worker.enqueue({
+        agentId: "default",
+        taskId: task.id,
+        conversationId: session.id,
+        sessionId: session.id,
+        assistantMessageId: assistantMessage.id,
+        userText: "请记住：我叫张三",
+        assistantText: "记住了",
+        database: db,
+      });
+
+      expect(result.addedMemoryIds).toEqual(["identity-memory"]);
+      expect(syncedContents).toEqual(["用户名字叫张三"]);
+      const parts = parseAssistantParts(db, assistantMessage.id);
+      expect(parts.some((part) => part.type === "tool-profile_sync")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   test("processes queued jobs serially", async () => {
     const first = createWorkerDb();
     const second = createWorkerDb();
@@ -354,6 +408,7 @@ describe("memory extraction worker", () => {
     };
     const worker = new MemoryExtractionWorker({
       store,
+      profileSync: async () => ({ status: "skipped", applied: [] }),
       planner: async () => {
         active += 1;
         maxActive = Math.max(maxActive, active);

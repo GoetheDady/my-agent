@@ -166,5 +166,19 @@ describe("runtimeStore", () => {
       detail: "3",
       tone: "memory",
     });
+    expect(getRuntimeEventView({
+      id: "event-profile",
+      agent_id: "default",
+      task_id: null,
+      conversation_id: null,
+      type: "profile.sync.completed",
+      payload: JSON.stringify({ reason: "新增身份记忆" }),
+      payloadJson: { reason: "新增身份记忆" },
+      created_at: 60,
+    })).toMatchObject({
+      label: "认知文件同步完成",
+      detail: "新增身份记忆",
+      tone: "memory",
+    });
   });
 });

@@ -168,9 +168,10 @@ describe("memory tools", () => {
         id: "memory-active-1",
         status: "active",
       });
-      const [event] = listAgentEvents("default", 1, db);
-      expect(event.type).toBe("memory.propose");
-      expect(JSON.parse(event.payload)).toMatchObject({
+      const event = listAgentEvents("default", 10, db).find((item) => item.type === "memory.propose");
+      expect(event).toBeDefined();
+      expect(event!.type).toBe("memory.propose");
+      expect(JSON.parse(event!.payload)).toMatchObject({
         memoryId: "memory-active-1",
         evidenceEventIds: ["event-1"],
       });
@@ -209,8 +210,9 @@ describe("memory tools", () => {
 
       expect(addCalls).toBe(0);
       expect(result.memory).toMatchObject({ id: "existing-active" });
-      const [event] = listAgentEvents("default", 1, db);
-      expect(JSON.parse(event.payload)).toMatchObject({
+      const event = listAgentEvents("default", 10, db).find((item) => item.type === "memory.propose");
+      expect(event).toBeDefined();
+      expect(JSON.parse(event!.payload)).toMatchObject({
         memoryId: "existing-active",
         skippedDuplicate: true,
         duplicateOfMemoryId: "existing-active",
@@ -240,9 +242,10 @@ describe("memory tools", () => {
       );
 
       expect(result.memory?.content).toBe("用户偏好浅色、密度适中的 UI");
-      const [event] = listAgentEvents("default", 1, db);
-      expect(event.type).toBe("memory.update");
-      expect(JSON.parse(event.payload)).toMatchObject({
+      const event = listAgentEvents("default", 10, db).find((item) => item.type === "memory.update");
+      expect(event).toBeDefined();
+      expect(event!.type).toBe("memory.update");
+      expect(JSON.parse(event!.payload)).toMatchObject({
         memoryId: "memory-1",
         evidenceEventIds: ["event-2", "event-3"],
       });

@@ -1,6 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "ai";
 import { z } from "zod";
+import {
+  syncProfileFromMemories,
+  type ProfileSyncPort,
+} from "../agents/profile-sync";
 import { appendEvent } from "../events/event-log";
 import {
   addMemory,
@@ -28,6 +32,7 @@ export interface MemoryToolContext {
   conversationId?: string | null;
   database?: Database;
   store?: MemoryStorePort;
+  profileSync?: ProfileSyncPort;
 }
 
 const defaultStore: MemoryStorePort = {
@@ -155,6 +160,20 @@ export async function memoryPropose(
     },
   }, context.database);
 
+  if (memory && !duplicate) {
+    await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
+      agentId: context.agentId ?? "default",
+      userId: "default",
+      taskId: context.taskId ?? null,
+      conversationId: context.conversationId ?? null,
+      database: context.database,
+      source: "memory_tool",
+      memories: [memory],
+      reason: input.reason,
+      sourceEventIds: input.evidenceEventIds ?? [],
+    });
+  }
+
   return { memory: memory ? toToolMemory(memory) : null };
 }
 
@@ -179,7 +198,39 @@ export async function memoryUpdate(
     },
   }, context.database);
 
+  if (memory) {
+    await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
+      agentId: context.agentId ?? "default",
+      userId: "default",
+      taskId: context.taskId ?? null,
+      conversationId: context.conversationId ?? null,
+      database: context.database,
+      source: "memory_tool",
+      memories: [memory],
+      reason: input.reason,
+      sourceEventIds: input.evidenceEventIds ?? [],
+    });
+  }
+
   return { memory: memory ? toToolMemory(memory) : null };
+}
+
+async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<ProfileSyncPort>[0]): Promise<void> {
+  try {
+    await sync(input);
+  } catch (error) {
+    appendEvent({
+      agent_id: input.agentId ?? "default",
+      task_id: input.taskId ?? null,
+      conversation_id: input.conversationId ?? null,
+      type: "profile.sync.failed",
+      payload: {
+        source: input.source,
+        memoryIds: input.memories.map((memory) => memory.id),
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }, input.database);
+  }
 }
 
 export async function memoryForget(

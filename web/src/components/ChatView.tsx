@@ -1,20 +1,30 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Brain, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { Brain, GitBranch, MessageSquare, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { NavLink, useNavigate, useParams } from "react-router";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import SessionSidebar from "./SessionSidebar";
 import MemoryPanel from "./MemoryPanel";
+import ArchitectureView from "./ArchitectureView";
 import { useChatStore, parseDbContent } from "../store/chatStore";
 import { useSessionStore } from "../store/sessionStore";
 import { createSessionResolver } from "../lib/sessionResolver";
-import { getSessionIdFromPath, getSessionPath } from "../lib/sessionRoute";
+import { ARCHITECTURE_PATH, getSessionPath } from "../lib/sessionRoute";
 
-export default function ChatView() {
+interface ChatViewProps {
+  view: "chat" | "architecture";
+}
+
+export default function ChatView({ view }: ChatViewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const navigate = useNavigate();
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
+  const activeView = view;
   const { thinkingEnabled, setSessionId } = useChatStore();
+  const currentSessionId = useChatStore((s) => s.sessionId);
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const workerPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -25,15 +35,14 @@ export default function ChatView() {
   }), []);
 
   const navigateToSession = useCallback((id: string, replace = false) => {
-    const path = getSessionPath(id);
-    if (window.location.pathname === path) return;
-    window.history[replace ? "replaceState" : "pushState"](null, "", path);
-  }, []);
+    navigate(getSessionPath(id), { replace });
+  }, [navigate]);
 
   const navigateToNewSession = useCallback(() => {
-    if (window.location.pathname === "/") return;
-    window.history.pushState(null, "", "/");
-  }, []);
+    navigate("/");
+  }, [navigate]);
+
+  const chatPath = currentSessionId ? getSessionPath(currentSessionId) : "/";
 
   const sessionResolver = useMemo(() => createSessionResolver({
     getSessionId: () => useChatStore.getState().sessionId,
@@ -146,13 +155,15 @@ export default function ChatView() {
   }, [fetchSessionUiMessages, setMessages, stopWorkerMessagePolling]);
 
   useEffect(() => {
+    if (view !== "chat") return;
     let cancelled = false;
 
-    async function syncFromLocation() {
-      const id = getSessionIdFromPath(window.location.pathname);
+    async function syncFromRoute() {
+      const id = routeSessionId ?? null;
       if (!id) {
         setMessages([]);
         useChatStore.getState().clearSession();
+        setActiveSessionId(null);
         return;
       }
 
@@ -160,19 +171,18 @@ export default function ChatView() {
       if (!loaded && !cancelled) {
         setMessages([]);
         useChatStore.getState().clearSession();
-        window.history.replaceState(null, "", "/");
+        setActiveSessionId(null);
+        navigate("/", { replace: true });
       }
     }
 
-    syncFromLocation();
-    window.addEventListener("popstate", syncFromLocation);
+    syncFromRoute();
 
     return () => {
       cancelled = true;
       stopWorkerMessagePolling();
-      window.removeEventListener("popstate", syncFromLocation);
     };
-  }, [loadSession, setMessages, stopWorkerMessagePolling]);
+  }, [loadSession, navigate, routeSessionId, setActiveSessionId, setMessages, stopWorkerMessagePolling, view]);
 
   const handleSend = useCallback(async (text: string) => {
     stopWorkerMessagePolling();
@@ -246,12 +256,38 @@ export default function ChatView() {
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[15px] font-semibold text-[var(--color-text)]">My Agent</h1>
               <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-muted)]">
-                Control Chat
+                {activeView === "chat" ? "Control Chat" : "Architecture"}
               </span>
             </div>
             <p className="mt-0.5 text-xs text-[var(--color-text-soft)]">
-              Chat first, configuration-ready agent workspace
+              {activeView === "chat"
+                ? "Chat first, configuration-ready agent workspace"
+                : "System layers, memory flow, and runtime events"}
             </p>
+          </div>
+          <div className="flex items-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-1">
+            <NavLink
+              to={chatPath}
+              className={({ isActive }) => `flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeView === "chat" || isActive
+                  ? "bg-white text-[var(--color-text)] shadow-sm"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              <MessageSquare size={15} />
+              对话
+            </NavLink>
+            <NavLink
+              to={ARCHITECTURE_PATH}
+              className={({ isActive }) => `flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeView === "architecture" || isActive
+                  ? "bg-white text-[var(--color-text)] shadow-sm"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              <GitBranch size={15} />
+              架构
+            </NavLink>
           </div>
           <button
             onClick={() => setMemoryOpen(true)}
@@ -268,14 +304,20 @@ export default function ChatView() {
             <Settings size={17} />
           </button>
         </header>
-        <MessageList messages={messages} handleApprove={handleApprove} handleDeny={handleDeny} />
-        <ChatInput
-          isLoading={isLoading}
-          onSend={handleSend}
-          onStop={stop}
-          thinkingEnabled={thinkingEnabled}
-          onToggleThinking={() => useChatStore.getState().setThinkingEnabled(!thinkingEnabled)}
-        />
+        {activeView === "chat" ? (
+          <>
+            <MessageList messages={messages} handleApprove={handleApprove} handleDeny={handleDeny} />
+            <ChatInput
+              isLoading={isLoading}
+              onSend={handleSend}
+              onStop={stop}
+              thinkingEnabled={thinkingEnabled}
+              onToggleThinking={() => useChatStore.getState().setThinkingEnabled(!thinkingEnabled)}
+            />
+          </>
+        ) : (
+          <ArchitectureView />
+        )}
       </div>
       {memoryOpen && <MemoryPanel onClose={() => setMemoryOpen(false)} />}
     </div>

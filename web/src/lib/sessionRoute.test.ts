@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getSessionIdFromPath, getSessionPath } from "./sessionRoute";
+import { ARCHITECTURE_PATH, getSessionIdFromPath, getSessionPath } from "./sessionRoute";
 
 describe("sessionRoute", () => {
   test("builds a session path", () => {
@@ -12,6 +12,7 @@ describe("sessionRoute", () => {
 
   test("ignores non-session paths", () => {
     expect(getSessionIdFromPath("/")).toBeNull();
+    expect(getSessionIdFromPath(ARCHITECTURE_PATH)).toBeNull();
     expect(getSessionIdFromPath("/api/sessions")).toBeNull();
   });
 });

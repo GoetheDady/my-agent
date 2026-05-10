@@ -1,6 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "ai";
 import { z } from "zod";
+import {
+  syncProfileFromMemories,
+  type ProfileSyncPort,
+} from "../agents/profile-sync";
 import { appendEvent } from "../events/event-log";
 import {
   addMemory,
@@ -34,6 +38,7 @@ export interface HumanMemoryToolContext {
   conversationId?: string | null;
   database?: Database;
   store?: HumanMemoryStorePort;
+  profileSync?: ProfileSyncPort;
 }
 
 export interface HumanMemoryStorePort {
@@ -193,6 +198,18 @@ export async function memoryRemember(
     status: "active",
     source_text: JSON.stringify({ reason: input.reason ?? "", kind: input.kind ?? "semantic" }),
   });
+  if (memory) {
+    await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
+      agentId: context.agentId ?? "default",
+      userId: "default",
+      taskId: context.taskId ?? null,
+      conversationId: context.conversationId ?? null,
+      database: context.database,
+      source: "memory_tool",
+      memories: [memory],
+      reason: input.reason ?? "memory_remember",
+    });
+  }
   return { memory: memory ? toRecallMemory(memory) : null };
 }
 
@@ -210,6 +227,18 @@ export async function memoryPlan(
       confidence: 0.8,
       source_text: JSON.stringify({ reason: input.reason ?? "", kind: "prospective" }),
     });
+    if (memory) {
+      await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
+        agentId: context.agentId ?? "default",
+        userId: "default",
+        taskId: context.taskId ?? null,
+        conversationId: context.conversationId ?? null,
+        database: context.database,
+        source: "memory_tool",
+        memories: [memory],
+        reason: input.reason ?? "memory_plan",
+      });
+    }
     return { memory: memory ? toRecallMemory(memory) : null, memories: [] };
   }
 
@@ -257,6 +286,24 @@ export function memoryReflect(
     reason: input.reason,
   }, context.database);
   return { reviewItem };
+}
+
+async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<ProfileSyncPort>[0]): Promise<void> {
+  try {
+    await sync(input);
+  } catch (error) {
+    appendEvent({
+      agent_id: input.agentId ?? "default",
+      task_id: input.taskId ?? null,
+      conversation_id: input.conversationId ?? null,
+      type: "profile.sync.failed",
+      payload: {
+        source: input.source,
+        memoryIds: input.memories.map((memory) => memory.id),
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }, input.database);
+  }
 }
 
 export function createHumanMemoryTools(context: HumanMemoryToolContext = {}) {

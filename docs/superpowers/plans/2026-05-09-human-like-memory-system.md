@@ -28,6 +28,7 @@
 | 7 | Dream worker autonomous loop | Done | 2026-05-09 |
 | 8 | Light UI | Done | 2026-05-09 |
 | 9 | Chrome DevTools MCP acceptance matrix | Documented | 2026-05-09 |
+| 10 | Soul/User stable profile files + auto sync | Done | 2026-05-10 |
 
 ## 关键架构
 
@@ -38,6 +39,10 @@
 - `dream_worker` 默认自主整理记忆：低风险确定性操作自动应用；高风险或证据不足时记录 skipped decision，不再把用户审批当作主流程。
 - `memory_decisions` 是自动整理审计记录，保存原因、置信度、before/after 快照，并支持撤销。
 - `memory_review_items` 保留兼容读取，但后续不再作为 Dream Worker 主流程。
+- `agents/<agent_id>/soul.md` 是 Agent 的稳定人格、语气和边界文件。
+- `users/<user_id>/user.md` 是用户稳定画像文件。
+- `profile_sync` 会从记忆写入和 Dream Worker 整理结果中，自动沉淀稳定认知到 `soul.md` / `user.md`。
+- `soul.md` / `user.md` 会进入 system prompt；memory 仍然是工具化动态回忆，不自动把长期记忆塞进 prompt。
 - 长期记忆仍坚持 Memory-as-Tool，不自动注入 prompt。
 
 ## 已落地范围
@@ -69,6 +74,12 @@
   - `memory_plan`：管理未来计划和待办。
   - `memory_evidence`：查看记忆或 episode 的证据来源。
   - `memory_reflect`：保留旧接口，仍可生成程序记忆/反思记忆的兼容审查建议。
+- 新增稳定 profile 文件：
+  - `agents/default/soul.md`：默认 Agent 的人格、语气、边界和记忆使用原则。
+  - `users/default/user.md`：默认用户的稳定画像、偏好和项目上下文。
+  - `src/agents/profile-files.ts`：加载/创建 profile 文件。
+  - `src/agents/profile-sync.ts`：从 active memory 和 Dream Worker 决策中自动同步稳定认知。
+  - `src/brain/prompt-builder.ts`：把 profile context 注入 system prompt。
 - task 完成后自动生成 episode。
 - `memory_recall` 支持按 intent 回忆 semantic、episodic、procedural、prospective、reflective、social。
 - dream worker 支持手动 dry-run、手动真实整理、每日 `03:30 Asia/Shanghai` 自动调度、启动后补跑、每日摘要、确定性去重、偏好冲突轨迹合并和串行执行。
@@ -210,6 +221,36 @@ bun run typecheck
 bun run lint
 cd web && bun run build
 ```
+
+## 2026-05-10 Soul/User Profile 自动同步更新
+
+参考 OpenClaw 的 `SOUL.md` / `USER.md` 思路，本项目新增稳定 profile 文件层，并允许 Agent 自动维护这些文件。
+
+术语说明：
+
+- `soul.md`：Agent 的“人格文件”，用于定义身份、语气、边界和默认行为。
+- `user.md`：用户画像文件，用于保存稳定偏好、称呼、时区和长期项目背景。
+- `profile context`：这些稳定文件被拼进 system prompt 的上下文段。
+- `profile_sync`：后台同步器，从记忆中判断哪些内容适合沉淀到 profile 文件。
+
+和记忆系统的关系：
+
+- `soul.md` / `user.md` 是少量稳定基线，适合人工编辑，也会被 Agent 自动维护。
+- 长期事实、经历、偏好变化、未来计划仍由 memory tools 查询和整理，profile 文件只保存当前稳定认知。
+- 普通记忆提取、主动记忆工具和 Dream Worker 真实整理后都会触发 `profile_sync`。
+- 同步结果不显示为聊天工具卡，只通过 `profile.sync.*` runtime events 和文件内容审计。
+- 如果 `user.md` 和 memory recall 结果冲突，Agent 应说明冲突并查证据，而不是直接编造结论。
+
+当前文件：
+
+- `agents/default/soul.md`
+- `users/default/user.md`
+
+后续方向：
+
+- Memory Panel 或配置 UI 支持编辑 `soul.md` / `user.md`。
+- 支持按 channel identity 映射不同 `users/<user_id>/user.md`。
+- 继续优化自动分类规则，避免把一次性任务、临时情绪或工具输出写进 profile。
 
 ## Chrome DevTools MCP Acceptance Matrix
 

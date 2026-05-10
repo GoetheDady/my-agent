@@ -10,6 +10,7 @@ export function registerMemoryLifecycleHooks(): void {
   registerLifecycleHook("assistant.message.persisted", (event) => {
     void enqueueMemoryExtraction({
       agentId: event.agentId,
+      userId: event.userId,
       taskId: event.taskId,
       conversationId: event.conversationId,
       sessionId: event.sessionId,

@@ -1,5 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "../core/database";
+import {
+  syncProfileFromMemories,
+  type ProfileSyncPort,
+} from "../agents/profile-sync";
 import { appendEvent } from "../events/event-log";
 import { dedupeActiveMemories, type MemoryDedupeGroup, type MemoryDedupeStore } from "./dedupe";
 import {
@@ -100,6 +104,7 @@ export async function runDreamWorker(
     database?: Database;
     dedupeStore?: MemoryDedupeStore;
     memoryStore?: DreamMemoryStore;
+    profileSync?: ProfileSyncPort;
   } = {},
 ): Promise<DreamRunResult> {
   if (running) throw new Error("Dream worker is already running");
@@ -112,6 +117,7 @@ export async function runDreamWorker(
   const dryRun = options.dryRun ?? false;
   const trigger = options.trigger ?? "manual";
   const memoryStore = options.memoryStore ?? defaultMemoryStore;
+  const profileSync = options.profileSync ?? syncProfileFromMemories;
   const dreamRun = createDreamRun({ agentId, date, timezone, trigger, dryRun }, database);
 
   appendEvent({
@@ -166,6 +172,13 @@ export async function runDreamWorker(
     if (!dryRun && decisions.length > 0) {
       summary.memory_change_ids = decisions.map((decision) => decision.id);
       updateDailySummaryMemoryChanges(summary.id, summary.memory_change_ids, database);
+      await syncProfilesForDreamDecisions({
+        agentId,
+        database,
+        profileSync,
+        decisions,
+        store: memoryStore,
+      });
     }
     const pendingReviewCount = listReviewItems({ agentId, status: "pending", limit: 1000 }, database).length;
     const completedRun = completeDreamRun(dreamRun.id, database) ?? dreamRun;
@@ -396,6 +409,51 @@ async function applyEpisodeDerivedMemoryDecisions(input: {
   return decisions;
 }
 
+async function syncProfilesForDreamDecisions(input: {
+  agentId: string;
+  database: Database;
+  profileSync: ProfileSyncPort;
+  decisions: MemoryDecisionRecord[];
+  store: DreamMemoryStore;
+}): Promise<void> {
+  const memoryIds = uniqueStrings(input.decisions
+    .filter((decision) => decision.status === "applied")
+    .flatMap((decision) => [
+      ...decision.created_memory_ids,
+      ...decision.target_memory_ids,
+    ]));
+  if (memoryIds.length === 0) return;
+
+  const memories: Memory[] = [];
+  for (const id of memoryIds) {
+    const memory = await input.store.getMemory(id);
+    if (memory?.status === "active") memories.push(memory);
+  }
+  if (memories.length === 0) return;
+
+  try {
+    await input.profileSync({
+      agentId: input.agentId,
+      userId: "default",
+      database: input.database,
+      source: "dream_worker",
+      memories,
+      reason: "dream worker memory decisions",
+      sourceEventIds: uniqueStrings(input.decisions.flatMap((decision) => decision.source_event_ids)),
+    });
+  } catch (error) {
+    appendEvent({
+      agent_id: input.agentId,
+      type: "profile.sync.failed",
+      payload: {
+        source: "dream_worker",
+        memoryIds: memories.map((memory) => memory.id),
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }, input.database);
+  }
+}
+
 export function getDailySummary(
   date: string,
   agentId = "default",
@@ -537,6 +595,10 @@ function parseStringArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 function dateKey(timestamp: number, timezone: string): string {

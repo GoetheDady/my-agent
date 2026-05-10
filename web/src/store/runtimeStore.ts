@@ -114,6 +114,37 @@ export function getCurrentTask(agent: RuntimeAgent | null, tasks: RuntimeTask[])
 export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   const payload = payloadRecord(event);
 
+  if (event.type.startsWith("profile.sync.")) {
+    if (event.type === "profile.sync.started") {
+      return {
+        label: "认知文件同步开始",
+        detail: getString(payload, "source") ?? "profile.sync.started",
+        tone: "memory",
+      };
+    }
+    if (event.type === "profile.sync.completed") {
+      return {
+        label: "认知文件同步完成",
+        detail: getString(payload, "reason") ?? getString(payload, "source") ?? "profile.sync.completed",
+        tone: "memory",
+      };
+    }
+    if (event.type === "profile.sync.skipped") {
+      return {
+        label: "认知文件同步跳过",
+        detail: getString(payload, "reason") ?? "profile.sync.skipped",
+        tone: "memory",
+      };
+    }
+    if (event.type === "profile.sync.failed") {
+      return {
+        label: "认知文件同步失败",
+        detail: getString(payload, "error") ?? "profile.sync.failed",
+        tone: "error",
+      };
+    }
+  }
+
   if (event.type.startsWith("memory.")) {
     if (event.type === "memory.decision.created") {
       return {

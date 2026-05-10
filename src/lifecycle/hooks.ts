@@ -5,6 +5,7 @@ export type LifecycleHookType = "assistant.message.persisted";
 export interface AssistantMessagePersistedEvent {
   type: "assistant.message.persisted";
   agentId: string;
+  userId?: string;
   taskId: string;
   conversationId: string | null;
   sessionId: string;

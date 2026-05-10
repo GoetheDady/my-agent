@@ -31,6 +31,10 @@ export type RuntimeEventType =
   | "memory.decision.skipped"
   | "memory.decision.failed"
   | "memory.decision.undone"
+  | "profile.sync.started"
+  | "profile.sync.completed"
+  | "profile.sync.skipped"
+  | "profile.sync.failed"
   | "memory.review.created"
   | "memory.review.accepted"
   | "memory.review.rejected";

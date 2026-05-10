@@ -1,4 +1,5 @@
 const SESSION_PREFIX = "/sessions/";
+export const ARCHITECTURE_PATH = "/architecture";
 
 export function getSessionPath(sessionId: string): string {
   return `${SESSION_PREFIX}${encodeURIComponent(sessionId)}`;
