@@ -14,7 +14,18 @@ export interface CreateTaskInput {
   created_at?: number;
 }
 
+/**
+ * 创建一条 queued 状态的任务。
+ *
+ * 所有渠道输入都会先转换为 task，再交给任务队列调度。
+ *
+ * @param input 任务来源、输入文本、目标 Agent、优先级等信息。
+ * @param database 可选数据库连接。
+ * @returns 已写入数据库的任务记录。
+ */
 export function createTask(input: CreateTaskInput, database: Database = getDb()): TaskRecord {
+  // Task 是 Agent 的最小执行单元。不同渠道（Web、未来微信/飞书）都会先落成 task，
+  // 再由队列按 agent_id 串行派发，避免一个 Agent 同时干多件事。
   const now = input.created_at ?? Date.now();
   const task: TaskRecord = {
     id: input.id ?? crypto.randomUUID(),
@@ -59,6 +70,13 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
   return task;
 }
 
+/**
+ * 根据 id 获取任务。
+ *
+ * @param taskId 任务 id。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回任务记录，否则返回 `null`。
+ */
 export function getTask(taskId: string, database: Database = getDb()): TaskRecord | null {
   return database
     .query<TaskRecord, [string]>(
@@ -70,6 +88,14 @@ export function getTask(taskId: string, database: Database = getDb()): TaskRecor
     .get(taskId) ?? null;
 }
 
+/**
+ * 列出某个 Agent 的任务。
+ *
+ * @param agentId Agent 标识。
+ * @param statuses 可选状态过滤；不传时返回该 Agent 全部任务。
+ * @param database 可选数据库连接。
+ * @returns 按优先级和创建时间排序的任务列表。
+ */
 export function listTasks(
   agentId: string,
   statuses?: TaskStatus[],
@@ -99,7 +125,14 @@ export function listTasks(
     .all(agentId, ...statuses);
 }
 
+/**
+ * 将任务标记为 running，并同步占用对应 Agent。
+ *
+ * @param taskId 任务 id。
+ * @param database 可选数据库连接。
+ */
 export function markTaskRunning(taskId: string, database: Database = getDb()): void {
+  // 任务进入 running 时同步更新 Agent 状态，Runtime 面板才能显示“当前正在执行哪个任务”。
   const task = requireTask(taskId, database);
   const now = Date.now();
 
@@ -113,6 +146,13 @@ export function markTaskRunning(taskId: string, database: Database = getDb()): v
   updateAgentStatus(task.agent_id, "running", taskId, database);
 }
 
+/**
+ * 将任务标记为 completed，并释放对应 Agent。
+ *
+ * @param taskId 任务 id。
+ * @param result 任务最终结果文本。
+ * @param database 可选数据库连接。
+ */
 export function markTaskCompleted(
   taskId: string,
   result: string,
@@ -121,11 +161,28 @@ export function markTaskCompleted(
   completeTask(taskId, "completed", result, null, database);
 }
 
+/**
+ * 将任务标记为 failed，并释放对应 Agent。
+ *
+ * @param taskId 任务 id。
+ * @param error 失败原因。
+ * @param database 可选数据库连接。
+ */
 export function markTaskFailed(taskId: string, error: string, database: Database = getDb()): void {
   completeTask(taskId, "failed", null, error, database);
 }
 
+/**
+ * 将任务标记为 canceled。
+ *
+ * 如果该任务正占用 Agent，会在同一事务里释放 Agent。
+ *
+ * @param taskId 任务 id。
+ * @param database 可选数据库连接。
+ */
 export function markTaskCanceled(taskId: string, database: Database = getDb()): void {
+  // 取消任务和释放 Agent 状态必须在同一个事务里完成。
+  // 事务表示一组数据库操作要么全部成功，要么全部失败，避免出现任务取消但 Agent 仍占用的状态。
   const cancel = database.transaction(() => {
     const task = requireTask(taskId, database);
     const now = Date.now();
@@ -154,6 +211,8 @@ function completeTask(
   error: string | null,
   database: Database,
 ): void {
+  // completed/failed 都会释放 current_task_id。
+  // 这里用事务保证任务状态和 Agent 状态不会被并发读取到半更新结果。
   const complete = database.transaction(() => {
     const task = requireTask(taskId, database);
     const now = Date.now();

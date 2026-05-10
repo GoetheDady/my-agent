@@ -40,6 +40,13 @@ const writeFileTool = tool({
     },
   });
 
+/**
+ * 工具注册分两层：
+ * 1. registerTool 保存工具元数据，用于权限策略、控制台展示和测试。
+ * 2. buildAgentTools 为每个 task 创建真正传给模型的工具集合。
+ *
+ * 记忆工具必须用 buildAgentTools(context) 创建，因为它们写事件时需要 taskId/conversationId。
+ */
 registerTool({
   name: 'read_file',
   tool: readFileTool,
@@ -119,7 +126,17 @@ registerTool({
 
 export const tools = buildAiToolSet('default');
 
+/**
+ * 为一次 Agent run 构建工具集合。
+ *
+ * 与静态 `tools` 不同，这里会把 task/conversation 上下文传给记忆工具，
+ * 让 memory.search 等事件能正确关联到本轮任务。
+ *
+ * @param context 记忆工具上下文，包括 agentId、taskId、conversationId 等。
+ * @returns 可传给 AI SDK 的工具集合。
+ */
 export function buildAgentTools(context: MemoryToolContext = {}) {
+  // 每个 Agent run 都创建新的 context-aware memory tools，确保 memory.search 事件归属正确。
   return {
     read_file: readFileTool,
     write_file: writeFileTool,

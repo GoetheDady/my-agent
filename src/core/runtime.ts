@@ -42,7 +42,11 @@ function detectRuntime(): RuntimeKind {
   return "node";
 }
 
-/** 获取当前运行时（首次调用后缓存） */
+/**
+ * 获取当前运行时类型。
+ *
+ * @returns `bun` 或 `node`，首次调用后会缓存检测结果。
+ */
 export function getRuntime(): RuntimeKind {
   if (!_runtime) {
     _runtime = detectRuntime();
@@ -50,14 +54,27 @@ export function getRuntime(): RuntimeKind {
   return _runtime;
 }
 
-/** 当前是否为 Bun 运行时 */
+/**
+ * 判断当前是否运行在 Bun。
+ *
+ * @returns 是 Bun 时返回 `true`。
+ */
 export const isBun = (): boolean => getRuntime() === "bun";
 
-/** 当前是否为 Node 运行时 */
+/**
+ * 判断当前是否运行在 Node.js。
+ *
+ * @returns 是 Node.js 时返回 `true`。
+ */
 export const isNode = (): boolean => getRuntime() === "node";
 
-/** 初始化 Agent runtime 所需的持久状态 */
+/**
+ * 初始化 Agent runtime 所需的持久状态。
+ *
+ * 当前会确保 default Agent 存在；未来多 Agent 初始化也应集中放在这里。
+ */
 export function initializeRuntime(): void {
+  // 目前 MVP 只有 default agent；未来多 Agent 也应从这里集中初始化。
   const db = getDb();
   ensureDefaultAgent(db);
 }

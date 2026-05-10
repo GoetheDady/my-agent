@@ -35,13 +35,29 @@ export interface AgentRunResult {
   taskId: string;
 }
 
+/**
+ * Agent 忙碌错误。
+ *
+ * 当同一个 Agent 已经有 running task 时，新的任务不能立即执行，会抛出该错误。
+ */
 export class AgentBusyError extends Error {
+  /**
+   * 创建 Agent 忙碌错误。
+   *
+   * @param agentId 正在执行其他任务的 Agent 标识。
+   */
   constructor(agentId: string) {
     super(`Agent is busy: ${agentId}`);
     this.name = "AgentBusyError";
   }
 }
 
+/**
+ * 将前端/数据库里的消息结构转换成 AI SDK 可消费的模型消息。
+ *
+ * @param uiMessages 前端 UI 消息或数据库恢复出的消息。
+ * @returns AI SDK `ModelMessage` 数组。
+ */
 export async function toModelMessages(uiMessages: Array<{
   role: string;
   parts?: unknown;
@@ -68,6 +84,16 @@ export async function toModelMessages(uiMessages: Array<{
   );
 }
 
+/**
+ * 启动一次 Agent 任务执行，并返回可流式消费的模型结果。
+ *
+ * 这个方法会完成任务领取、prompt 构建、工具注册、流式事件写入和任务收尾。
+ * 它不会阻塞到模型完全结束；调用方会拿到 `streamText` 的结果并继续消费流。
+ *
+ * @param input Agent 运行所需的 task、消息、思考模式和可选数据库/中断信号。
+ * @returns 包含 AI SDK 流式结果和 taskId 的运行结果。
+ * @throws 当 Agent 正忙、任务无法领取或模型启动失败时抛出错误。
+ */
 export function runAgentTask(input: AgentRunInput): AgentRunResult {
   const database = input.database ?? getDb();
   let eventTimestamp = Date.now();
@@ -96,6 +122,14 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
     }, database);
   };
 
+  /**
+   * Agent 执行主流程：
+   * 1. claim task，把 queued task 原子切换成 running，同时锁住对应 Agent。
+   * 2. 构建 system prompt：只注入稳定 profile 和 working memory，不注入长期记忆全文。
+   * 3. 使用 buildAgentTools 创建带 task/conversation 上下文的工具集合。
+   * 4. streamText 流式返回模型输出，并把 delta、完成、失败等过程写入 events。
+   * 5. 完成后生成/更新 episode，供之后的情景记忆和 Dream Worker 使用。
+   */
   ensureTaskCanRun(input.task, database);
   appendEvent({
     agent_id: input.task.agent_id,
@@ -134,6 +168,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       },
       onChunk: ({ chunk }) => {
         if (chunk.type === "text-delta") {
+          // delta 事件用于 Runtime 面板观察流式输出，不作为最终消息历史。
           appendEvent({
             agent_id: input.task.agent_id,
             task_id: input.task.id,
@@ -166,6 +201,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
           created_at: nextEventTimestamp(),
         }, database);
         try {
+          // Episode 是“做过什么”的情景摘要。失败不能回滚聊天结果，只记录 episode.failed。
           upsertEpisodeForTask(input.task.id, database);
         } catch (error) {
           appendEvent({
@@ -208,6 +244,7 @@ function ensureTaskCanRun(task: TaskRecord, database: Database): void {
 
   const claimed = claimTask(task.id, database);
   if (!claimed) {
+    // 同一 Agent 保持单线程：如果已经有 running task，本轮请求返回 queued。
     throw new AgentBusyError(task.agent_id);
   }
 }
@@ -218,6 +255,7 @@ function createRunAbortSignal(
 ): { signal: AbortSignal; reason: () => string; cleanup: () => void } {
   const controller = new AbortController();
   let reason = "";
+  // 双重中断来源：客户端断开连接，或模型调用超过内部超时。
   const timeout = setTimeout(() => {
     reason = `Model run timed out after ${timeoutMs}ms`;
     controller.abort();
@@ -245,10 +283,21 @@ function createRunAbortSignal(
   };
 }
 
+/**
+ * 把 Agent 运行结果转换成前端可直接读取的 UI message stream response。
+ *
+ * UI message stream response 是 AI SDK 给前端消费的 HTTP 流格式，
+ * 里面包含文本增量、工具调用、工具结果等结构化片段。
+ *
+ * @param run `runAgentTask` 返回的运行结果。
+ * @param onFinish 前端流结束时的回调，用于持久化最终 assistant message。
+ * @returns 可作为路由响应返回给前端的流式 Response。
+ */
 export function toAgentUiMessageStreamResponse(
   run: AgentRunResult,
   onFinish: (event: { responseMessage: unknown }) => void,
 ): Response {
+  // AI SDK 的 UI stream response 负责把模型文本、工具调用、工具结果按前端可识别格式输出。
   return run.result.toUIMessageStreamResponse({
     consumeSseStream: consumeStream,
     headers: {

@@ -35,6 +35,15 @@ interface MemoryReviewRow {
   reviewed_at: number | null;
 }
 
+/**
+ * 创建一条记忆审查建议。
+ *
+ * Review item 是早期人工审查流程的兼容层，新自动整理主流程使用 Memory Decision。
+ *
+ * @param input 建议类型、标题、建议内容、目标记忆、证据和置信度。
+ * @param database 可选数据库连接。
+ * @returns 新创建的 review item。
+ */
 export function createReviewItem(input: {
   agentId?: string;
   type: MemoryReviewType;
@@ -45,6 +54,8 @@ export function createReviewItem(input: {
   confidence?: number;
   reason?: string;
 }, database: Database = getDb()): MemoryReviewItem {
+  // review item 是早期“人工审批”模型的兼容层。
+  // 新的 Dream Worker 主流程使用 memory_decisions 自主应用，但反思工具仍可生成待审查建议。
   const now = Date.now();
   const item: MemoryReviewItem = {
     id: crypto.randomUUID(),
@@ -93,6 +104,13 @@ export function createReviewItem(input: {
   return item;
 }
 
+/**
+ * 列出记忆审查建议。
+ *
+ * @param params Agent、状态和数量限制。
+ * @param database 可选数据库连接。
+ * @returns 按创建时间倒序排列的 review item 列表。
+ */
 export function listReviewItems(
   params: { agentId?: string; status?: MemoryReviewStatus; limit?: number } = {},
   database: Database = getDb(),
@@ -122,11 +140,20 @@ export function listReviewItems(
     .map(toReviewItem);
 }
 
+/**
+ * 更新记忆审查建议状态。
+ *
+ * @param id review item id。
+ * @param status 新状态，只能是 accepted 或 rejected。
+ * @param database 可选数据库连接。
+ * @returns 更新后的 review item；不存在时返回 `null`。
+ */
 export function updateReviewStatus(
   id: string,
   status: Exclude<MemoryReviewStatus, "pending">,
   database: Database = getDb(),
 ): MemoryReviewItem | null {
+  // 保留接受/拒绝事件，方便旧 UI 或测试继续观察 review item 生命周期。
   const now = Date.now();
   database
     .query(
@@ -145,6 +172,13 @@ export function updateReviewStatus(
   return item;
 }
 
+/**
+ * 获取单条记忆审查建议。
+ *
+ * @param id review item id。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回 review item，否则返回 `null`。
+ */
 export function getReviewItem(id: string, database: Database = getDb()): MemoryReviewItem | null {
   const row = database
     .query<MemoryReviewRow, [string]>(

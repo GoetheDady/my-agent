@@ -55,13 +55,26 @@ export interface EpisodeSearchParams {
   limit?: number;
 }
 
+/**
+ * 为已完成任务创建或更新 episode。
+ *
+ * Episode 是一次经历摘要，用于跨会话回答“刚才/昨天做了什么”。
+ *
+ * @param taskId 已完成任务 id。
+ * @param database 可选数据库连接。
+ * @returns 创建或更新后的 episode；任务不存在或未完成时返回 `null`。
+ */
 export function upsertEpisodeForTask(taskId: string, database: Database = getDb()): EpisodeRecord | null {
+  // Episode 是“这次经历”的摘要，不是长期事实。
+  // task 完成后生成/更新 episode，让跨会话可以回答“刚才/昨天做了什么”。
   const task = getTask(taskId, database);
   if (!task || task.status !== "completed") return null;
 
   const events = listTaskEvents(taskId, database);
   const existing = getEpisodeByTaskId(taskId, database);
   const now = Date.now();
+  // episode 事件时间戳放在本 task 事件之后，保证事件流按顺序看时：
+  // 先看到工具/回复，再看到“经历摘要已生成”。
   const episodeEventCreatedAt = Math.max(now, ...events.map((event) => event.created_at)) + 1;
   const episode: EpisodeRecord = {
     id: existing?.id ?? crypto.randomUUID(),
@@ -160,6 +173,13 @@ export function upsertEpisodeForTask(taskId: string, database: Database = getDb(
   return episode;
 }
 
+/**
+ * 根据 taskId 获取 episode。
+ *
+ * @param taskId 任务 id。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回 episode，否则返回 `null`。
+ */
 export function getEpisodeByTaskId(taskId: string, database: Database = getDb()): EpisodeRecord | null {
   const row = database
     .query<EpisodeRow, [string]>(
@@ -169,6 +189,13 @@ export function getEpisodeByTaskId(taskId: string, database: Database = getDb())
   return row ? toEpisode(row) : null;
 }
 
+/**
+ * 根据 episode id 获取经历摘要。
+ *
+ * @param id episode id。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回 episode，否则返回 `null`。
+ */
 export function getEpisode(id: string, database: Database = getDb()): EpisodeRecord | null {
   const row = database
     .query<EpisodeRow, [string]>(
@@ -178,10 +205,19 @@ export function getEpisode(id: string, database: Database = getDb()): EpisodeRec
   return row ? toEpisode(row) : null;
 }
 
+/**
+ * 搜索 episode。
+ *
+ * @param params Agent、关键词、时间范围和数量限制。
+ * @param database 可选数据库连接。
+ * @returns 匹配的 episode 列表。
+ */
 export function searchEpisodes(
   params: EpisodeSearchParams = {},
   database: Database = getDb(),
 ): EpisodeRecord[] {
+  // 先按时间范围粗筛，再按关键词过滤。
+  // 这里不用向量检索，是因为 episode 通常数量较小，且时间范围对“上午/昨天”问题更重要。
   const agentId = params.agentId ?? "default";
   const limit = params.limit ?? 10;
   const from = params.from ?? 0;
@@ -251,6 +287,7 @@ function buildEpisodeSummary(task: TaskRecord, events: RuntimeEvent[]): string {
 }
 
 function estimateImportance(task: TaskRecord, events: RuntimeEvent[]): number {
+  // importance 是粗略重要性：工具越多、记忆事件越多、用户输入越长，说明这次经历更可能值得回忆。
   const toolCount = extractTools(events).length;
   const memoryEvents = events.filter((event) => event.type.startsWith("memory.")).length;
   const lengthScore = Math.min(task.input.length / 200, 0.2);

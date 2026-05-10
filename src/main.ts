@@ -11,6 +11,14 @@ import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
 import { startDreamScheduler } from "./memory/dream-scheduler";
 
+/**
+ * 后端启动顺序：
+ * 1. initializeRuntime() 初始化数据库、默认 Agent、工具注册等运行时基础设施。
+ * 2. registerMemoryLifecycleHooks() 注册“助手消息已持久化”后的记忆提取 hook。
+ * 3. startDreamScheduler() 启动进程内梦整理调度器。
+ *
+ * 注意：记忆提取和梦整理都属于后台认知流程，不应该阻塞 HTTP 服务启动。
+ */
 initializeRuntime();
 registerMemoryLifecycleHooks();
 startDreamScheduler();
@@ -46,6 +54,7 @@ app.get("*", async (c) => {
   const pathname = c.req.path;
   const safePath = resolve(DIST_DIR, pathname.slice(1) || "index.html");
   const rel = relative(DIST_DIR, safePath);
+  // 防止通过 ../../ 访问 web/dist 之外的本地文件。
   if (rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\")) {
     return c.text("Forbidden", 403);
   }
@@ -59,6 +68,7 @@ app.get("*", async (c) => {
       headers: { "content-type": mime, "cache-control": "public, max-age=3600" },
     });
   } catch {
+    // 前端使用 React Router，刷新 /memory、/sessions/:id 等路径时需要回退到 index.html。
     const indexPath = resolve(DIST_DIR, "index.html");
     try {
       const data = await readFile(indexPath);

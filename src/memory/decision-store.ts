@@ -74,6 +74,15 @@ const defaultMemoryStore: MemoryDecisionMemoryStore = {
   restoreMemorySnapshot,
 };
 
+// Memory Decision 是 Dream Worker 自主整理记忆后留下的审计记录。
+// snapshot（快照）保存改动前后的最小必要字段，用来支持“可撤销”而不是硬删除。
+/**
+ * 捕获一组记忆的最小恢复快照。
+ *
+ * @param ids 需要捕获的记忆 id 列表。
+ * @param store 可选记忆存储端口，测试中可注入 mock。
+ * @returns 可用于撤销的记忆快照列表。
+ */
 export async function captureMemorySnapshots(
   ids: string[],
   store: MemoryDecisionMemoryStore = defaultMemoryStore,
@@ -90,6 +99,15 @@ export async function captureMemorySnapshots(
   return snapshots;
 }
 
+/**
+ * 创建一条 Memory Decision 审计记录。
+ *
+ * Memory Decision 记录 Dream Worker 自动做出的整理动作、原因、置信度和改动快照。
+ *
+ * @param input 决策类型、状态、目标记忆、创建记忆、证据和快照。
+ * @param database 可选数据库连接。
+ * @returns 已写入的 Memory Decision 记录。
+ */
 export function createMemoryDecision(input: {
   agentId?: string;
   dreamRunId?: string | null;
@@ -106,6 +124,8 @@ export function createMemoryDecision(input: {
   error?: string | null;
   createdAt?: number;
 }, database: Database = getDb()): MemoryDecisionRecord {
+  // 创建 decision 时同时写 runtime event。
+  // 这样前端事件流能看到“做了什么决定”，memory_decisions 表能看到“为什么和怎么撤销”。
   const now = input.createdAt ?? Date.now();
   const decision: MemoryDecisionRecord = {
     id: crypto.randomUUID(),
@@ -173,6 +193,13 @@ export function createMemoryDecision(input: {
   return decision;
 }
 
+/**
+ * 列出 Memory Decision。
+ *
+ * @param params Agent、状态和数量限制。
+ * @param database 可选数据库连接。
+ * @returns 按创建时间倒序排列的决策记录。
+ */
 export function listMemoryDecisions(
   params: { agentId?: string; status?: MemoryDecisionStatus; limit?: number } = {},
   database: Database = getDb(),
@@ -202,6 +229,13 @@ export function listMemoryDecisions(
     .map(toDecision);
 }
 
+/**
+ * 获取单条 Memory Decision。
+ *
+ * @param id 决策 id。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回决策记录，否则返回 `null`。
+ */
 export function getMemoryDecision(id: string, database: Database = getDb()): MemoryDecisionRecord | null {
   const row = database
     .query<MemoryDecisionRow, [string]>(
@@ -211,6 +245,16 @@ export function getMemoryDecision(id: string, database: Database = getDb()): Mem
   return row ? toDecision(row) : null;
 }
 
+/**
+ * 撤销一条已应用的 Memory Decision。
+ *
+ * 撤销会恢复 before snapshot，并把本次整理新建的记忆标记为 inactive。
+ *
+ * @param id 决策 id。
+ * @param options 可选数据库连接和记忆存储端口。
+ * @returns 撤销后的决策记录，以及本次是否真正产生变更。
+ * @throws 当决策不是 applied 状态时抛出错误。
+ */
 export async function undoMemoryDecision(
   id: string,
   options: {
@@ -227,6 +271,10 @@ export async function undoMemoryDecision(
     throw new Error("只有已应用的记忆整理决策可以撤销");
   }
 
+  // 撤销分两步：
+  // 1. 把被改写的旧记忆恢复到 before_snapshot。
+  // 2. 把本次整理新建的记忆设为 inactive，避免继续参与回忆。
+  // 这符合“不硬删除长期记忆”的安全边界。
   const beforeIds = new Set(decision.before_snapshot.map((snapshot) => snapshot.id));
   for (const snapshot of decision.before_snapshot) {
     await store.restoreMemorySnapshot(snapshot);
@@ -264,6 +312,8 @@ export async function undoMemoryDecision(
 }
 
 function appendDecisionStatusEvent(decision: MemoryDecisionRecord, database: Database): void {
+  // 状态事件用于 Runtime 面板的中文展示和后续调试。
+  // 真正的可恢复数据仍以 memory_decisions 表里的 snapshot 为准。
   const eventType = {
     applied: "memory.decision.applied",
     skipped: "memory.decision.skipped",

@@ -6,6 +6,8 @@ import { normalizePath } from "../brain/tool-executor";
 const app = new Hono();
 
 function findToolCallById(messages: unknown[], toolCallId: string): { args: Record<string, unknown> } | null {
+  // 从历史 assistant parts 里找对应工具调用参数。
+  // 这个接口用于用户批准某个文件路径后，把路径加入工具白名单。
   for (const msg of messages) {
     const message = msg as { role: string; content: string };
     if (message.role !== 'assistant') continue;
@@ -31,6 +33,8 @@ function findToolCallById(messages: unknown[], toolCallId: string): { args: Reco
 }
 
 app.post("/whitelist", async (c) => {
+  // 白名单接口只根据已有工具调用里的 path 扩权，不接受任意 path 直接写入。
+  // 这样用户是在具体上下文中授权，降低误把大目录放开的风险。
   const body = await c.req.json().catch(() => ({})) as {
     toolCallId?: string;
     sessionId?: string;

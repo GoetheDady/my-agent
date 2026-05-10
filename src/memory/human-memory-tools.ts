@@ -22,6 +22,9 @@ import {
   type MemoryReviewType,
 } from "./review-store";
 
+// 人类式记忆工具层，也可以理解为 Memory Router（记忆路由器）。
+// Router 的意思是：主 Agent 不需要知道底层是 LanceDB、episodes 还是 review item，
+// 只需要按“我要回忆偏好/经历/计划/证据”表达意图，这里负责把请求分发到正确的记忆层。
 export type MemoryRecallIntent =
   | "auto"
   | "semantic"
@@ -106,6 +109,16 @@ const memoryReflectSchema = z.object({
   reason: z.string().optional(),
 });
 
+/**
+ * 统一回忆入口。
+ *
+ * 依据用户意图在 semantic、episodic、procedural、prospective、reflective 和 social
+ * 记忆层之间路由，并返回证据链和相关 review item。
+ *
+ * @param input 查询文本、意图、时间范围、限定 kind 和返回条数。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 按记忆层分组的回忆结果。
+ */
 export async function memoryRecall(
   input: z.infer<typeof memoryRecallSchema>,
   context: HumanMemoryToolContext = {},
@@ -126,11 +139,15 @@ export async function memoryRecall(
   const should = (kind: MemoryRecallIntent) =>
     intent === "auto" || intent === kind || input.kinds?.includes(kind);
 
+  // semantic 是稳定事实层；这里先用通用向量/文本搜索兜底，
+  // 因为用户问“我在开发什么”这类问题通常不需要知道更细的底层分类。
   const semantic = should("semantic")
     ? (await store.searchMemories(input.query, limit)).map(toRecallMemory)
     : [];
   let episodic: ReturnType<typeof toRecallEpisode>[] = [];
   if (should("episodic")) {
+    // episodic 是情景记忆，指某次任务/对话/工具调用的摘要。
+    // 如果关键词没命中，仍按时间范围返回最近经历，避免“刚才做了什么”因为措辞不同查不到。
     const matchedEpisodes = searchEpisodes({
       agentId,
       query: input.query,
@@ -164,6 +181,8 @@ export async function memoryRecall(
     ? listReviewItems({ agentId, status: "pending", limit }, context.database)
     : [];
 
+  // memory.search 事件是证据链的一部分。后续记忆再巩固需要知道：
+  // 本轮 Agent 到底查过哪些旧记忆，才能判断新事实是否在修正旧事实。
   appendEvent({
     agent_id: agentId,
     task_id: context.taskId ?? null,
@@ -187,10 +206,19 @@ export async function memoryRecall(
   return { intent, semantic, episodic, prospective, procedural, reflective, social, reviewItems };
 }
 
+/**
+ * 显式写入一条长期记忆。
+ *
+ * @param input 记忆内容、kind、reason 和 confidence。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 写入后的记忆，或 `null`。
+ */
 export async function memoryRemember(
   input: z.infer<typeof memoryRememberSchema>,
   context: HumanMemoryToolContext = {},
 ): Promise<{ memory: ReturnType<typeof toRecallMemory> | null }> {
+  // memory_remember 是显式写入入口，适合“请记住……”这类用户明确授权的内容。
+  // 写入后会尝试同步 user.md / soul.md；同步失败只记事件，不影响记忆本身。
   const memory = await (context.store ?? defaultStore).addMemory({
     content: input.content,
     memory_type: mapKindToMemoryType(input.kind ?? "semantic"),
@@ -213,12 +241,23 @@ export async function memoryRemember(
   return { memory: memory ? toRecallMemory(memory) : null };
 }
 
+/**
+ * 管理前瞻记忆。
+ *
+ * `create` 用于新增计划，`list` 用于列出当前 active 计划，`complete` 用于标记完成。
+ *
+ * @param input 操作类型、内容、memoryId 和原因。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 当前记忆或计划列表。
+ */
 export async function memoryPlan(
   input: z.infer<typeof memoryPlanSchema>,
   context: HumanMemoryToolContext = {},
 ): Promise<{ memory: ReturnType<typeof toRecallMemory> | null; memories: ReturnType<typeof toRecallMemory>[] }> {
   const store = context.store ?? defaultStore;
   if (input.action === "create") {
+    // prospective memory 是前瞻记忆，表示未来要做的事或计划。
+    // v1 只负责“记得有这件事”，不负责真正定时通知。
     if (!input.content) return { memory: null, memories: [] };
     const memory = await store.addMemory({
       content: input.content,
@@ -243,6 +282,7 @@ export async function memoryPlan(
   }
 
   if (input.action === "complete") {
+    // 完成计划时不删除记忆，而是改状态。这样以后还能追溯“以前计划过什么”。
     if (!input.memoryId) return { memory: null, memories: [] };
     const memory = await store.setMemoryStatus(input.memoryId, "completed");
     return { memory: memory ? toRecallMemory(memory) : null, memories: [] };
@@ -254,10 +294,19 @@ export async function memoryPlan(
   return { memory: null, memories };
 }
 
+/**
+ * 查询记忆或 episode 的证据。
+ *
+ * @param input memory id 或 episode id，以及可选 kind。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 记忆/episode 及其来源证据。
+ */
 export async function memoryEvidence(
   input: z.infer<typeof memoryEvidenceSchema>,
   context: HumanMemoryToolContext = {},
 ): Promise<{ memory: ReturnType<typeof toRecallMemory> | null; episode: ReturnType<typeof toRecallEpisode> | null; source: unknown }> {
+  // evidence 是证据查询入口。用户问“你为什么这么判断”时，
+  // Agent 应该用这里返回的 source_event_ids/source_text 说明依据，而不是凭空解释。
   if (input.kind === "episode") {
     const episode = getEpisode(input.id, context.database);
     return { memory: null, episode: episode ? toRecallEpisode(episode) : null, source: episode?.source_event_ids ?? [] };
@@ -271,10 +320,21 @@ export async function memoryEvidence(
   };
 }
 
+/**
+ * 生成反思或程序记忆建议。
+ *
+ * 这里不直接改写 active memory，而是创建 review item 供后续整理流程使用。
+ *
+ * @param input 建议标题、拟写内容、类型、目标记忆、证据和置信度。
+ * @param context Agent、task、conversation 和可选数据库。
+ * @returns 新创建的 review item。
+ */
 export function memoryReflect(
   input: z.infer<typeof memoryReflectSchema>,
   context: HumanMemoryToolContext = {},
 ): { reviewItem: MemoryReviewItem } {
+  // 反思类内容抽象程度高，容易把一次性现象误写成长期规律。
+  // 所以工具层仍保留 review item：先记录建议，不直接改 active memory。
   const reviewItem = createReviewItem({
     agentId: context.agentId ?? "default",
     type: input.type as MemoryReviewType ?? "reflective_memory",
@@ -306,6 +366,12 @@ async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<Profil
   }
 }
 
+/**
+ * 创建带上下文的记忆工具集合。
+ *
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 可交给 AI SDK 的记忆工具集。
+ */
 export function createHumanMemoryTools(context: HumanMemoryToolContext = {}) {
   return {
     memory_recall: tool({
@@ -337,6 +403,8 @@ export function createHumanMemoryTools(context: HumanMemoryToolContext = {}) {
 }
 
 function inferRecallIntent(query: string): MemoryRecallIntent {
+  // 简单意图识别用于没有显式传 intent 的情况。
+  // 这不是最终判断，只是帮助 Agent 少走错层；真正答案仍来自工具返回的证据。
   if (/(刚才|上午|下午|昨天|上周|做了什么|发生了什么|之前)/.test(query)) return "episodic";
   if (/(后续|以后|计划|待办|提醒|要做什么)/.test(query)) return "prospective";
   if (/(怎么做|流程|步骤|注意什么|应该怎么)/.test(query)) return "procedural";
@@ -373,6 +441,8 @@ async function recallMemoriesByTypes(
 }
 
 function rankRecallMemories(memories: Memory[], query: string): Memory[] {
+  // 排序目标不是“只找最相似文本”，还要考虑置信度、最近更新、用户是否问偏好/变化轨迹。
+  // 例如“我以前有没有改过主意”应该优先命中带“曾经/现在/改为”的再巩固记忆。
   const queryTokens = tokenizeRecallText(query);
   const asksPreference = /(喜欢|偏好|习惯|风格|沟通)/.test(query);
   const asksChange = /(改过主意|变化|变过|曾经|以前|现在|不喜欢|改为|不再|后来)/.test(query);

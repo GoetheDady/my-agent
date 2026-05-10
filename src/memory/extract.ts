@@ -3,11 +3,23 @@ import { streamText } from "ai";
 import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
 import { getConfig } from "../core/config";
 
+/**
+ * 从一组用户/助手消息中提取长期记忆。
+ *
+ * 这是旧版兼容入口；新主流程由 `MemoryExtractionWorker` 在助手消息持久化后触发。
+ *
+ * @param userMessages 用户消息列表。
+ * @param assistantMessages 助手消息列表。
+ * @param sessionId 来源 session id。
+ * @returns 本次新增、更新或取代的记忆数量。
+ */
 export async function extractMemories(
   userMessages: string[],
   assistantMessages: string[],
   sessionId: string,
 ): Promise<number> {
+  // 旧版前端触发式记忆提取入口，保留用于兼容和手动调试。
+  // 新主流程已经迁移到 MemoryExtractionWorker：assistant message 持久化后由 lifecycle hook 触发。
   const conversationText = userMessages
     .map((m, i) => `用户：${m}\n助手：${assistantMessages[i] ?? ""}`)
     .join("\n\n")
@@ -15,7 +27,7 @@ export async function extractMemories(
 
   if (!conversationText) return 0;
 
-  // 检索已有相关记忆
+  // 先检索已有相关记忆，让模型可以选择 update/supersede/noop，而不是盲目新增。
   const lastUserMessage = userMessages.at(-1) ?? "";
   const existingMemories = await searchMemories(lastUserMessage, 10);
 
@@ -101,7 +113,8 @@ ${existingText ? `\n## 已有相关记忆\n${existingText}` : ""}`;
     for (const act of actions) {
       if (act.confidence !== undefined && act.confidence < 0.5) continue;
 
-      // 对于需要 memory_id 的操作，只允许操作本次检索到的记忆
+      // 安全边界：对于需要 memory_id 的操作，只允许操作本次检索到的记忆。
+      // 这样即使模型输出了其他 id，也不会越权改写无关记忆。
       const needsId = ["update", "supersede", "delete", "noop"].includes(act.action);
       if (needsId && (!act.memory_id || !validIds.has(act.memory_id))) continue;
 

@@ -51,7 +51,18 @@ export interface AppliedProfileUpdate {
   bullet: string;
 }
 
+/**
+ * 加载当前 Agent 和用户的 profile 文件。
+ *
+ * profile 文件包括 `soul.md` 和 `user.md`。缺失时默认会创建模板，
+ * 然后返回可注入 prompt 的稳定认知内容。
+ *
+ * @param options Agent/User 标识、项目根目录和是否自动创建缺失文件。
+ * @returns profile 文件列表，以及单独的 soul/user 内容。
+ */
 export function loadProfileContext(options: LoadProfileContextOptions = {}): ProfileContext {
+  // profile 文件是稳定认知层：user.md 描述“我对用户的长期认知”，
+  // soul.md 描述“我对自己的长期行为原则”。事件事实仍然通过记忆工具查。
   const rootDir = options.rootDir ?? getProjectRoot();
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
@@ -76,6 +87,12 @@ export function loadProfileContext(options: LoadProfileContextOptions = {}): Pro
   };
 }
 
+/**
+ * 计算 profile 文件路径。
+ *
+ * @param options Agent/User 标识和项目根目录。
+ * @returns soul.md 与 user.md 的绝对路径。
+ */
 export function getProfileFilePaths(options: {
   agentId?: string;
   userId?: string;
@@ -90,7 +107,18 @@ export function getProfileFilePaths(options: {
   };
 }
 
+/**
+ * 对 `soul.md` / `user.md` 执行结构化 bullet 更新。
+ *
+ * 方法会按固定 section 插入或替换条目，不会重写整个 Markdown，
+ * 因此用户手动补充的段落会尽量被保留。
+ *
+ * @param options Agent/User 标识、根目录和待更新的 soul/user bullet。
+ * @returns 实际写入的更新列表；完全重复的 bullet 不会出现在结果中。
+ */
 export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): AppliedProfileUpdate[] {
+  // 只做结构化 bullet 更新，不重写整个 Markdown。
+  // 这样用户手动写的段落、注释和额外 section 会被保留。
   const rootDir = options.rootDir ?? getProjectRoot();
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
@@ -130,6 +158,7 @@ function readProfileFile(path: string): string | null {
 }
 
 function safeProfileSegment(value: string): string {
+  // agentId/userId 会进入文件路径，必须清洗成安全路径片段，避免意外写到目录外。
   const normalized = value.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
   return normalized.length > 0 ? normalized : "default";
 }
@@ -138,6 +167,8 @@ function applyMarkdownBulletUpdates(
   content: string,
   updates: ProfileBulletUpdate[],
 ): { content: string; changed: boolean; applied: Array<{ section: string; bullet: string }> } {
+  // 一个同步批次可能同时包含身份、偏好、协作方式等多个更新。
+  // 每条更新独立 upsert，保证部分重复时不会产生重复 bullet。
   let nextContent = content;
   let changed = false;
   const applied: Array<{ section: string; bullet: string }> = [];
@@ -167,6 +198,8 @@ function upsertBulletInSection(
   content: string,
   update: { section: string; bullet: string; replaceMatching: RegExp[] },
 ): { content: string; changed: boolean } {
+  // upsert 表示“有则更新，无则插入”。
+  // replaceMatching 用于冲突事实，例如用户改名或偏好变化时替换旧结论。
   const lines = content.split(/\r?\n/);
   const sectionStart = lines.findIndex((line) => line.trim() === `## ${update.section}`);
   if (sectionStart === -1) {
@@ -188,6 +221,8 @@ function upsertBulletInSection(
     .some((line) => normalizeComparableBullet(line) === normalizeComparableBullet(update.bullet));
   if (bulletExists) return { content, changed: false };
 
+  // 同一 section 里命中 replaceMatching 的旧条目会被替换，
+  // 其余手写 bullet 不动，避免自动同步覆盖用户自己整理的内容。
   const matchingLineIndexes: number[] = [];
   for (let index = sectionStart + 1; index < sectionEnd; index += 1) {
     const line = lines[index];

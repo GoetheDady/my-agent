@@ -4,6 +4,22 @@ import { getDb } from "../core/database";
 import { getTask } from "./task-store";
 import type { TaskRecord } from "./task-types";
 
+/**
+ * 任务队列的核心约束：同一个 Agent 同时只能运行一个 task。
+ *
+ * 这里使用 SQLite transaction 把“检查 Agent 是否空闲”和“领取任务”合成一个原子操作。
+ * 这样即使后续接入多个 channel，也不会出现同一 Agent 并发处理两个任务的问题。
+ */
+/**
+ * 为指定 Agent 领取下一条可执行任务。
+ *
+ * 领取过程在数据库事务中完成：只有 Agent 处于 idle 时才会把最高优先级、
+ * 最早创建的 queued task 切换成 running。
+ *
+ * @param agentId 要领取任务的 Agent 标识。
+ * @param database 可选数据库连接。
+ * @returns 成功领取时返回任务记录；Agent 忙或无任务时返回 `null`。
+ */
 export function claimNextTask(agentId: string, database: Database = getDb()): TaskRecord | null {
   const claim = database.transaction(() => {
     const agent = getAgent(agentId, database);
@@ -30,12 +46,23 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
       return null;
     }
 
+    // 队列顺序：priority 高的优先；同优先级下创建更早的先执行。
     return claimQueuedTask(nextTask, database);
   });
 
   return claim();
 }
 
+/**
+ * 按指定 taskId 领取任务。
+ *
+ * 这个方法用于 Web 请求已经创建好 task 后立即启动执行。
+ * 它同样会检查 Agent 是否空闲，保证同一个 Agent 同一时间只跑一个任务。
+ *
+ * @param taskId 要领取的任务 id。
+ * @param database 可选数据库连接。
+ * @returns 成功领取时返回任务记录；任务不存在、不是 queued 或 Agent 忙时返回 `null`。
+ */
 export function claimTask(taskId: string, database: Database = getDb()): TaskRecord | null {
   const claim = database.transaction(() => {
     const task = getTask(taskId, database);
@@ -63,6 +90,7 @@ export function claimTask(taskId: string, database: Database = getDb()): TaskRec
 }
 
 function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
+  // task.status 和 agent.status 必须一起更新，二者共同表达“Agent 当前被哪个任务占用”。
   database
     .query(
       `UPDATE tasks

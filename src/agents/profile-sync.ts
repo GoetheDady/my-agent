@@ -37,12 +37,29 @@ interface ClassifiedProfileUpdates {
   skippedReason?: string;
 }
 
+/**
+ * 空 profile 同步器。
+ *
+ * 测试或禁用文件写入时可以传入它，保持调用链完整但不产生任何文件副作用。
+ *
+ * @returns 一个表示“已跳过”的同步结果。
+ */
 export const noopProfileSync: ProfileSyncPort = async () => ({
   status: "skipped",
   applied: [],
   skippedReason: "profile sync disabled",
 });
 
+/**
+ * 根据长期记忆同步 `user.md` 和 `soul.md`。
+ *
+ * 关系说明：memory 是证据层，保留事实、来源和变化轨迹；
+ * `user.md` / `soul.md` 是稳定认知层，只保存高优先级、简洁、当前有效的画像/原则。
+ * 同步失败只记录事件，不影响 memory 写入或聊天回复。
+ *
+ * @param input 本次同步的来源、候选记忆、Agent/User 标识和可选数据库连接。
+ * @returns 同步结果，包括完成/跳过/失败状态和实际写入的 profile 条目。
+ */
 export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<ProfileSyncResult> {
   const agentId = input.agentId ?? "default";
   const taskId = input.taskId ?? null;
@@ -77,6 +94,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
       return { status: "skipped", applied: [], skippedReason };
     }
 
+    // applyProfileFileUpdates 会按固定 section 更新，尽量保留用户手写内容，只改受控条目。
     const applied = applyProfileFileUpdates({
       agentId,
       userId: input.userId ?? "default",
@@ -137,6 +155,15 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
   }
 }
 
+/**
+ * 把记忆内容分类成 profile 文件更新。
+ *
+ * 该方法只处理 active 且置信度足够高的记忆，并把用户画像写入 `user.md`，
+ * 把 Agent 行为原则、流程经验和反思教训写入 `soul.md`。
+ *
+ * @param memories 待分类的记忆列表。
+ * @returns 分类后的 soul/user 更新集合，以及没有命中时的跳过原因。
+ */
 export function classifyProfileUpdates(
   memories: Array<Pick<Memory, "content" | "memory_type" | "status" | "confidence">>,
 ): ClassifiedProfileUpdates {
@@ -144,6 +171,7 @@ export function classifyProfileUpdates(
   const soulUpdates = new Map<string, ProfileBulletUpdate>();
 
   for (const memory of memories) {
+    // 只把 active 且置信度足够高的记忆沉淀到 profile；历史证据和低置信候选留在 memory 层。
     if (memory.status && memory.status !== "active") continue;
     if (memory.confidence < 0.7) continue;
     const content = normalizeContent(memory.content);
@@ -168,6 +196,7 @@ function classifyUserUpdates(content: string, memoryType: string): ProfileBullet
   const updates: ProfileBulletUpdate[] = [];
   const name = extractName(content);
   if (name) {
+    // 身份类信息采用 replaceMatching，保证“我叫张三”变成“我叫李四”时画像文件只保留当前结论。
     updates.push({
       section: "Identity",
       bullet: `name: ${name}`,
@@ -199,6 +228,7 @@ function classifyUserUpdates(content: string, memoryType: string): ProfileBullet
   }
 
   if (isUserPreference(content, memoryType)) {
+    // user.md 保存当前稳定偏好；偏好变化历史仍由 memory 的变化轨迹和 evidence 负责。
     updates.push({
       section: "Stable Preferences",
       bullet: stripUserSubject(content),
@@ -248,6 +278,7 @@ function classifySoulUpdates(content: string, memoryType: string): ProfileBullet
   }
 
   if (!voiceRule && !boundaryRule && !memoryRule && isProceduralOrReflective(content, memoryType)) {
+    // 程序记忆/反思记忆通常描述 Agent 以后应该如何做事，沉淀到 soul.md 的 Operating Principles。
     updates.push({
       section: "Operating Principles",
       bullet: stripAgentSubject(content),
@@ -347,6 +378,7 @@ function isAgentDirected(content: string): boolean {
 }
 
 function isTransientContent(content: string): boolean {
+  // 临时任务、工具输出和本轮上下文不进入画像文件，避免 user.md/soul.md 变成聊天记录。
   return /(刚才|今天|上午|下午|昨天|这次|本轮|临时|当前消息|工具输出|读取文件|写入文件)/.test(content)
     && !/(长期|以后|持续|稳定|偏好|喜欢|名字|称呼)/.test(content);
 }

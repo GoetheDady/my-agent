@@ -26,6 +26,10 @@ export interface ToolResult {
  * 1. 转换为绝对路径
  * 2. 检测符号链接
  * 3. 防止路径遍历（../）
+ *
+ * @param inputPath 用户或模型传入的相对路径。
+ * @returns 项目根目录下的绝对路径。
+ * @throws 检测到路径穿越或符号链接时抛出错误。
  */
 export function normalizePath(inputPath: string): string {
   const projectRoot = getProjectRoot();
@@ -63,6 +67,9 @@ export function normalizePath(inputPath: string): string {
  * 允许的路径包括：
  * 1. 白名单中的目录及其子目录
  * 2. 白名单中的文件
+ *
+ * @param absolutePath 已规范化的绝对路径。
+ * @returns 路径在白名单内时返回 `true`。
  */
 export function isPathInWhitelist(absolutePath: string): boolean {
   const config = loadConfig();
@@ -80,6 +87,12 @@ export function isPathInWhitelist(absolutePath: string): boolean {
   });
 }
 
+/**
+ * 检查原始输入路径是否可被写工具访问。
+ *
+ * @param inputPath 用户或模型传入的路径。
+ * @returns 路径规范化成功且位于白名单内时返回 `true`。
+ */
 export function isInputPathAllowlisted(inputPath: string): boolean {
   try {
     return isPathInWhitelist(normalizePath(inputPath));
@@ -96,7 +109,7 @@ export function isInputPathAllowlisted(inputPath: string): boolean {
  * 读取文件
  *
  * @param path 相对于项目根目录的路径
- * @returns 操作结果
+ * @returns 操作结果；成功时包含文件内容，失败时包含错误类型和建议。
  */
 export function readFile(path: string): ToolResult {
   try {
@@ -148,7 +161,7 @@ export function readFile(path: string): ToolResult {
  *   - 'create': 创建新文件，文件存在时失败
  *   - 'overwrite': 覆盖文件，不存在时创建
  *   - 'append': 追加到文件末尾，文件不存在时失败
- * @returns 操作结果
+ * @returns 操作结果；成功时包含写入路径和模式，失败时包含错误类型和建议。
  */
 export function writeFile(
   path: string,

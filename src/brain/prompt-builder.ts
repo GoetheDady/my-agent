@@ -26,18 +26,31 @@ export interface BuildAgentSystemPromptOptions {
   createProfileFiles?: boolean;
 }
 
+/**
+ * 构建 Agent 任务执行时使用的 system prompt。
+ *
+ * 该方法只注入稳定 profile 和当前 task 的 working memory；
+ * 长期记忆不直接注入 prompt，必须通过记忆工具查询。
+ *
+ * @param task 当前要执行的任务。
+ * @param database 可选数据库连接。
+ * @param options profile 上下文覆盖项，测试中可避免读写真实文件。
+ * @returns 完整 system prompt 字符串。
+ */
 export function buildAgentSystemPrompt(
   task: TaskRecord,
   database?: Database,
   options: BuildAgentSystemPromptOptions = {},
 ): string {
   const agent = getAgent(task.agent_id, database);
+  // profile 文件是稳定认知层，会注入 prompt；长期记忆仍坚持 Memory-as-Tool，不整体注入。
   const profileContext = options.profileContext ?? loadProfileContext({
     agentId: task.agent_id,
     userId: task.source_user_id,
     rootDir: options.profileRootDir,
     createIfMissing: options.createProfileFiles,
   });
+  // working memory 只保存当前 task 的临时状态，不等同于长期记忆。
   const workingMemory = listWorkingMemory(task.agent_id, task.id, database);
   const workingMemoryLines = Object.entries(workingMemory)
     .map(([key, value]) => `- ${key}: ${JSON.stringify(value)}`)
@@ -66,6 +79,7 @@ export function buildAgentSystemPrompt(
 function buildProfileContextSection(profileContext: ProfileContext): string {
   if (profileContext.files.length === 0) return "";
 
+  // 明确告诉模型：profile 是稳定背景，不是证据链；涉及历史事实仍要调用记忆工具。
   const lines = [
     "",
     `<profile-context>`,

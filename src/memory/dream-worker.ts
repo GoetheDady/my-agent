@@ -94,6 +94,22 @@ const defaultMemoryStore: DreamMemoryStore = {
 
 let running = false;
 
+/**
+ * Dream Worker：后台“睡眠整理”流程。
+ *
+ * 与每轮对话后的 MemoryExtractionWorker 不同，Dream Worker 面向一整天/一批 episodes：
+ * - dry-run：只预览 summary、去重和决策，不修改 active memory。
+ * - real-run：自动执行高置信、可审计、可撤销的整理决策。
+ *
+ * 安全原则：
+ * - 不硬删除记忆，只把旧记忆改成 inactive/superseded。
+ * - 每次应用都写 memory_decisions，保存 before/after 快照。
+ * - profile_sync 失败不回滚 dream decisions，只记录事件。
+ *
+ * @param options Dream Worker 运行配置，包括日期、是否 dry-run、数据库和可注入存储端口。
+ * @returns 本次整理的 summary、去重预览、决策列表和运行记录。
+ * @throws 当已有 Dream Worker 正在运行时抛出错误，保证整理串行执行。
+ */
 export async function runDreamWorker(
   options: {
     agentId?: string;
@@ -127,7 +143,9 @@ export async function runDreamWorker(
   }, database);
 
   try {
+    // 每次 dream 都先产生日总结；dry-run 返回临时 summary，real-run 才写入 daily_summaries。
     const summary = upsertDailySummary({ agentId, date, timezone, dryRun }, database);
+    // 先用 dry-run 去重获得候选组，real-run 再把候选组转成可审计 decision。
     const dedupePreview = await dedupeActiveMemories({
       dryRun: true,
       store: options.dedupeStore ?? memoryStore,
@@ -157,6 +175,7 @@ export async function runDreamWorker(
           store: memoryStore,
         }),
       ];
+    // dedupe 输出要体现 real-run 已经实际停用/替代了哪些记忆，供前端展示。
     const inactiveMemoryIds = decisions
       .filter((decision) => decision.status === "applied")
       .flatMap((decision) =>
@@ -172,6 +191,7 @@ export async function runDreamWorker(
     if (!dryRun && decisions.length > 0) {
       summary.memory_change_ids = decisions.map((decision) => decision.id);
       updateDailySummaryMemoryChanges(summary.id, summary.memory_change_ids, database);
+      // Dream Worker 沉淀出的 active memory 也要同步到 user.md / soul.md 稳定认知层。
       await syncProfilesForDreamDecisions({
         agentId,
         database,
@@ -240,6 +260,7 @@ async function applyExactDedupeDecisions(input: {
     const targetMemoryIds = [group.keptMemoryId, ...group.duplicateMemoryIds];
     const beforeSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
     if (beforeSnapshot.length !== targetMemoryIds.length) {
+      // 目标记忆缺失时跳过，避免一半应用一半失败造成不可解释状态。
       decisions.push(createMemoryDecision({
         agentId: input.agentId,
         dreamRunId: input.dreamRunId,
@@ -254,6 +275,7 @@ async function applyExactDedupeDecisions(input: {
       continue;
     }
 
+    // 确定重复：保留质量最高/置信更高的一条，其余只标 inactive，不删除。
     for (const duplicateId of group.duplicateMemoryIds) {
       await input.store.setMemoryStatus(duplicateId, "inactive");
     }
@@ -283,6 +305,7 @@ async function applyConflictUpdateDecisions(input: {
 }): Promise<MemoryDecisionRecord[]> {
   const { memories } = await input.store.listMemories({ status: "active", pageSize: 1000 });
   const byObject = new Map<string, { memory: Memory; polarity: "positive" | "negative"; object: string }[]>();
+  // v1 使用确定性规则识别“喜欢/不喜欢 X”这类偏好冲突，不依赖模型自由判断。
   for (const memory of memories) {
     const fact = extractPreferenceFact(memory.content);
     if (!fact) continue;
@@ -312,6 +335,7 @@ async function applyConflictUpdateDecisions(input: {
 
     const targetMemoryIds = [newest.memory.id, previous.memory.id];
     const beforeSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
+    // 冲突处理保留变化轨迹，而不是只留下最新偏好；这能回答“以前有没有改过主意”。
     const nextContent = hasChangeTrace(newest.memory.content)
       ? newest.memory.content
       : `用户曾经${formatPreferenceFact(previous)}；现在明确表示${formatPreferenceFact(newest)}。`;
@@ -354,6 +378,8 @@ async function applyEpisodeDerivedMemoryDecisions(input: {
   const joined = episodes.map((episode) => `${episode.title}\n${episode.summary}\n${episode.outcome}`).join("\n");
   if (episodes.length < 2 || joined.length === 0) return [];
 
+  // v1 先做少量确定性候选：多次 episode 反复出现的流程/风险才自动沉淀。
+  // 后续如果接入模型提炼，也必须保留 confidence 阈值和 decision 快照。
   const active = await input.store.listMemories({ status: "active", pageSize: 1000 });
   const candidates = [
     {
@@ -416,6 +442,7 @@ async function syncProfilesForDreamDecisions(input: {
   decisions: MemoryDecisionRecord[];
   store: DreamMemoryStore;
 }): Promise<void> {
+  // 只同步仍处于 active 的记忆；inactive/superseded 是历史证据，不应进入当前画像文件。
   const memoryIds = uniqueStrings(input.decisions
     .filter((decision) => decision.status === "applied")
     .flatMap((decision) => [
@@ -454,6 +481,15 @@ async function syncProfilesForDreamDecisions(input: {
   }
 }
 
+/**
+ * 获取某天的日总结。
+ *
+ * @param date 日期字符串，格式通常为 `YYYY-MM-DD`。
+ * @param agentId Agent 标识，默认 `default`。
+ * @param timezone 时区，默认 `Asia/Shanghai`。
+ * @param database 可选数据库连接。
+ * @returns 找到时返回日总结，否则返回 `null`。
+ */
 export function getDailySummary(
   date: string,
   agentId = "default",
@@ -470,6 +506,13 @@ export function getDailySummary(
   return row ? toDailySummary(row) : null;
 }
 
+/**
+ * 列出最近的日总结。
+ *
+ * @param params Agent 和数量限制。
+ * @param database 可选数据库连接。
+ * @returns 按日期倒序排列的日总结列表。
+ */
 export function listDailySummaries(
   params: { agentId?: string; limit?: number } = {},
   database: Database = getDb(),
@@ -500,6 +543,7 @@ function upsertDailySummary(
   }, database);
   const existing = getDailySummary(input.date, input.agentId, input.timezone, database);
   const now = Date.now();
+  // 目前 daily summary 是确定性摘要，避免 Dream Worker 在 MVP 阶段引入额外模型调用不稳定性。
   const summary: DailySummaryRecord = {
     id: existing?.id ?? crypto.randomUUID(),
     agent_id: input.agentId,
@@ -618,6 +662,8 @@ function dayRange(date: string, timezone: string): { from: number; to: number } 
 }
 
 function extractPreferenceFact(content: string): { polarity: "positive" | "negative"; object: string } | null {
+  // 用简单中文偏好句式抽取冲突对象，例如“喜欢西红柿”和“不喜欢西红柿”。
+  // 这是保守规则：识别不了就不自动合并，避免误改复杂偏好。
   const normalized = content
     .toLowerCase()
     .replace(/\s+/g, "")

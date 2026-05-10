@@ -19,11 +19,31 @@ type ConversationRow = {
   updated_at: number;
 };
 
+/**
+ * Web 渠道适配器。
+ *
+ * 负责把浏览器 session 消息转换为内部 conversation 和 task，
+ * 让后端 runtime 可以用统一方式处理 Web、微信、飞书等不同渠道。
+ */
 export class WebChannelAdapter implements ChannelAdapter {
   readonly channel = "web";
 
+  /**
+   * 创建 Web 渠道适配器。
+   *
+   * @param database 可选数据库连接。
+   */
   constructor(private readonly database: Database = getDb()) {}
 
+  /**
+   * 接收 Web 前端的一条用户消息，并转换成内部任务。
+   *
+   * 这里不调用模型，只做三件事：确保 conversation 存在、创建 queued task、
+   * 写 task.created 和 user.message 事件，作为后续记忆证据链。
+   *
+   * @param input Web 渠道输入，包括 session id、用户 id 和文本。
+   * @returns 内部 conversation id、目标 Agent 和新建 task。
+   */
   async receive(input: ChannelInput): Promise<ChannelReceiveResult> {
     const agentId = input.agentId ?? "default";
     const externalUserId = input.externalUserId ?? "default";
@@ -60,13 +80,22 @@ export class WebChannelAdapter implements ChannelAdapter {
     return { agentId, conversationId: conversation.id, task };
   }
 
+  /**
+   * 向 Web 渠道投递输出。
+   *
+   * Web 当前通过 HTTP stream 直接返回模型输出，因此这里是空实现。
+   *
+   * @param _output 渠道输出，占位参数。
+   */
   async deliver(_output: ChannelOutput): Promise<void> {
+    // Web 场景下模型输出通过 HTTP stream 直接回到前端，不需要额外投递。
     return Promise.resolve();
   }
 
   private ensureConversation(agentId: string, externalConversationId: string): ConversationRow {
     const existing = this.getConversation(externalConversationId);
     if (existing) {
+      // 同一个 sessionId 复用同一个 conversation，只刷新 updated_at。
       this.database
         .query("UPDATE conversations SET updated_at = ? WHERE id = ?")
         .run(Date.now(), existing.id);

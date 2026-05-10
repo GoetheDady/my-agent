@@ -9,6 +9,12 @@ import {
 
 const app = new Hono();
 
+/**
+ * Session API 面向 Web UI 的会话列表和历史消息。
+ *
+ * 注意：内部 Agent Runtime 使用 conversations/tasks/events；
+ * sessions/messages 是前端展示层，两者通过 WebChannelAdapter 的 externalConversationId 关联。
+ */
 app.get("/", (c) => c.json(listSessions()));
 
 app.post("/", async (c) => {

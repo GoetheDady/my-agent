@@ -39,6 +39,8 @@ let db: lancedb.Connection | null = null;
 let tbl: lancedb.Table | null = null;
 
 async function getTable(): Promise<lancedb.Table> {
+  // LanceDB 是向量数据库：它把文本对应的 embedding（向量）存起来，
+  // 方便用语义相似度查找“意思接近”的记忆，而不只靠关键词。
   if (tbl) return tbl;
 
   const dbPath = resolve(import.meta.dir, "../../data/memories.lancedb");
@@ -48,6 +50,8 @@ async function getTable(): Promise<lancedb.Table> {
   if (existing.includes(TABLE_NAME)) {
     tbl = await db.openTable(TABLE_NAME);
   } else {
+    // LanceDB 不能直接创建完全空表，因此先插入占位行，再立即删除。
+    // 这只是建表技巧，不会参与真实记忆查询。
     tbl = await db.createTable(TABLE_NAME, [
       {
         id: "__init__",
@@ -125,6 +129,14 @@ function toMemory(row: Record<string, unknown>): Memory {
 
 const BASE_FILTER = "user_id = 'default' AND agent_id = ''";
 
+/**
+ * 新增一条长期记忆。
+ *
+ * 方法会调用 embedding 服务生成向量，并把记忆写入 LanceDB。
+ *
+ * @param params 记忆内容、类型、来源 session/source text、置信度和状态。
+ * @returns 写入成功时返回记忆记录；embedding 失败时返回 `null`。
+ */
 export async function addMemory(params: {
   content: string;
   memory_type?: string;
@@ -133,6 +145,8 @@ export async function addMemory(params: {
   confidence?: number;
   status?: string;
 }): Promise<Memory | null> {
+  // 写入长期记忆时先生成 embedding。embedding 失败说明外部向量服务不可用，
+  // 这时返回 null，让上层记录失败或跳过，避免写入不可检索的数据。
   const { content, memory_type = "fact", source_session_id = "", source_text = "", confidence = 1.0, status = "active" } = params;
   const embedding = await embedText(content);
   if (embedding.length === 0) return null;
@@ -152,7 +166,18 @@ export async function addMemory(params: {
   return memory;
 }
 
+/**
+ * 更新一条记忆的文本内容。
+ *
+ * 更新后会重新生成 embedding，保证检索结果与新文本一致。
+ *
+ * @param id 记忆 id。
+ * @param content 新内容。
+ * @returns 更新后的记忆；记忆不存在或 embedding 失败时返回 `null`。
+ */
 export async function updateMemory(id: string, content: string): Promise<Memory | null> {
+  // LanceDB 当前更新路径采用“删旧行 + 加新行”。
+  // 业务上仍视为同一条记忆，因为 id 保持不变，证据链不会断。
   const table = await getTable();
   const rows = await table.query().where(`id = '${id}'`).limit(1).toArray();
   if (rows.length === 0) return null;
@@ -175,7 +200,17 @@ export async function updateMemory(id: string, content: string): Promise<Memory 
   return updated;
 }
 
+/**
+ * 根据快照恢复记忆。
+ *
+ * 主要用于撤销 Memory Decision，恢复内容、类型、状态和置信度。
+ *
+ * @param snapshot 记忆快照。
+ * @returns 恢复后的记忆；目标不存在或 embedding 失败时返回 `null`。
+ */
 export async function restoreMemorySnapshot(snapshot: MemorySnapshotRestore): Promise<Memory | null> {
+  // 用于撤销 Memory Decision。恢复内容/类型/状态/置信度后重新计算 embedding，
+  // 确保撤销后的记忆仍能按恢复后的文本被搜索到。
   const table = await getTable();
   const rows = await table.query().where(`id = '${snapshot.id}'`).limit(1).toArray();
   if (rows.length === 0) return null;
@@ -200,11 +235,21 @@ export async function restoreMemorySnapshot(snapshot: MemorySnapshotRestore): Pr
   return updated;
 }
 
+/**
+ * 将旧记忆标记为 superseded。
+ *
+ * superseded 表示已被新记忆取代，不再参与默认回忆，但仍保留历史轨迹。
+ *
+ * @param oldId 被取代的旧记忆 id。
+ * @param _params 兼容旧调用的参数，当前只使用 oldId。
+ */
 export async function supersedeMemory(oldId: string, _params: {
   content: string;
   memory_type?: string;
   confidence?: number;
 }): Promise<void> {
+  // superseded 表示“被新记忆取代”，不同于 delete。
+  // 旧记忆仍保留在库里，便于解释用户曾经如何改变过想法。
   const table = await getTable();
   const rows = await table.query().where(`id = '${oldId}'`).limit(1).toArray();
   if (rows.length === 0) return;
@@ -216,12 +261,28 @@ export async function supersedeMemory(oldId: string, _params: {
   await table.add([toRecord(updated)]);
 }
 
+/**
+ * 物理删除一条记忆。
+ *
+ * 自动整理流程不使用该方法；高风险场景优先通过 status 停用。
+ *
+ * @param id 要删除的记忆 id。
+ */
 export async function deleteMemory(id: string): Promise<void> {
   const table = await getTable();
   await table.delete(`id = '${id}'`);
 }
 
+/**
+ * 更新记忆状态。
+ *
+ * @param id 记忆 id。
+ * @param status 新状态，例如 `active`、`inactive`、`superseded`、`completed`。
+ * @returns 更新后的记忆；记忆不存在时返回 `null`。
+ */
 export async function setMemoryStatus(id: string, status: string): Promise<Memory | null> {
+  // status 是记忆生命周期控制：active 参与回忆，inactive/superseded/completed 默认不参与。
+  // 自动整理优先改 status，不做物理删除。
   const table = await getTable();
   const rows = await table.query().where(`id = '${id}'`).limit(1).toArray();
   if (rows.length === 0) return null;
@@ -234,6 +295,13 @@ export async function setMemoryStatus(id: string, status: string): Promise<Memor
   return updated;
 }
 
+/**
+ * 记录一次记忆被访问。
+ *
+ * 会更新 `last_accessed_at` 并增加 `access_count`，用于检索排序和记忆强化。
+ *
+ * @param id 记忆 id。
+ */
 export async function touchMemory(id: string): Promise<void> {
   const table = await getTable();
   const rows = await table.query().where(`id = '${id}'`).limit(1).toArray();
@@ -251,6 +319,8 @@ export async function touchMemory(id: string): Promise<void> {
 }
 
 function memoryDecay(memory_type: string, lastAccessedAt: number): number {
+  // 衰减表示“长期不用的记忆权重降低”。fact 衰减为 1，
+  // 因为稳定事实不应该仅因最近没被问到就被遗忘。
   const days = (Date.now() - lastAccessedAt) / (1000 * 60 * 60 * 24);
   switch (memory_type) {
     case "fact":       return 1.0;
@@ -300,10 +370,21 @@ const VECTOR_WEIGHT = 0.7;
 const TEXT_WEIGHT = 0.3;
 const MMR_LAMBDA = 0.7;
 
+/**
+ * 搜索 active 长期记忆。
+ *
+ * 使用向量相似度、文本相关性和记忆衰减混合排序，并对返回记忆执行 touch。
+ *
+ * @param query 查询文本。
+ * @param topN 最大返回条数。
+ * @returns 排序后的相关 active 记忆列表。
+ */
 export async function searchMemories(
   query: string,
   topN: number = 5,
 ): Promise<Memory[]> {
+  // 混合检索：向量相似度负责“意思像不像”，TF-IDF 负责“关键词有没有命中”。
+  // TF-IDF 是一种文本相关性算法，这里用于补足专有名词、中文短词和项目名检索。
   const queryEmbedding = await embedText(query);
   if (queryEmbedding.length === 0) return [];
 
@@ -365,6 +446,8 @@ export async function searchMemories(
   const selected: typeof scored = [];
   for (const s of scored) {
     if (selected.length >= topN) break;
+    // MMR 是 Maximal Marginal Relevance，意思是“既相关又尽量多样”。
+    // 它避免搜索结果全是同一条事实的轻微改写，给 Agent 更多上下文。
     const tooSimilar = selected.some(sel =>
       cosineSimilarity(s.mem.embedding, sel.mem.embedding) > (1 - MMR_LAMBDA)
     );
@@ -394,6 +477,14 @@ export async function searchMemories(
   }));
 }
 
+/**
+ * 分页列出记忆。
+ *
+ * 管理 UI 使用该方法查看记忆列表；Agent 回忆优先使用 `searchMemories` 或 `memory_recall`。
+ *
+ * @param params 分页、类型、状态和搜索条件。
+ * @returns 当前页记忆和过滤后的总数。
+ */
 export async function listMemories(params: {
   page?: number;
   pageSize?: number;
@@ -401,6 +492,8 @@ export async function listMemories(params: {
   status?: string;
   search?: string;
 }): Promise<{ memories: Memory[]; total: number }> {
+  // 管理页列表偏向可解释和分页，不追求复杂排序；
+  // 真正给 Agent 回忆使用的是 searchMemories / memory_recall。
   const { page = 1, pageSize = 20, type, status = "active", search } = params;
   const table = await getTable();
 
@@ -438,12 +531,23 @@ export async function listMemories(params: {
   return { memories, total };
 }
 
+/**
+ * 获取单条记忆。
+ *
+ * @param id 记忆 id。
+ * @returns 找到时返回记忆，否则返回 `null`。
+ */
 export async function getMemory(id: string): Promise<Memory | null> {
   const table = await getTable();
   const rows = await table.query().where(`id = '${id}'`).limit(1).toArray();
   return rows.length > 0 ? toMemory(rows[0] as unknown as Record<string, unknown>) : null;
 }
 
+/**
+ * 获取记忆统计信息。
+ *
+ * @returns 总数、按类型分组数量和按状态分组数量。
+ */
 export async function getMemoryStats(): Promise<{
   total: number;
   byType: Record<string, number>;

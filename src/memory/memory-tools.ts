@@ -75,6 +75,7 @@ function isSuspicious(content: string): boolean {
 }
 
 function toToolMemory(memory: Memory): ToolMemory | null {
+  // 记忆是历史资料，不是系统指令；输出给模型前过滤明显提示词注入片段。
   if (isSuspicious(memory.content)) return null;
 
   return {
@@ -98,6 +99,13 @@ export interface ToolMemory {
   updated_at: number;
 }
 
+/**
+ * 搜索长期记忆，并记录 memory.search 事件。
+ *
+ * @param input 查询文本和返回数量限制。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 适合工具输出的记忆列表。
+ */
 export async function memorySearch(
   input: { query: string; limit?: number },
   context: MemoryToolContext = {},
@@ -107,6 +115,7 @@ export async function memorySearch(
     .map(toToolMemory)
     .filter((memory): memory is ToolMemory => memory !== null);
 
+  // memory.search 事件必须带 task/conversation 上下文，供本轮记忆再巩固判断“哪些旧记忆被唤起”。
   appendEvent({
     ...contextIds(context),
     type: "memory.search",
@@ -116,6 +125,13 @@ export async function memorySearch(
   return { memories };
 }
 
+/**
+ * 读取单条长期记忆。
+ *
+ * @param input 记忆 id。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 找到时返回记忆，否则返回 `null`。
+ */
 export async function memoryGet(
   input: { memoryId: string },
   context: MemoryToolContext = {},
@@ -124,6 +140,15 @@ export async function memoryGet(
   return { memory: memory ? toToolMemory(memory) : null };
 }
 
+/**
+ * 写入一条已生效长期记忆。
+ *
+ * 写入前会做确定性去重；写入成功后会尝试同步 profile 文件。
+ *
+ * @param input 记忆内容、原因、证据事件、类型和置信度。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 写入或命中的已有记忆。
+ */
 export async function memoryPropose(
   input: {
     content: string;
@@ -136,6 +161,7 @@ export async function memoryPropose(
 ): Promise<{ memory: ToolMemory | null }> {
   const store = getStore(context);
   const { memories: activeMemories } = await store.listMemories({ status: "active", pageSize: 1000 });
+  // 主 Agent 写记忆时也做确定性去重，避免和后台 worker 写出重复 active memory。
   const duplicate = findDuplicateMemoryContent(input.content, activeMemories);
   const memory = duplicate ?? (await store.addMemory({
     content: input.content,
@@ -161,6 +187,7 @@ export async function memoryPropose(
   }, context.database);
 
   if (memory && !duplicate) {
+    // 记忆工具直接写 active memory；写入成功后同步 profile，但 profile 同步失败不影响工具结果。
     await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
       agentId: context.agentId ?? "default",
       userId: "default",
@@ -177,6 +204,13 @@ export async function memoryPropose(
   return { memory: memory ? toToolMemory(memory) : null };
 }
 
+/**
+ * 更新一条长期记忆。
+ *
+ * @param input 记忆 id、更新后的完整内容、原因和证据事件。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 更新后的记忆；不存在或更新失败时返回 `null`。
+ */
 export async function memoryUpdate(
   input: {
     memoryId: string;
@@ -188,6 +222,7 @@ export async function memoryUpdate(
 ): Promise<{ memory: ToolMemory | null }> {
   const memory = await getStore(context).updateMemory(input.memoryId, input.patch);
 
+  // 更新记忆时记录 reason/evidence，后续用户追问“依据是什么”时可以回溯。
   appendEvent({
     ...contextIds(context),
     type: "memory.update",
@@ -219,6 +254,7 @@ async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<Profil
   try {
     await sync(input);
   } catch (error) {
+    // profile 文件是派生层，失败只写事件，不让工具调用表现为失败。
     appendEvent({
       agent_id: input.agentId ?? "default",
       task_id: input.taskId ?? null,
@@ -233,10 +269,20 @@ async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<Profil
   }
 }
 
+/**
+ * 停用一条长期记忆。
+ *
+ * 这里不会物理删除，只把状态改为 inactive，便于审计和撤销。
+ *
+ * @param input 记忆 id 和停用原因。
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 停用后的记忆；不存在时返回 `null`。
+ */
 export async function memoryForget(
   input: { memoryId: string; reason: string },
   context: MemoryToolContext = {},
 ): Promise<{ memory: ToolMemory | null }> {
+  // “遗忘”不硬删除，只标记 inactive；这样仍可审计和撤销。
   const memory = await getStore(context).setMemoryStatus(input.memoryId, "inactive");
 
   appendEvent({
@@ -277,6 +323,12 @@ const memoryForgetSchema = z.object({
   reason: z.string().describe("为什么停用"),
 });
 
+/**
+ * 创建基础记忆工具集合。
+ *
+ * @param context Agent、task、conversation 和可选存储端口。
+ * @returns 可交给 AI SDK 的基础记忆工具集合。
+ */
 export function createMemoryTools(context: MemoryToolContext = {}) {
   return {
     memory_search: tool({

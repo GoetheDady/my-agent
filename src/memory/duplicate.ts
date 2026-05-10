@@ -36,6 +36,13 @@ const predicateMarkers = [
 const positivePreferenceMarkers = ["偏好", "喜欢", "需要", "想要", "希望", "倾向"];
 const negativePreferenceMarkers = ["不偏好", "不喜欢", "不需要", "不想要", "讨厌"];
 
+/**
+ * 在已有记忆中查找与候选内容重复的记忆。
+ *
+ * @param content 候选记忆内容。
+ * @param memories 已有记忆列表。
+ * @returns 找到时返回第一条重复记忆，否则返回 `null`。
+ */
 export function findDuplicateMemoryContent(content: string, memories: Memory[]): Memory | null {
   for (const memory of memories) {
     if (isDuplicateMemoryContent(content, memory.content)) return memory;
@@ -43,10 +50,24 @@ export function findDuplicateMemoryContent(content: string, memories: Memory[]):
   return null;
 }
 
+/**
+ * 判断两段记忆内容是否表达同一事实。
+ *
+ * 会处理“请记住/用户/我”等前缀，以及偏好对象包含关系；
+ * 正负偏好相反时不会判为重复。
+ *
+ * @param candidateContent 候选内容。
+ * @param existingContent 已有内容。
+ * @returns 两者可确定为重复时返回 `true`。
+ */
 export function isDuplicateMemoryContent(candidateContent: string, existingContent: string): boolean {
+  // 重复判断不是简单字符串相等，还会去掉“请记住/用户/我”等主语前缀，
+  // 并提取“喜欢 X / 偏好 X / 正在开发 X”这类谓词后的核心事实。
   const candidate = normalizeMemoryContent(candidateContent);
   const existing = normalizeMemoryContent(existingContent);
   if (!candidate || !existing) return false;
+  // 正负偏好相反时不能当重复处理，例如“喜欢西红柿”和“不喜欢西红柿”。
+  // 这种情况交给记忆再巩固生成变化轨迹。
   if (hasOppositePolarity(candidate, existing)) return false;
   if (candidate === existing) return true;
 
@@ -61,6 +82,12 @@ export function isDuplicateMemoryContent(candidateContent: string, existingConte
   return false;
 }
 
+/**
+ * 规范化记忆内容，便于重复判断。
+ *
+ * @param content 原始记忆内容。
+ * @returns 去空白、去标点、转小写后的字符串。
+ */
 export function normalizeMemoryContent(content: string): string {
   return content
     .toLowerCase()
@@ -108,6 +135,8 @@ function keysMatch(a: string, b: string): boolean {
 }
 
 function preferenceObjectKey(normalized: string): string | null {
+  // 偏好对象 key 用来识别“fact 包含 preference”的重复：
+  // 例如“我偏好浅色 UI”和“用户偏好浅色 UI”应该归为同一事实。
   for (const marker of negativePreferenceMarkers) {
     const index = normalized.indexOf(marker);
     if (index >= 0) {

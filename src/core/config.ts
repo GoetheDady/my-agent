@@ -59,10 +59,12 @@ const DEFAULT_MODEL = "deepseek-v4-flash";
 // ============================================================
 
 /**
- * 获取项目根目录
+ * 获取项目根目录。
  *
- * Bun 和 Node 的 import.meta 行为不同，做兼容处理。
- * Bun 有 import.meta.dir，Node 需要用 fileURLToPath。
+ * Bun 和 Node 的 `import.meta` 行为不同，所以这里做兼容处理：
+ * Bun 可以使用 `import.meta.dir`，Node 需要通过 `fileURLToPath` 计算。
+ *
+ * @returns 项目根目录的绝对路径。
  */
 export function getProjectRoot(): string {
   const meta = import.meta as unknown as { dir?: string };
@@ -74,9 +76,12 @@ export function getProjectRoot(): string {
 }
 
 /**
- * 加载配置
+ * 加载应用配置。
  *
- * 优先级：环境变量 > 配置文件 > 默认值
+ * 配置优先级为：环境变量 > `config.json` > 默认值。
+ *
+ * @returns 完整应用配置。
+ * @throws 缺少 DeepSeek API Key 时抛出错误。
  */
 export function loadConfig(): AppConfig {
   const root = getProjectRoot();
@@ -110,7 +115,8 @@ export function loadConfig(): AppConfig {
     );
   }
 
-  // Strip /anthropic suffix if present (migration from old Anthropic-format config)
+  // 兼容旧 Anthropic 格式配置：以前可能把 baseURL 写成 /anthropic 结尾。
+  // DeepSeek SDK 需要基础地址本身，所以这里统一剥掉后缀。
   let baseURL = fileConfig.provider?.baseURL;
   if (baseURL?.endsWith("/anthropic")) {
     baseURL = baseURL.slice(0, -"/anthropic".length);
@@ -134,14 +140,27 @@ export function loadConfig(): AppConfig {
 
 let _config: AppConfig | null = null;
 
+/**
+ * 获取缓存后的应用配置。
+ *
+ * @returns 应用配置；首次调用会读取文件和环境变量，后续复用缓存。
+ */
 export function getConfig(): AppConfig {
+  // 配置只缓存一次，避免每次工具调用都读文件。
+  // 如果后续做配置 UI，需要在 saveConfig 后同步刷新这个缓存。
   if (!_config) {
     _config = loadConfig();
   }
   return _config;
 }
 
+/**
+ * 保存完整应用配置到 `config.json`。
+ *
+ * @param config 要写入的完整配置对象。
+ */
 export function saveConfig(config: AppConfig): void {
+  // 当前写回整个 config.json。调用方需要传入完整配置，避免局部覆盖丢字段。
   const root = getProjectRoot();
   const configPath = resolve(root, "config.json");
 

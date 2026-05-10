@@ -10,8 +10,16 @@ import { resolve } from "path";
 
 let db: Database | null = null;
 
+/**
+ * 初始化 SQLite 数据库 schema。
+ *
+ * schema 包括 Web 会话、Agent 运行时、任务队列、事件日志、工作记忆、
+ * channel 映射、episode、Dream Worker 和记忆整理决策等表。
+ *
+ * @param database 要初始化的 SQLite 数据库连接。
+ */
 export function initializeDatabaseSchema(database: Database): void {
-  // 建表
+  // 会话层：面向 Web UI 的 session/message 历史，负责刷新、切换会话和展示工具卡。
   database.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -34,6 +42,8 @@ export function initializeDatabaseSchema(database: Database): void {
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)`);
 
+  // Runtime 层：Agent、task、event 是后端执行的主干。
+  // task 表示一次待执行/执行中的工作；event 是所有运行过程的可观察日志。
   database.run(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -79,6 +89,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Working memory 是 task 级短期状态，不进入长期记忆，也不会跨 task 自动复用。
   database.run(`
     CREATE TABLE IF NOT EXISTS working_memory (
       agent_id TEXT NOT NULL,
@@ -92,6 +103,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Channel 层：把 Web、未来微信/飞书等外部会话映射成内部 conversation/user。
   database.run(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
@@ -106,6 +118,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Channel identity：把外部渠道用户映射到内部 user_id，后续微信/飞书会依赖这里。
   database.run(`
     CREATE TABLE IF NOT EXISTS channel_identities (
       id TEXT PRIMARY KEY,
@@ -119,6 +132,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Episodic 层：每个完成 task 生成一条经历摘要，用来回答“刚才/昨天做过什么”。
   database.run(`
     CREATE TABLE IF NOT EXISTS episodes (
       id TEXT PRIMARY KEY,
@@ -145,6 +159,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Dream 层：每日总结、整理运行记录和整理决策，支撑自动记忆整理与撤销审计。
   database.run(`
     CREATE TABLE IF NOT EXISTS daily_summaries (
       id TEXT PRIMARY KEY,
@@ -163,6 +178,7 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // memory_review_items 是早期人工审查方案的兼容表；新闭环以 memory_decisions 为主。
   database.run(`
     CREATE TABLE IF NOT EXISTS memory_review_items (
       id TEXT PRIMARY KEY,
@@ -241,6 +257,7 @@ export function initializeDatabaseSchema(database: Database): void {
     `CREATE INDEX IF NOT EXISTS idx_dream_runs_agent_date ON dream_runs(agent_id, date, trigger, dry_run, status)`,
   );
   database.run(
+    // scheduled real-run 每天只允许一个 completed 记录，避免服务重启后重复整理。
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_dream_runs_scheduled_completed
      ON dream_runs(agent_id, date, trigger, dry_run)
      WHERE trigger = 'scheduled' AND dry_run = 0 AND status = 'completed'`,
@@ -254,6 +271,13 @@ export function initializeDatabaseSchema(database: Database): void {
   );
 }
 
+/**
+ * 获取全局 SQLite 数据库连接。
+ *
+ * 首次调用会创建 `data/agent.sqlite`，初始化 schema，并启用 WAL 和外键约束。
+ *
+ * @returns 全局数据库连接。
+ */
 export function getDb(): Database {
   if (db) return db;
 
@@ -271,6 +295,11 @@ export function getDb(): Database {
   return db;
 }
 
+/**
+ * 关闭全局 SQLite 数据库连接。
+ *
+ * 主要用于测试或进程退出前清理资源。
+ */
 export function closeDb(): void {
   if (db) {
     db.close();
