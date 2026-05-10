@@ -8,7 +8,7 @@ import {
   getMemoryStats,
   searchMemories,
 } from "../memory/store";
-import { extractMemories } from "../memory/memory";
+import { extractMemories } from "../memory/legacy/memory";
 import { dedupeActiveMemories } from "../memory/dedupe";
 import { listDailySummaries, listDreamRuns, runDreamWorker } from "../memory/dream-worker";
 import { listMemoryDecisions, undoMemoryDecision } from "../memory/decision-store";

@@ -8,7 +8,8 @@
 
 ## Stable Preferences
 
-- 偏好浅色、密度适中的 UI
+- 的浏览器测试稳定偏好代码是 MEM0510
+- 的UI偏好是浅色、中等密度、舒适
 
 ## Current Context
 
