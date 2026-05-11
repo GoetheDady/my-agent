@@ -1,10 +1,10 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { readFile, writeFile, isInputPathAllowlisted } from './tool-executor';
+import { readFile, writeFile, isInputPathAllowlisted } from './executor';
 import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
 import { createHumanMemoryTools } from '../memory/human-memory-tools';
-import { evaluateToolPolicy } from './tool-policy';
-import { buildAiToolSet, registerTool } from './tool-registry';
+import { evaluateToolPolicy } from './policy';
+import { buildAiToolSet, registerTool } from './registry';
 
 const readFileSchema = z.object({
   path: z.string().describe('文件路径（相对或绝对）'),

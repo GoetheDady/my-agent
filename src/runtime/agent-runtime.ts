@@ -8,8 +8,8 @@ import {
 import { createDeepSeek, deepseek } from "@ai-sdk/deepseek";
 import type { Database } from "bun:sqlite";
 import { appendEvent } from "../events/event-log";
-import { buildAgentSystemPrompt } from "../brain/prompt-builder";
-import { buildAgentTools, tools } from "../brain/tools";
+import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
+import { buildAgentTools, tools } from "../tools/service";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { upsertEpisodeForTask } from "../memory/episode-store";

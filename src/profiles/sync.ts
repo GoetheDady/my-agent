@@ -2,9 +2,9 @@ import type { Database } from "bun:sqlite";
 import {
   applyProfileFileUpdates,
   type AppliedProfileUpdate,
-} from "../profile-files";
-import { appendEvent } from "../../events/event-log";
-import type { Memory } from "../../memory/storage/store";
+} from "./files";
+import { appendEvent } from "../events/event-log";
+import type { Memory } from "../memory/storage/store";
 import { classifyProfileUpdates } from "./classifier";
 
 export { classifyProfileUpdates } from "./classifier";

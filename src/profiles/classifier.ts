@@ -1,5 +1,5 @@
-import type { ProfileBulletUpdate } from "../profile-files";
-import type { Memory } from "../../memory/storage/store";
+import type { Memory } from "../memory/storage/store";
+import type { ProfileBulletUpdate } from "./files";
 
 export interface ClassifiedProfileUpdates {
   soulUpdates: ProfileBulletUpdate[];

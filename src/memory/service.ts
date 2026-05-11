@@ -3,7 +3,7 @@ import {
   syncProfileFromMemories,
   type ProfileSyncPort,
   type ProfileSyncSource,
-} from "../agents/profile-sync";
+} from "../profiles/sync";
 import { appendEvent } from "../events/event-log";
 import {
   addMemory,

@@ -33,9 +33,9 @@ bun run build        # 构建到 web/dist
 - LanceDB (`data/memories.lancedb`)：向量记忆存储，智谱 AI embedding-3（2048 dims）。
 - Profile 文件默认在 `data/profiles/` 下，例如 `data/profiles/agents/default/soul.md` 和 `data/profiles/users/default/user.md`。可通过 `MY_AGENT_DATA_DIR` 改运行时数据根目录。
 
-**Agent 系统** (`src/agents/`):
+**Agent 系统** (`src/agents/`, `src/runtime/`):
 - 启动时 `ensureDefaultAgent()` 创建唯一默认 Agent（`id: "default"`）。
-- `runAgentTask()` 编排：标记运行 → 构建 system prompt → 注入记忆 → `streamText` → 标记完成/失败。
+- `runAgentTask()` 编排：标记运行 → 构建 system prompt → 构建工具集 → `streamText` → 标记完成/失败。
 - Agent 状态：`idle | running | paused | error`。45s 模型超时 + abort 信号处理。
 
 **任务系统** (`src/tasks/`):
@@ -48,8 +48,9 @@ bun run build        # 构建到 web/dist
 - 处理器异步触发（`Promise.resolve().then()`），错误被捕获并记录。
 - 在 `main.ts` 通过 `registerMemoryLifecycleHooks()` 注册。
 
-**工具系统** (`src/brain/`):
-- `registerTool({ name, tool, toolset, category, createsCandidateMemory? })` 注册工具。
+**工具系统** (`src/tools/`):
+- `registerTool({ name, tool, toolset, category })` 注册工具。
+- `src/tools/service.ts` 是工具系统门面，统一提供工具列表、工具集构建、权限评估和执行包装。
 - `buildAgentTools(context: MemoryToolContext)` 工厂函数，为记忆工具注入 `agentId/taskId/conversationId` 上下文。
 - 只读工具默认允许，写工具需审批（除非加入白名单）。
 
@@ -113,7 +114,7 @@ ensureDefaultAgent(db);
 
 **LanceDB 不 mock**：需要真实文件 DB。若 native bindings 不可用，用 `test.skipIf(!lanceDbAvailable)` 跳过。
 
-常用测试 fixture：`withRunnerDb()`（agent-runner）、`createWorkerDb()`（extraction worker）、`withMemoryToolDb()`（memory tools）。
+常用测试 fixture：`withRunnerDb()`（agent runtime）、`createWorkerDb()`（extraction worker）、`withMemoryToolDb()`（memory tools）。
 
 ## Gotchas
 

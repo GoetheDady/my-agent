@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { updateAssistantToolPart } from "../../channels/session-api";
+import { updateAssistantToolPart } from "../../sessions/service";
 import { appendEvent } from "../../events/event-log";
 import type { MemoryExtractionJob } from "./types";
 

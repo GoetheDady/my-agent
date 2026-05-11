@@ -1,5 +1,5 @@
 import { getDb } from "../../core/database";
-import { syncProfileFromMemories } from "../../agents/profile/profile-sync";
+import { syncProfileFromMemories } from "../../profiles/sync";
 import { appendEvent } from "../../events/event-log";
 import { dedupeActiveMemories } from "../dedupe";
 import {

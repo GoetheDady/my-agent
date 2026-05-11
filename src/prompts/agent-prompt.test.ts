@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { createTask } from "../tasks/task-store";
-import { buildAgentSystemPrompt } from "./prompt-builder";
+import { buildAgentSystemPrompt } from "./agent-prompt";
 
 function withPromptDb<T>(run: (db: Database) => T): T {
   const db = new Database(":memory:");

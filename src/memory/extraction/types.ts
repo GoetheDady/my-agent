@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ProfileSyncPort } from "../../agents/profile/profile-sync";
+import type { ProfileSyncPort } from "../../profiles/sync";
 import type {
   addMemory,
   getMemory,

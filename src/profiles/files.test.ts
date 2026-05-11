@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { applyProfileFileUpdates, loadProfileContext } from "./profile-files";
+import { applyProfileFileUpdates, loadProfileContext } from "./files";
 
 function withTempDir<T>(run: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "my-agent-profile-"));

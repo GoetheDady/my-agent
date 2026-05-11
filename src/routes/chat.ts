@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { generateText } from "ai";
 import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
-import { createSession, appendMessage, getSession, updateSessionTitle, type SessionMessage } from "../channels/session-api";
+import { createSession, appendMessage, getSession, updateSessionTitle, type SessionMessage } from "../sessions/service";
 import { getConfig } from "../core/config";
 import { extractAssistantText, serializeAssistantPartsForStorage } from "../channels/message-parts";
-import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../agents/agent-runner";
+import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../runtime/agent-runtime";
 import { WebChannelAdapter } from "../channels/web-channel";
 import { emitLifecycleHook } from "../lifecycle/hooks";
 

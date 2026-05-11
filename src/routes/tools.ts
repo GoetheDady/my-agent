@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getConfig, saveConfig } from "../core/config";
-import { getSessionMessages } from "../channels/session-api";
-import { normalizePath } from "../brain/tool-executor";
+import { getSessionMessages } from "../sessions/service";
+import { normalizePath } from "../tools/service";
 
 const app = new Hono();
 

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { tool } from "ai";
 import { z } from "zod";
-import { getTool, listToolsForAgent, registerTool } from "./tool-registry";
-import "./tools";
+import { getTool, listToolsForAgent, registerTool } from "./registry";
+import "./service";
 
 describe("tool registry", () => {
   test("registers built-in tools", () => {

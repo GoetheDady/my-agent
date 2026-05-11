@@ -86,20 +86,23 @@ cd web && bun run build
 
 ```text
 src/
-├── agents/      # Agent 注册、运行、profile 文件同步
-├── brain/       # Prompt 构建、工具注册、工具策略和工具执行
+├── agents/      # Agent 注册、类型和状态
 ├── channels/    # Web / 未来微信飞书等渠道适配
 ├── collab/      # 未来多 Agent 协作预留目录
 ├── core/        # 配置、数据库、运行时兼容层
 ├── events/      # Runtime 事件系统
 ├── guards/      # 未来安全边界和守卫逻辑预留目录
 ├── lifecycle/   # 生命周期 hook 总线
-├── memory/      # 长期记忆、工作记忆、情景记忆、Dream Worker
+├── memory/      # MemoryService、记忆存储、提取和 Dream Worker
 ├── plugins/     # 未来插件系统预留目录
+├── profiles/    # ProfileService，维护 user.md / soul.md
+├── prompts/     # Agent prompt 构建
 ├── routes/      # HTTP API 路由
-├── scripts/     # 一次性脚本预留目录
+├── runtime/     # AgentRuntimeService，编排 Agent 执行
+├── sessions/    # SessionService，会话和消息历史
 ├── tasks/       # 任务队列和任务状态
 ├── telemetry/   # 未来遥测预留目录
+├── tools/       # Agent 工具外壳、注册、权限和工具集
 └── main.ts      # 后端入口
 ```
 
@@ -119,28 +122,41 @@ src/
 - `src/agents/agent-types.ts`：Agent、Agent 状态和相关类型定义。
 - `src/agents/agent-registry.ts`：Agent 注册表。负责创建、读取和更新默认 Agent。
 - `src/agents/agent-registry.test.ts`：覆盖默认 Agent 创建和状态更新。
-- `src/agents/agent-runner.ts`：Agent 执行器。负责任务运行、构建 prompt、调用模型、处理工具调用和保存回复。
-- `src/agents/agent-runner.test.ts`：覆盖 Agent 执行流程、任务状态和异常处理。
-- `src/agents/profile-files.ts`：读取和更新 `data/profiles/agents/default/soul.md`、`data/profiles/users/default/user.md`。
-- `src/agents/profile-files.test.ts`：覆盖 profile 文件读写和结构化 Markdown 更新。
-- `src/agents/profile-sync.ts`：profile 同步入口的兼容导出，主实现已拆到 `src/agents/profile/`。
-- `src/agents/profile-sync.test.ts`：覆盖记忆写入后自动同步 profile 文件。
 
-### `src/agents/profile/`
+## `src/runtime/`
 
-- `src/agents/profile/classifier.ts`：判断一条记忆是否应该沉淀到 `user.md` 或 `soul.md`。
-- `src/agents/profile/profile-sync.ts`：profile 同步主流程。根据记忆类型和分类结果更新稳定认知文件，并写入事件。
+- `src/runtime/agent-runtime.ts`：Agent 执行编排层。负责任务领取、prompt 构建、模型调用、工具调用循环和任务收尾。
+- `src/runtime/agent-runtime.test.ts`：覆盖 Agent 执行流程、任务状态和异常处理。
 
-## `src/brain/`
+## `src/prompts/`
 
-- `src/brain/prompt-builder.ts`：构建系统提示词。会读取 `soul.md` / `user.md` 这类稳定认知文件。
-- `src/brain/prompt-builder.test.ts`：覆盖 prompt 构建和 profile 注入。
-- `src/brain/tool-registry.ts`：工具注册表。统一记录可用工具的名称、分类和元信息。
-- `src/brain/tool-registry.test.ts`：覆盖工具注册、查询和工具集构建。
-- `src/brain/tool-policy.ts`：工具权限策略。决定哪些工具可直接执行，哪些需要审批。
-- `src/brain/tool-policy.test.ts`：覆盖工具权限、路径白名单和 allowlist 规则。
-- `src/brain/tool-executor.ts`：工具执行包装层，统一执行工具、记录事件和处理错误。
-- `src/brain/tools.ts`：Agent 可用工具集合。包含文件工具、记忆工具等工具注册。
+- `src/prompts/agent-prompt.ts`：构建系统提示词。会读取 `soul.md` / `user.md` 这类稳定认知文件。
+- `src/prompts/agent-prompt.test.ts`：覆盖 prompt 构建和 profile 注入。
+
+## `src/tools/`
+
+Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具层只负责 schema、权限、工具集和执行包装。
+
+- `src/tools/registry.ts`：工具注册中心。统一记录工具名称、分类和元信息。
+- `src/tools/registry.test.ts`：覆盖工具注册、查询和工具集构建。
+- `src/tools/policy.ts`：工具权限策略。决定哪些工具可直接执行，哪些需要审批。
+- `src/tools/policy.test.ts`：覆盖工具权限、路径白名单和 allowlist 规则。
+- `src/tools/executor.ts`：文件工具执行和路径安全工具。
+- `src/tools/builtin-tools.ts`：内置工具注册，包括文件工具和记忆工具外壳。
+- `src/tools/toolsets.ts`：工具分组定义，例如 memory、file、runtime、core。
+- `src/tools/service.ts`：工具系统门面。统一导出工具列表、工具集构建、权限评估和执行包装。
+
+## `src/profiles/`
+
+- `src/profiles/files.ts`：读取和更新 `data/profiles/agents/default/soul.md`、`data/profiles/users/default/user.md`。
+- `src/profiles/files.test.ts`：覆盖 profile 文件读写和结构化 Markdown 更新。
+- `src/profiles/classifier.ts`：判断一条记忆是否应该沉淀到 `user.md` 或 `soul.md`。
+- `src/profiles/sync.ts`：profile 同步主流程。根据记忆类型和分类结果更新稳定认知文件，并写入事件。
+- `src/profiles/sync.test.ts`：覆盖记忆写入后自动同步 profile 文件。
+
+## `src/sessions/`
+
+- `src/sessions/service.ts`：会话和消息存储服务，供 routes、workers 和工具审批流程调用。
 
 ## `src/channels/`
 
@@ -149,7 +165,6 @@ src/
 - `src/channels/web-channel.test.ts`：覆盖 Web 渠道创建任务和发送消息流程。
 - `src/channels/message-parts.ts`：消息内容 part 的解析和序列化。`part` 指一条消息中的文本块、工具块、推理块等子结构。
 - `src/channels/message-parts.test.ts`：覆盖消息 part 解析、工具卡解析和历史消息兼容。
-- `src/channels/session-api.ts`：会话和消息存储 API，供路由和渠道层调用。
 
 ## `src/events/`
 
@@ -176,7 +191,7 @@ src/
 - `src/routes/runtime.ts`：运行时 API。提供 Agent 状态、任务队列和事件流。
 - `src/routes/runtime.test.ts`：覆盖 runtime 状态和事件接口。
 - `src/routes/sessions.ts`：会话 API。提供会话列表、会话消息、创建和删除会话。
-- `src/routes/tools.ts`：工具 API。提供工具列表和工具权限信息。
+- `src/routes/tools.ts`：工具 API。提供工具白名单授权接口。
 
 ## `src/memory/`
 
@@ -418,7 +433,7 @@ web/
 1. 前端 `ChatPage` 确保有 session，再调用聊天 API。
 2. 后端 `routes/chat.ts` 保存用户消息并创建任务。
 3. `task-queue.ts` 按 Agent 串行执行任务。
-4. `agent-runner.ts` 构建 prompt，调用模型，并通过工具系统执行工具。
+4. `agent-runtime.ts` 构建 prompt，调用模型，并通过工具系统执行工具。
 5. 助手回复保存到 `messages` 表。
 6. `routes/chat.ts` 触发 `assistant.message.persisted` 生命周期 hook。
 7. `lifecycle-hooks.ts` 投递 `MemoryExtractionWorker` 后台任务。

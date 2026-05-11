@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { ensureDefaultAgent, getAgent, updateAgentStatus } from "./agent-registry";
-import { AgentBusyError, runAgentTask } from "./agent-runner";
+import { ensureDefaultAgent, getAgent, updateAgentStatus } from "../agents/agent-registry";
+import { AgentBusyError, runAgentTask } from "./agent-runtime";
 import { initializeDatabaseSchema } from "../core/database";
 import { listTaskEvents } from "../events/event-log";
 import { createTask, getTask } from "../tasks/task-store";
@@ -27,7 +27,7 @@ function fakeStreamTextSuccess() {
   };
 }
 
-describe("agent runner", () => {
+describe("agent runtime", () => {
   test("marks task as running", () => {
     withRunnerDb((db, task) => {
       runAgentTask({

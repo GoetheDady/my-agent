@@ -5,7 +5,7 @@ import {
   getSessionMessages,
   updateSessionTitle,
   deleteSession,
-} from "../channels/session-api";
+} from "../sessions/service";
 
 const app = new Hono();
 

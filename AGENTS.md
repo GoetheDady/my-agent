@@ -20,10 +20,10 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Handlers fire asynchronously (via `Promise.resolve().then()`), errors are caught and logged.
 - Registered in `main.ts` via `registerMemoryLifecycleHooks()`.
 
-### Agent System (`src/agents/`)
+### Agent System (`src/agents/`, `src/runtime/`)
 - Single default agent (`id: "default"`) created by `ensureDefaultAgent()` on startup.
 - Agent states: `idle` | `running` | `paused` | `error`.
-- `runAgentTask()` orchestrates: mark task running → build system prompt → inject memories → `streamText` → mark complete/fail.
+- `src/runtime/agent-runtime.ts` `runAgentTask()` orchestrates: mark task running → build system prompt → build tools → `streamText` → mark complete/fail.
 - Has 45s model timeout + abort signal handling. Uses `failTaskOnce` guard to prevent double-completion.
 
 ### Task System (`src/tasks/`)
@@ -36,11 +36,10 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Event types include: `task.*`, `tool.*`, `memory.search`, `memory.remember`, `memory.update`, `memory.extract.*`, `memory.reconsolidate.*`, `memory.dedupe.*`.
 - Events are exposed via `GET /api/runtime/events?agentId=default`.
 
-### Tool System (`src/brain/`)
-- Tools registered via `registerTool({ name, tool, toolset, category, createsCandidateMemory? })`.
-- Two ways to get tools:
-  - `tools` (static export) — legacy, used for simple cases.
-  - `buildAgentTools(context: MemoryToolContext)` — factory for context-aware tools (passes task/agent info to memory tools).
+### Tool System (`src/tools/`)
+- Tools registered via `registerTool({ name, tool, toolset, category })`.
+- `src/tools/service.ts` is the tools facade: list tools, build agent tools, evaluate policy, and expose execution helpers.
+- `buildAgentTools(context: MemoryToolContext)` builds context-aware tools and passes task/agent info to memory tools.
 - Policy: read-only tools allowed by default. Write tools need approval unless allowlisted. Memory write tools write active memories directly (no more "candidate" pattern).
 - `isInputPathAllowlisted` controls which file paths write_file can target.
 
@@ -77,7 +76,7 @@ bun run build        # tsc -b && vite build → web/dist
 - **Bun test runner** (not Vitest/Jest). Test files: `*.test.ts`.
 - **In-memory SQLite**: `new Database(":memory:")` + `db.run("PRAGMA foreign_keys = ON")` + `initializeDatabaseSchema(db)` + `ensureDefaultAgent(db)`.
 - **LanceDB is NOT mocked** in tests. Tests that need LanceDB use the real file-based DB. If LanceDB native bindings are unavailable, those tests will fail — skip them with `test.skipIf(!lanceDbAvailable)`.
-- **Common test fixtures**: `withRunnerDb()` (agent-runner tests), `createWorkerDb()` (extraction worker tests), `withMemoryToolDb()` (memory tool tests). Each sets up test DB with schema + default agent.
+- **Common test fixtures**: `withRunnerDb()` (agent runtime tests), `createWorkerDb()` (extraction worker tests), `withMemoryToolDb()` (memory tool tests). Each sets up test DB with schema + default agent.
 - **DI pattern**: All functions accept optional `database: Database`. Pass `:memory:` DB in tests, omit in production to use default.
 
 ## Frontend Conventions

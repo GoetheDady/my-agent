@@ -2,10 +2,10 @@ import type { Database } from "bun:sqlite";
 import {
   syncProfileFromMemories,
   type ProfileSyncPort,
-} from "../../agents/profile/profile-sync";
+} from "../../profiles/sync";
 import {
   appendAssistantToolPart,
-} from "../../channels/session-api";
+} from "../../sessions/service";
 import { getDb } from "../../core/database";
 import { appendEvent, listTaskEvents } from "../../events/event-log";
 import { createMemoryService } from "../service";

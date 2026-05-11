@@ -1,4 +1,4 @@
-import { getTool, type RegisteredTool } from "./tool-registry";
+import { getTool, type RegisteredTool } from "./registry";
 
 export interface ToolPolicyInput {
   toolName: string;

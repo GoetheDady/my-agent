@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ProfileSyncPort } from "../../agents/profile/profile-sync";
+import type { ProfileSyncPort } from "../../profiles/sync";
 import { appendEvent } from "../../events/event-log";
 import type { MemoryDedupeGroup } from "../dedupe";
 import {

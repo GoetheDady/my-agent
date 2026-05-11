@@ -5,7 +5,7 @@ import {
   appendMessage,
   createSession,
   getSessionMessage,
-} from "../channels/session-api";
+} from "../sessions/service";
 import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
 import { createTask } from "../tasks/task-store";

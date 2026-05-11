@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateToolPolicy } from "./tool-policy";
-import "./tools";
+import { evaluateToolPolicy } from "./policy";
+import "./service";
 
 describe("tool policy", () => {
   test("read-only tools are allowed by default", () => {

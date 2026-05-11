@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "ai";
 import { z } from "zod";
-import type { ProfileSyncPort } from "../agents/profile-sync";
+import type { ProfileSyncPort } from "../profiles/sync";
 import { appendEvent } from "../events/event-log";
 import {
   addMemory,

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { getAgent } from "../agents/agent-registry";
-import { loadProfileContext, type ProfileContext } from "../agents/profile-files";
+import { loadProfileContext, type ProfileContext } from "../profiles/files";
 import { listWorkingMemory } from "../memory/working-memory";
 import type { TaskRecord } from "../tasks/task-types";
 

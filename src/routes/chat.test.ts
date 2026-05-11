@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_AGENT_SYSTEM_PROMPT } from "../brain/prompt-builder";
+import { DEFAULT_AGENT_SYSTEM_PROMPT } from "../prompts/agent-prompt";
 
 const chatRouteSource = readFileSync(new URL("./chat.ts", import.meta.url), "utf8");
 

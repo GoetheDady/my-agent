@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ProfileSyncPort } from "../../agents/profile/profile-sync";
+import type { ProfileSyncPort } from "../../profiles/sync";
 import type { MemoryDedupeResult, MemoryDedupeStore } from "../dedupe";
 import type { MemoryDecisionMemoryStore, MemoryDecisionRecord } from "../decision-store";
 import type { DreamRunRecord, DreamRunTrigger } from "../dream-run-store";
