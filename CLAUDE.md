@@ -4,155 +4,128 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-这是一个基于 Bun + Hono + Vercel AI SDK 的 AI Agent 系统，包含后端 API 和 React 前端。系统支持多会话对话、长期记忆存储与检索、以及 DeepSeek 模型的 thinking 模式。
+基于 Bun + Hono + Vercel AI SDK 的 AI Agent 系统，包含后端 API 和 React 前端。支持多会话对话、长期记忆存储与检索、Agent 任务调度、以及 DeepSeek 模型的 thinking 模式。
+
+## Commands
+
+```bash
+# 后端
+bun run dev          # 热重载开发
+bun run start        # 生产运行（需先构建前端）
+bun test             # 所有测试
+bun test src/path    # 单个测试文件
+bun run check        # lint + typecheck
+
+# 前端
+cd web
+bun run dev          # Vite 开发服务器（代理 /api 到 :3000）
+bun run build        # 构建到 web/dist
+```
 
 ## Architecture
 
-### Backend (src/)
-- **Runtime**: 优先使用 Bun，兼容 Node.js。运行时检测在 `src/core/runtime.ts`
-- **Web Framework**: Hono，路由在 `src/routes/`
-- **AI SDK**: Vercel AI SDK (`ai` package) + `@ai-sdk/deepseek`
-- **Database**: 
-  - SQLite (Bun.sqlite) 用于会话和消息存储 (`data/agent.sqlite`)
-  - LanceDB 用于向量记忆存储 (`data/memories.lancedb`)
+### Backend (`src/`)
 
-### Frontend (web/)
-- **Framework**: React 19 + Vite + TypeScript
-- **State Management**: Zustand
-- **Styling**: Tailwind CSS 4
-- **AI Integration**: `@ai-sdk/react` 的 `useChat` hook
+**Runtime & Web**: Bun + Hono。运行时检测在 `src/core/runtime.ts`，路由在 `src/routes/`。
 
-### Key Modules
+**Database**:
+- SQLite (`data/agent.sqlite`)：会话、消息、Agent、任务、事件。WAL 模式，外键强制。
+- LanceDB (`data/memories.lancedb`)：向量记忆存储，智谱 AI embedding-3（2048 dims）。
+- Profile 文件默认在 `data/profiles/` 下，例如 `data/profiles/agents/default/soul.md` 和 `data/profiles/users/default/user.md`。可通过 `MY_AGENT_DATA_DIR` 改运行时数据根目录。
 
-**会话管理** (`src/channels/session-api.ts`):
-- 会话和消息的 CRUD 操作
-- 使用 SQLite 持久化，支持 WAL 模式并发读
+**Agent 系统** (`src/agents/`):
+- 启动时 `ensureDefaultAgent()` 创建唯一默认 Agent（`id: "default"`）。
+- `runAgentTask()` 编排：标记运行 → 构建 system prompt → 注入记忆 → `streamText` → 标记完成/失败。
+- Agent 状态：`idle | running | paused | error`。45s 模型超时 + abort 信号处理。
+
+**任务系统** (`src/tasks/`):
+- 生命周期：`queued → running → completed | failed | canceled`。
+- 每个 Agent 的任务队列串行处理。
+
+**生命周期钩子** (`src/lifecycle/hooks.ts`):
+- `registerLifecycleHook(type, handler)` / `emitLifecycleHook(event)`。
+- 当前唯一钩子类型：`assistant.message.persisted`。
+- 处理器异步触发（`Promise.resolve().then()`），错误被捕获并记录。
+- 在 `main.ts` 通过 `registerMemoryLifecycleHooks()` 注册。
+
+**工具系统** (`src/brain/`):
+- `registerTool({ name, tool, toolset, category, createsCandidateMemory? })` 注册工具。
+- `buildAgentTools(context: MemoryToolContext)` 工厂函数，为记忆工具注入 `agentId/taskId/conversationId` 上下文。
+- 只读工具默认允许，写工具需审批（除非加入白名单）。
 
 **记忆系统** (`src/memory/`):
-- `store.ts`: LanceDB 向量存储，支持混合检索（向量相似度 + TF-IDF 文本匹配）
-- `embedder.ts`: 智谱 AI embedding-3 模型
-- `extract.ts`: 从对话中提取结构化记忆
-- `prefetch.ts`: 后台预取记忆，减少对话延迟
-- `memory.ts`: 记忆注入到 system prompt，带 prompt injection 防护
+- 混合检索：向量相似度 + TF-IDF 文本匹配。
+- `MemoryExtractionWorker`：assistant 消息持久化后触发，使用 LLM planner 决定创建/更新哪些记忆，并去重。
+- `dedupeActiveMemories()`：找语义相似的活跃记忆，保留置信度最高的，其余标记为 inactive。支持 dry-run。
+- `src/memory/legacy/`：旧版提取/注入代码，保留兼容性。
+- `src/memory/storage/`：LanceDB 表定义、搜索评分、类型。
+- `src/memory/tools/`：召回意图识别、排序、序列化。
+- `src/memory/dream/`：Dream 调度器，定期对记忆进行整合与反思。
 
-**路由** (`src/routes/`):
-- `chat.ts`: 流式对话 API，支持 thinking 模式、记忆注入、自动生成会话标题
-- `sessions.ts`: 会话列表、创建、删除、消息历史
-- `memory.ts`: 记忆提取、列表、统计
+**事件系统** (`src/events/`):
+- `appendEvent()` 写入类型化运行时事件到 SQLite。
+- 事件类型涵盖 `task.*`、`tool.*`、`memory.*`。
+- 通过 `GET /api/runtime/events?agentId=default` 暴露。
 
-**前端状态** (`web/src/store/`):
-- `chatStore.ts`: 会话 ID、thinking 开关、记忆提取状态
-- `sessionStore.ts`: 会话列表管理
-- `memoryStore.ts`: 记忆面板数据
+### Frontend (`web/src/`)
 
-## Development Commands
+**框架**: React 19 + Vite + TypeScript + Zustand + Tailwind CSS 4（配置在 CSS `@theme` 中，无独立配置文件）。
 
-### Backend
-```bash
-# 开发模式（热重载）
-bun run dev
+**路由**: React Router。`App.tsx` 拥有路由树，`layouts/AppShell.tsx` 是工程控制台 shell，页面在 `pages/`。
+- `/`：新对话入口；`/sessions/:sessionId`：持久化会话。使用 `getSessionPath()` 生成 URL。
 
-# 生产运行
-bun run start
+**目录边界**: 页面级路由组件 → `pages/`；共享布局 → `layouts/`；功能 UI → `features/`；通用 UI → `components/common/`。
 
-# 测试
-bun test
-bun test --watch
+**Zustand Stores** (`web/src/store/`):
+- `chatStore`：sessionId、thinkingEnabled。
+- `sessionStore`：会话列表 CRUD。
+- `memoryStore`：记忆面板数据。
+- `runtimeStore`：Agent 状态、任务队列、事件。
 
-# 代码检查
-bun run lint
-bun run typecheck
-bun run check  # lint + typecheck
-```
+## Key Patterns
 
-### Frontend
-```bash
-cd web
+### 记忆提取流程（后端驱动）
+1. 后端 `src/routes/chat.ts` 保存 assistant 消息后触发 `assistant.message.persisted` 钩子。
+2. `src/memory/lifecycle-hooks.ts` 监听并入队 `MemoryExtractionWorker`。
+3. Worker 提取记忆，将 `memory_extract`/`memory_reconsolidate` tool parts 注入消息内容，并去重。
+4. 前端 `pages/ChatPage.tsx` 通过 `startWorkerMessagePolling` 轮询新 tool parts（不再调用 `/api/memory/extract`）。
 
-# 开发服务器
-bun run dev
+### 消息内容格式
+数据库 `messages.content` 存储 JSON 字符串。用 `parseDbContent(content, role)` 解析为类型化 blocks（text、reasoning、tool-*、memory_*）。
 
-# 构建生产版本
-bun run build
-
-# 预览构建结果
-bun run preview
-```
-
-### Full Stack Development
-后端会自动服务前端构建产物（`web/dist`），因此：
-1. 前端开发：`cd web && bun run dev`（独立 Vite 服务器，支持 HMR）
-2. 后端开发：`bun run dev`（根目录）
-3. 生产部署：先 `cd web && bun run build`，再 `bun run start`
-
-## Configuration
-
-### Environment Variables
-必需的环境变量（在 `.env` 文件中配置）：
-- `DEEPSEEK_API_KEY`: DeepSeek API 密钥
-- `ZHIPU_API_KEY`: 智谱 AI API 密钥（用于 embedding）
-- `PORT`: 服务端口（可选，默认 3000）
-
-### Config File
-可选的 `config.json`（根目录）：
-```json
-{
-  "provider": {
-    "apiKey": "$DEEPSEEK_API_KEY",
-    "model": "deepseek-v4-flash",
-    "baseURL": "https://api.deepseek.com"
-  }
-}
-```
-
-配置优先级：环境变量 > config.json > 默认值
-
-## Important Patterns
-
-### 会话创建时机
-- 前端在发送第一条消息前必须先创建会话（`sessionStore.createSession()`）
-- 后端 `/api/chat` 如果收到 `sessionId: null`，会创建新会话但会打印警告
-- 避免重复创建：前端已有 `handleNew` 守卫逻辑
-
-### 记忆提取流程
-1. 用户发送消息 → 后端流式返回响应
-2. `onFinish` 回调触发 `queuePrefetch(assistantText)` 后台预取
-3. 前端收到完整响应后，调用 `/api/memory/extract` 提取记忆
-4. 提取状态存储在 `chatStore.memoryStatusMap[messageId]`
-
-### Thinking 模式
-- 前端通过 `chatStore.thinkingEnabled` 控制
-- 后端在 `streamText` 的 `providerOptions.deepseek.thinking` 传递
-- 响应中 `type: "thinking"` 的 block 会被前端渲染为折叠的推理过程
+### 配置优先级
+环境变量 > `config.json`（`$VAR` 语法从 env 解析）> 默认值。必需：`DEEPSEEK_API_KEY`、`ZHIPU_API_KEY`。
 
 ### 静态文件服务
-- 后端 `src/main.ts` 内联实现静态文件服务（不依赖 `hono/serve-static`）
-- 所有非 `/api/*` 路由都会尝试从 `web/dist` 读取文件
-- 404 时回退到 `index.html`（支持前端路由）
+`src/main.ts` 内联实现，非 `/api/*` 路由从 `web/dist` 读取，404 回退 `index.html`。
 
 ## Testing
 
-### Backend Tests
-- 使用 Bun 内置测试运行器
-- 测试文件命名：`*.test.ts`
-- 示例：`src/memory/embedder.test.ts`
+Bun 内置测试运行器（非 Vitest/Jest），测试文件 `*.test.ts`。
 
-### Frontend Tests
-- 前端测试文件：`web/src/lib/*.test.ts`
-- 使用 Bun 测试运行器（不是 Vitest）
+**In-memory SQLite 模式**：
+```ts
+const db = new Database(":memory:");
+db.run("PRAGMA foreign_keys = ON");
+initializeDatabaseSchema(db);
+ensureDefaultAgent(db);
+```
 
-## Common Pitfalls
+**LanceDB 不 mock**：需要真实文件 DB。若 native bindings 不可用，用 `test.skipIf(!lanceDbAvailable)` 跳过。
 
-1. **不要在前端直接使用 `sessionId: null`**：会导致后端创建新会话，破坏前端状态同步
-2. **记忆提取是异步的**：不要期望立即可用，使用 `memoryStatusMap` 跟踪状态
-3. **Thinking 模式需要显式启用**：默认关闭，通过前端开关控制
-4. **LanceDB 表初始化**：首次运行会创建表并插入占位记录后立即删除（绕过空表限制）
-5. **SQLite WAL 模式**：支持并发读，但写操作仍然串行
-6. **前端消息格式**：数据库存储的 `content` 字段是 JSON 字符串，需要用 `parseDbContent` 解析
+常用测试 fixture：`withRunnerDb()`（agent-runner）、`createWorkerDb()`（extraction worker）、`withMemoryToolDb()`（memory tools）。
+
+## Gotchas
+
+1. **`sessionId: null`**：后端会创建新会话，导致前端状态脱同步。
+2. **LanceDB 空表**：首次运行插入占位记录后立即删除（绕过空表限制）。
+3. **`bunfig.toml` 使用 npmmirror.com**：包从中国镜像解析。
+4. **ESLint 忽略 `web/`**：前端类型检查在 `bun run build` 的 `tsc -b` 步骤中完成。
+5. **Thinking 模式默认关闭**：通过 `chatStore.thinkingEnabled` 切换。
 
 ## Code Style
 
-- 使用 ESLint + TypeScript ESLint
-- 优先使用 Bun API（如 `Bun.sqlite`），但保持 Node.js 兼容性
-- 注释用中文，代码和变量名用英文
-- 避免过度抽象，保持代码直接和可读
+- ESLint + typescript-eslint。未使用变量以 `_` 前缀允许。
+- 注释用中文，代码和变量名用英文。
+- 优先 Bun API（`Bun.sqlite`、`Bun.serve`），保持 Node.js 兼容路径。
+- 避免过度抽象，保持代码直接可读。

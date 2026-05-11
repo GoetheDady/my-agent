@@ -7,8 +7,9 @@ import {
   createMemoryDecision,
   type MemoryDecisionRecord,
 } from "../decision-store";
-import { findDuplicateMemoryContent } from "../duplicate";
 import { searchEpisodes } from "../episode-store";
+import { createMemoryService } from "../service";
+import { isCanonicalDuplicateMemory } from "../canonical";
 import type { Memory } from "../storage/store";
 import { dayRange, uniqueStrings } from "./time";
 import type { DreamMemoryStore } from "./types";
@@ -68,6 +69,7 @@ export async function applyConflictUpdateDecisions(input: {
   dreamRunId: string;
   database: Database;
   store: DreamMemoryStore;
+  profileSync: ProfileSyncPort;
 }): Promise<MemoryDecisionRecord[]> {
   const { memories } = await input.store.listMemories({ status: "active", pageSize: 1000 });
   const byObject = new Map<string, { memory: Memory; polarity: "positive" | "negative"; object: string }[]>();
@@ -105,7 +107,20 @@ export async function applyConflictUpdateDecisions(input: {
     const nextContent = hasChangeTrace(newest.memory.content)
       ? newest.memory.content
       : `用户曾经${formatPreferenceFact(previous)}；现在明确表示${formatPreferenceFact(newest)}。`;
-    await input.store.updateMemory(newest.memory.id, nextContent);
+    await createMemoryService({
+      store: input.store,
+      profileSync: input.profileSync,
+    }).update({
+      memoryId: newest.memory.id,
+      content: nextContent,
+      reason: "dream_worker conflict update",
+      profileSyncSource: "dream_worker",
+    }, {
+      agentId: input.agentId,
+      database: input.database,
+      store: input.store,
+      profileSync: input.profileSync,
+    });
     await input.store.setMemoryStatus(previous.memory.id, "superseded");
     const afterSnapshot = await captureMemorySnapshots(targetMemoryIds, input.store);
 
@@ -133,6 +148,7 @@ export async function applyEpisodeDerivedMemoryDecisions(input: {
   timezone: string;
   database: Database;
   store: DreamMemoryStore;
+  profileSync: ProfileSyncPort;
 }): Promise<MemoryDecisionRecord[]> {
   const range = dayRange(input.date, input.timezone);
   const episodes = searchEpisodes({
@@ -146,7 +162,6 @@ export async function applyEpisodeDerivedMemoryDecisions(input: {
 
   // v1 先做少量确定性候选：多次 episode 反复出现的流程/风险才自动沉淀。
   // 后续如果接入模型提炼，也必须保留 confidence 阈值和 decision 快照。
-  const active = await input.store.listMemories({ status: "active", pageSize: 1000 });
   const candidates = [
     {
       type: "procedural_extract" as const,
@@ -169,9 +184,18 @@ export async function applyEpisodeDerivedMemoryDecisions(input: {
   const decisions: MemoryDecisionRecord[] = [];
   for (const candidate of candidates) {
     if (!candidate.matches.every((pattern) => pattern.test(joined))) continue;
-    if (findDuplicateMemoryContent(candidate.content, active.memories)) continue;
+    const { memories: activeBefore } = await input.store.listMemories({ status: "active", pageSize: 1000 });
+    const duplicateBefore = activeBefore.find((memory) =>
+      isCanonicalDuplicateMemory(candidate.content, memory.content, candidate.memoryType, memory.memory_type),
+    ) ?? null;
+    const beforeSnapshot = duplicateBefore
+      ? await captureMemorySnapshots([duplicateBefore.id], input.store)
+      : [];
 
-    const saved = await input.store.addMemory({
+    const result = await createMemoryService({
+      store: input.store,
+      profileSync: input.profileSync,
+    }).remember({
       content: candidate.content,
       memory_type: candidate.memoryType,
       status: "active",
@@ -180,9 +204,17 @@ export async function applyEpisodeDerivedMemoryDecisions(input: {
         source: "dream_worker",
         episodeIds: episodes.map((episode) => episode.id),
       }),
+      reason: candidate.reason,
+      evidenceEventIds: episodes.flatMap((episode) => episode.source_event_ids),
+      profileSyncSource: "dream_worker",
+    }, {
+      agentId: input.agentId,
+      database: input.database,
+      store: input.store,
+      profileSync: input.profileSync,
     });
-    if (!saved) continue;
-    active.memories.push(saved);
+    if (!result.memory || (result.action !== "created" && result.action !== "updated")) continue;
+    const saved = result.memory;
     const afterSnapshot = await captureMemorySnapshots([saved.id], input.store);
     decisions.push(createMemoryDecision({
       agentId: input.agentId,
@@ -192,8 +224,10 @@ export async function applyEpisodeDerivedMemoryDecisions(input: {
       title: candidate.title,
       reason: candidate.reason,
       confidence: 0.78,
-      createdMemoryIds: [saved.id],
+      targetMemoryIds: result.action === "updated" ? [saved.id] : [],
+      createdMemoryIds: result.action === "created" ? [saved.id] : [],
       sourceEventIds: episodes.flatMap((episode) => episode.source_event_ids),
+      beforeSnapshot,
       afterSnapshot,
     }, input.database));
   }

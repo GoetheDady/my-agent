@@ -272,10 +272,10 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
         tone: "memory",
       };
     }
-    if (event.type === "memory.propose") {
+    if (event.type === "memory.remember") {
       return {
         label: "写入记忆",
-        detail: getString(payload, "reason") ?? getString(payload, "memoryId") ?? "memory.propose",
+        detail: getString(payload, "action") ?? getString(payload, "reason") ?? getString(payload, "memoryId") ?? "memory.remember",
         tone: "memory",
       };
     }

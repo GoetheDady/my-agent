@@ -73,13 +73,6 @@ registerTool({
   category: 'memory_read',
 });
 registerTool({
-  name: 'memory_propose',
-  tool: memoryTools.memory_propose,
-  toolset: 'memory',
-  category: 'memory_write',
-  createsCandidateMemory: false,
-});
-registerTool({
   name: 'memory_update',
   tool: memoryTools.memory_update,
   toolset: 'memory',

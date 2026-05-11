@@ -48,10 +48,10 @@ function withProfileSyncDb<T>(run: (db: Database) => T | Promise<T>): Promise<T>
 describe("profile sync", () => {
   test("syncs user identity and stable project context to user.md", async () => {
     await withTempDir(async (dir) => {
-      loadProfileContext({ rootDir: dir, agentId: "default", userId: "default" });
+      loadProfileContext({ profileRootDir: dir, agentId: "default", userId: "default" });
 
       const result = await syncProfileFromMemories({
-        rootDir: dir,
+        profileRootDir: dir,
         source: "memory_worker",
         memories: [
           createMemory({ id: "name", content: "用户名字叫张三", memory_type: "identity" }),
@@ -71,10 +71,10 @@ describe("profile sync", () => {
 
   test("syncs agent self-rules to soul.md without duplicate bullets", async () => {
     await withTempDir(async (dir) => {
-      loadProfileContext({ rootDir: dir, agentId: "default", userId: "default" });
+      loadProfileContext({ profileRootDir: dir, agentId: "default", userId: "default" });
 
       await syncProfileFromMemories({
-        rootDir: dir,
+        profileRootDir: dir,
         source: "memory_tool",
         memories: [
           createMemory({
@@ -85,7 +85,7 @@ describe("profile sync", () => {
         ],
       });
       await syncProfileFromMemories({
-        rootDir: dir,
+        profileRootDir: dir,
         source: "memory_tool",
         memories: [
           createMemory({
@@ -107,13 +107,13 @@ describe("profile sync", () => {
     await withProfileSyncDb(async (db) => {
       await withTempDir(async (dir) => {
         const completed = await syncProfileFromMemories({
-          rootDir: dir,
+          profileRootDir: dir,
           database: db,
           source: "memory_worker",
           memories: [createMemory({ id: "name", content: "用户名字叫李四", memory_type: "identity" })],
         });
         const skipped = await syncProfileFromMemories({
-          rootDir: dir,
+          profileRootDir: dir,
           database: db,
           source: "memory_worker",
           memories: [createMemory({ id: "event", content: "今天读取了 eslint.config.js", memory_type: "episodic" })],

@@ -135,7 +135,7 @@ const memoryFlows = [
 const storage = [
   { icon: HardDrive, label: "SQLite", detail: "sessions、messages、tasks、events、episodes、dream_runs、decisions" },
   { icon: Network, label: "LanceDB", detail: "active / inactive / superseded 长期向量记忆" },
-  { icon: FileText, label: "Markdown Profiles", detail: "agents/default/soul.md 与 users/default/user.md" },
+  { icon: FileText, label: "Markdown Profiles", detail: "data/profiles 下的 soul.md 与 user.md" },
 ];
 
 export default function ArchitectureView() {

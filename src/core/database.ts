@@ -6,7 +6,9 @@
  */
 
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
 import { resolve } from "path";
+import { getRuntimeDataDir } from "./config";
 
 let db: Database | null = null;
 
@@ -274,14 +276,16 @@ export function initializeDatabaseSchema(database: Database): void {
 /**
  * 获取全局 SQLite 数据库连接。
  *
- * 首次调用会创建 `data/agent.sqlite`，初始化 schema，并启用 WAL 和外键约束。
+ * 首次调用会在运行时数据目录创建 `agent.sqlite`，初始化 schema，并启用 WAL 和外键约束。
  *
  * @returns 全局数据库连接。
  */
 export function getDb(): Database {
   if (db) return db;
 
-  const dbPath = resolve(import.meta.dir, "../../data/agent.sqlite");
+  const dataDir = getRuntimeDataDir();
+  mkdirSync(dataDir, { recursive: true });
+  const dbPath = resolve(dataDir, "agent.sqlite");
 
   db = new Database(dbPath, { create: true });
 

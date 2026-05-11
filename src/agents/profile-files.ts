@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { getProjectRoot } from "../core/config";
+import { getRuntimeDataDir } from "../core/config";
 
 export const DEFAULT_SOUL_FILENAME = "soul.md";
 export const DEFAULT_USER_FILENAME = "user.md";
@@ -22,6 +22,13 @@ export interface ProfileContext {
 export interface LoadProfileContextOptions {
   agentId?: string;
   userId?: string;
+  /**
+   * profile 数据根目录。
+   *
+   * 生产默认是运行时数据目录下的 `profiles/`，测试可传临时目录隔离文件写入。
+   */
+  profileRootDir?: string;
+  /** @deprecated 请使用 profileRootDir；保留给现有测试和调用点过渡。 */
   rootDir?: string;
   createIfMissing?: boolean;
 }
@@ -40,6 +47,8 @@ export interface ProfileBulletUpdate {
 export interface ApplyProfileUpdatesOptions {
   agentId?: string;
   userId?: string;
+  profileRootDir?: string;
+  /** @deprecated 请使用 profileRootDir；保留给现有测试和调用点过渡。 */
   rootDir?: string;
   soulUpdates?: ProfileBulletUpdate[];
   userUpdates?: ProfileBulletUpdate[];
@@ -63,11 +72,11 @@ export interface AppliedProfileUpdate {
 export function loadProfileContext(options: LoadProfileContextOptions = {}): ProfileContext {
   // profile 文件是稳定认知层：user.md 描述“我对用户的长期认知”，
   // soul.md 描述“我对自己的长期行为原则”。事件事实仍然通过记忆工具查。
-  const rootDir = options.rootDir ?? getProjectRoot();
+  const profileRootDir = resolveProfileRootDir(options);
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
   const createIfMissing = options.createIfMissing ?? true;
-  const { soulPath, userPath } = getProfileFilePaths({ rootDir, agentId, userId });
+  const { soulPath, userPath } = getProfileFilePaths({ profileRootDir, agentId, userId });
 
   if (createIfMissing) {
     writeFileIfMissing(soulPath, buildDefaultSoulTemplate(agentId));
@@ -96,14 +105,16 @@ export function loadProfileContext(options: LoadProfileContextOptions = {}): Pro
 export function getProfileFilePaths(options: {
   agentId?: string;
   userId?: string;
+  profileRootDir?: string;
+  /** @deprecated 请使用 profileRootDir。 */
   rootDir?: string;
 } = {}): ProfileFilePaths {
-  const rootDir = options.rootDir ?? getProjectRoot();
+  const profileRootDir = resolveProfileRootDir(options);
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
   return {
-    soulPath: resolve(rootDir, "agents", agentId, DEFAULT_SOUL_FILENAME),
-    userPath: resolve(rootDir, "users", userId, DEFAULT_USER_FILENAME),
+    soulPath: resolve(profileRootDir, "agents", agentId, DEFAULT_SOUL_FILENAME),
+    userPath: resolve(profileRootDir, "users", userId, DEFAULT_USER_FILENAME),
   };
 }
 
@@ -119,10 +130,10 @@ export function getProfileFilePaths(options: {
 export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): AppliedProfileUpdate[] {
   // 只做结构化 bullet 更新，不重写整个 Markdown。
   // 这样用户手动写的段落、注释和额外 section 会被保留。
-  const rootDir = options.rootDir ?? getProjectRoot();
+  const profileRootDir = resolveProfileRootDir(options);
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
-  const { soulPath, userPath } = getProfileFilePaths({ rootDir, agentId, userId });
+  const { soulPath, userPath } = getProfileFilePaths({ profileRootDir, agentId, userId });
   writeFileIfMissing(soulPath, buildDefaultSoulTemplate(agentId));
   writeFileIfMissing(userPath, buildDefaultUserTemplate(userId));
 
@@ -140,6 +151,12 @@ export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): Ap
   }
 
   return applied;
+}
+
+function resolveProfileRootDir(options: { profileRootDir?: string; rootDir?: string } = {}): string {
+  // profile 文件属于运行时数据，而不是源码。默认集中到 data/profiles，
+  // 这样把项目交给别人使用时，用户数据可以整体复制、备份或通过 MY_AGENT_DATA_DIR 改位置。
+  return options.profileRootDir ?? options.rootDir ?? resolve(getRuntimeDataDir(), "profiles");
 }
 
 function writeFileIfMissing(path: string, content: string): void {

@@ -44,6 +44,18 @@ function withHumanMemoryDb<T>(run: (db: Database) => T | Promise<T>): Promise<T>
   return Promise.resolve(run(db)).finally(() => db.close());
 }
 
+function createStore(overrides: Partial<HumanMemoryStorePort> = {}): HumanMemoryStorePort {
+  return {
+    searchMemories: async () => [],
+    listMemories: async () => ({ memories: [], total: 0 }),
+    getMemory: async () => null,
+    addMemory: async () => null,
+    updateMemory: async () => null,
+    setMemoryStatus: async () => null,
+    ...overrides,
+  };
+}
+
 describe("human memory tools", () => {
   test("memoryRecall routes semantic, episodic, and prospective memories", async () => {
     await withHumanMemoryDb((db) => {
@@ -57,7 +69,7 @@ describe("human memory tools", () => {
       markTaskCompleted(task.id, "缺少情景记忆和前瞻记忆", db);
       upsertEpisodeForTask(task.id, db);
 
-      const store: HumanMemoryStorePort = {
+      const store = createStore({
         searchMemories: async () => [createMemory({ id: "semantic", content: "用户正在开发 my-agent 项目" })],
         listMemories: async ({ type }) => ({
           memories: type === "prospective"
@@ -66,9 +78,7 @@ describe("human memory tools", () => {
           total: type === "prospective" ? 1 : 0,
         }),
         getMemory: async (id) => createMemory({ id, source_text: JSON.stringify({ evidenceEventIds: ["event-1"] }) }),
-        addMemory: async () => null,
-        setMemoryStatus: async () => null,
-      };
+      });
 
       return Promise.all([
         memoryRecall({ query: "我在开发什么", intent: "semantic" }, { database: db, store }),
@@ -84,16 +94,14 @@ describe("human memory tools", () => {
 
   test("memoryPlan creates, lists, and completes prospective memories", async () => {
     let saved = createMemory({ id: "future-1", memory_type: "prospective", content: "接入飞书渠道" });
-    const store: HumanMemoryStorePort = {
-      searchMemories: async () => [],
+    const store = createStore({
       listMemories: async () => ({ memories: [saved], total: 1 }),
-      getMemory: async () => null,
       addMemory: async (params) => {
         saved = createMemory({ id: "future-1", memory_type: params.memory_type, content: params.content });
         return saved;
       },
       setMemoryStatus: async (id, status) => createMemory({ id, status, memory_type: "prospective" }),
-    };
+    });
 
     const created = await memoryPlan({ action: "create", content: "接入飞书渠道" }, { store });
     const listed = await memoryPlan({ action: "list" }, { store });
@@ -120,16 +128,12 @@ describe("human memory tools", () => {
         confidence: 0.95,
         updated_at: 20,
       });
-      const store: HumanMemoryStorePort = {
-        searchMemories: async () => [],
+      const store = createStore({
         listMemories: async ({ type }) => ({
           memories: type === "preference" ? [oldMemory, changedMemory] : [],
           total: type === "preference" ? 2 : 0,
         }),
-        getMemory: async () => null,
-        addMemory: async () => null,
-        setMemoryStatus: async () => null,
-      };
+      });
 
       const result = await memoryRecall(
         { query: "我现在喜欢什么？我以前有没有改过主意？", intent: "social" },
@@ -143,13 +147,10 @@ describe("human memory tools", () => {
 
   test("memoryRemember writes procedural memory and memoryReflect creates review item", async () => {
     await withHumanMemoryDb(async (db) => {
-      const store: HumanMemoryStorePort = {
-        searchMemories: async () => [],
-        listMemories: async () => ({ memories: [], total: 0 }),
+      const store = createStore({
         getMemory: async (id) => createMemory({ id, source_text: JSON.stringify({ reason: "test" }) }),
         addMemory: async (params) => createMemory({ id: "procedure", memory_type: params.memory_type, content: params.content }),
-        setMemoryStatus: async () => null,
-      };
+      });
 
       const remembered = await memoryRemember(
         { content: "修改记忆系统后要同步计划文档", kind: "procedural" },
@@ -169,17 +170,13 @@ describe("human memory tools", () => {
 
   test("memoryRemember sends saved active memory to profile sync", async () => {
     let syncedContent = "";
-    const store: HumanMemoryStorePort = {
-      searchMemories: async () => [],
-      listMemories: async () => ({ memories: [], total: 0 }),
-      getMemory: async () => null,
+    const store = createStore({
       addMemory: async (params) => createMemory({
         id: "identity",
         memory_type: params.memory_type,
         content: params.content,
       }),
-      setMemoryStatus: async () => null,
-    };
+    });
 
     const result = await memoryRemember(
       { content: "用户名字叫张三", kind: "identity" },

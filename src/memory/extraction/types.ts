@@ -5,6 +5,7 @@ import type {
   getMemory,
   listMemories,
   searchMemories,
+  setMemoryStatus,
   updateMemory,
 } from "../storage/store";
 import type { Memory } from "../storage/store";
@@ -54,6 +55,7 @@ export interface MemoryWorkerStore {
   listMemories: typeof listMemories;
   searchMemories: typeof searchMemories;
   updateMemory: typeof updateMemory;
+  setMemoryStatus: typeof setMemoryStatus;
 }
 
 export type MemoryChangePlanner = (input: {

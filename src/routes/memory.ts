@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import {
   listMemories,
   getMemory,
-  addMemory,
   updateMemory,
   deleteMemory,
   getMemoryStats,
@@ -15,6 +14,7 @@ import { listMemoryDecisions, undoMemoryDecision } from "../memory/decision-stor
 import { searchEpisodes } from "../memory/episode-store";
 import { listReviewItems, updateReviewStatus } from "../memory/review-store";
 import { appendEvent } from "../events/event-log";
+import { defaultMemoryService } from "../memory/service";
 
 const app = new Hono();
 
@@ -188,12 +188,18 @@ app.post("/", async (c) => {
     memory_type?: string;
   };
   if (!body.content) return c.json({ error: "缺少 content" }, 400);
-  const memory = await addMemory({
+  const result = await defaultMemoryService.remember({
     content: body.content,
     memory_type: body.memory_type,
+    reason: "manual_memory_api",
+    profileSyncSource: "memory_tool",
   });
-  if (!memory) return c.json({ error: "添加失败" }, 500);
-  return c.json(memory, 201);
+  if (!result.memory) return c.json({ error: "添加失败" }, 500);
+  return c.json({
+    ...result.memory,
+    action: result.action,
+    duplicateOfMemoryId: result.duplicateOfMemoryId,
+  }, result.action === "created" ? 201 : 200);
 });
 
 // GET /api/memory/:id

@@ -5,7 +5,9 @@ import type { MemoryDecisionMemoryStore, MemoryDecisionRecord } from "../decisio
 import type { DreamRunRecord, DreamRunTrigger } from "../dream-run-store";
 import type {
   addMemory,
+  getMemory,
   listMemories,
+  setMemoryStatus,
   updateMemory,
 } from "../storage/store";
 
@@ -52,8 +54,10 @@ export interface DreamRunResult {
 
 export interface DreamMemoryStore extends MemoryDedupeStore, MemoryDecisionMemoryStore {
   listMemories: typeof listMemories;
+  getMemory: typeof getMemory;
   addMemory: typeof addMemory;
   updateMemory: typeof updateMemory;
+  setMemoryStatus: typeof setMemoryStatus;
 }
 
 export interface DreamWorkerOptions {

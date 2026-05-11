@@ -66,11 +66,23 @@ function parseAssistantParts(db: Database, messageId: string): Array<Record<stri
   return JSON.parse(message!.content) as Array<Record<string, unknown>>;
 }
 
+function createStore(overrides: Partial<MemoryWorkerStore> = {}): MemoryWorkerStore {
+  return {
+    addMemory: async () => null,
+    getMemory: async () => null,
+    listMemories: async () => ({ memories: [], total: 0 }),
+    searchMemories: async () => [],
+    updateMemory: async () => null,
+    setMemoryStatus: async () => null,
+    ...overrides,
+  };
+}
+
 describe("memory extraction worker", () => {
   test("adds a synthetic memory_extract tool part and records completed events", async () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     const savedMemories: Memory[] = [];
-    const store: MemoryWorkerStore = {
+    const store = createStore({
       addMemory: async (params) => {
         const memory = createMemory({
           id: "new-memory",
@@ -81,11 +93,7 @@ describe("memory extraction worker", () => {
         savedMemories.push(memory);
         return memory;
       },
-      getMemory: async () => null,
-      listMemories: async () => ({ memories: [], total: 0 }),
-      searchMemories: async () => [],
-      updateMemory: async () => null,
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),
@@ -133,16 +141,13 @@ describe("memory extraction worker", () => {
     }, db);
 
     let updatedContent = "";
-    const store: MemoryWorkerStore = {
-      addMemory: async () => null,
+    const store = createStore({
       getMemory: async (id) => createMemory({ id, content: "用户喜欢西红柿" }),
-      listMemories: async () => ({ memories: [], total: 0 }),
-      searchMemories: async () => [],
       updateMemory: async (id, content) => {
         updatedContent = content;
         return createMemory({ id, content });
       },
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),
@@ -187,16 +192,13 @@ describe("memory extraction worker", () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     let plannerSawOldMemory = false;
     let updatedContent = "";
-    const store: MemoryWorkerStore = {
-      addMemory: async () => null,
-      getMemory: async () => null,
-      listMemories: async () => ({ memories: [], total: 0 }),
+    const store = createStore({
       searchMemories: async () => [createMemory({ id: "memory-old", content: "用户喜欢西红柿" })],
       updateMemory: async (id, content) => {
         updatedContent = content;
         return createMemory({ id, content });
       },
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),
@@ -241,16 +243,14 @@ describe("memory extraction worker", () => {
   test("skips low-confidence and duplicate new memories", async () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     let addCalls = 0;
-    const store: MemoryWorkerStore = {
+    const store = createStore({
       addMemory: async () => {
         addCalls += 1;
         return createMemory({ id: `new-${addCalls}` });
       },
-      getMemory: async () => null,
-      listMemories: async () => ({ memories: [], total: 0 }),
+      listMemories: async () => ({ memories: [createMemory({ id: "existing", content: "用户偏好浅色 UI" })], total: 1 }),
       searchMemories: async () => [createMemory({ id: "existing", content: "用户偏好浅色 UI" })],
-      updateMemory: async () => null,
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),
@@ -296,16 +296,13 @@ describe("memory extraction worker", () => {
       id: "existing-active",
       content: "用户正在开发 my-agent 项目，偏好浅色、舒服、密度适中的 Web UI。",
     });
-    const store: MemoryWorkerStore = {
+    const store = createStore({
       addMemory: async () => {
         addCalls += 1;
         return createMemory({ id: `new-${addCalls}` });
       },
-      getMemory: async () => null,
       listMemories: async () => ({ memories: [existing], total: 1 }),
-      searchMemories: async () => [],
-      updateMemory: async () => null,
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),
@@ -348,18 +345,14 @@ describe("memory extraction worker", () => {
   test("runs profile sync after memory changes without adding chat tool cards", async () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     let syncedContents: string[] = [];
-    const store: MemoryWorkerStore = {
+    const store = createStore({
       addMemory: async (params) => createMemory({
         id: "identity-memory",
         content: params.content,
         memory_type: params.memory_type,
         status: params.status,
       }),
-      getMemory: async () => null,
-      listMemories: async () => ({ memories: [], total: 0 }),
-      searchMemories: async () => [],
-      updateMemory: async () => null,
-    };
+    });
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async (input) => {
@@ -399,13 +392,7 @@ describe("memory extraction worker", () => {
     const second = createWorkerDb();
     let active = 0;
     let maxActive = 0;
-    const store: MemoryWorkerStore = {
-      addMemory: async () => null,
-      getMemory: async () => null,
-      listMemories: async () => ({ memories: [], total: 0 }),
-      searchMemories: async () => [],
-      updateMemory: async () => null,
-    };
+    const store = createStore();
     const worker = new MemoryExtractionWorker({
       store,
       profileSync: async () => ({ status: "skipped", applied: [] }),

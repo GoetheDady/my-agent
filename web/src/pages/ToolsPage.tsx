@@ -9,7 +9,7 @@ export default function ToolsPage() {
           <ToolClass icon={Search} title="Read" text="读取文件、列目录等低风险工具默认允许。" />
           <ToolClass icon={Lock} title="Write" text="写文件等高影响工具需要审批或 allowlist。" />
           <ToolClass icon={Wrench} title="Memory Read" text="memory_recall/search/get 用于查询长期记忆和证据。" />
-          <ToolClass icon={ShieldCheck} title="Memory Write" text="memory_propose/update/forget 直接写 active memory，并记录事件。" />
+          <ToolClass icon={ShieldCheck} title="Memory Write" text="memory_remember/update/forget 通过 MemoryService 写 active memory，并记录事件。" />
         </div>
       </PageSection>
       <div className="mt-5">

@@ -41,11 +41,18 @@ export interface ToolsConfig {
   allowedPaths: string[];
 }
 
+/** 运行时数据目录配置 */
+export interface RuntimeDataConfig {
+  /** 所有本地运行数据的根目录，例如 SQLite、LanceDB、profile 文件 */
+  rootDir: string;
+}
+
 /** 完整应用配置 */
 export interface AppConfig {
   provider: ProviderConfig;
   embedding: EmbeddingConfig;
   tools: ToolsConfig;
+  runtimeData: RuntimeDataConfig;
 }
 
 // ============================================================
@@ -73,6 +80,20 @@ export function getProjectRoot(): string {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   return resolve(__dirname, "../..");
+}
+
+/**
+ * 获取运行时数据根目录。
+ *
+ * 运行时数据是用户使用项目后产生的本地状态，例如数据库、向量库和 profile 文件。
+ * 默认放在项目根目录的 `data/` 下，便于把源码和用户数据隔离；部署给别人使用时，
+ * 可以通过 `MY_AGENT_DATA_DIR` 改到任意持久化目录。
+ *
+ * @param root 项目根目录，测试或配置加载时可显式传入。
+ * @returns 运行时数据目录的绝对路径。
+ */
+export function getRuntimeDataDir(root = getProjectRoot()): string {
+  return resolve(process.env.MY_AGENT_DATA_DIR ?? resolve(root, "data"));
 }
 
 /**
@@ -134,6 +155,9 @@ export function loadConfig(): AppConfig {
     },
     tools: {
       allowedPaths: fileConfig.tools?.allowedPaths ?? [getProjectRoot()],
+    },
+    runtimeData: {
+      rootDir: getRuntimeDataDir(root),
     },
   };
 }

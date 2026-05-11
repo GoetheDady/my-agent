@@ -9,7 +9,7 @@ export type RuntimeEventType =
   | "tool.call"
   | "tool.result"
   | "memory.search"
-  | "memory.propose"
+  | "memory.remember"
   | "memory.update"
   | "memory.extract.started"
   | "memory.extract.completed"

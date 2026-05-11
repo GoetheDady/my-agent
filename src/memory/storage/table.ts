@@ -1,5 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
+import { mkdirSync } from "node:fs";
 import { resolve } from "path";
+import { getRuntimeDataDir } from "../../core/config";
 import type { Memory } from "./types";
 
 export const USER_ID = "default";
@@ -17,7 +19,9 @@ export async function getTable(): Promise<lancedb.Table> {
   // 方便用语义相似度查找“意思接近”的记忆，而不只靠关键词。
   if (tbl) return tbl;
 
-  const dbPath = resolve(import.meta.dir, "../../../data/memories.lancedb");
+  const dataDir = getRuntimeDataDir();
+  mkdirSync(dataDir, { recursive: true });
+  const dbPath = resolve(dataDir, "memories.lancedb");
   db = await lancedb.connect(dbPath);
 
   const existing = await db.tableNames();

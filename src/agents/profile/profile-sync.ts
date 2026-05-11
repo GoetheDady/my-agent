@@ -17,6 +17,14 @@ export interface ProfileSyncInput {
   taskId?: string | null;
   conversationId?: string | null;
   database?: Database;
+  /**
+   * profile 数据根目录。默认使用 data/profiles。
+   *
+   * 这里保留 rootDir 作为兼容字段，是为了现有测试和调用点能逐步迁移；
+   * 新代码应优先传 profileRootDir，避免把它误解成项目根目录。
+   */
+  profileRootDir?: string;
+  /** @deprecated 请使用 profileRootDir。 */
   rootDir?: string;
   source: ProfileSyncSource;
   memories: Array<Pick<Memory, "id" | "content" | "memory_type" | "status" | "confidence">>;
@@ -94,6 +102,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
     const applied = applyProfileFileUpdates({
       agentId,
       userId: input.userId ?? "default",
+      profileRootDir: input.profileRootDir,
       rootDir: input.rootDir,
       soulUpdates: classified.soulUpdates,
       userUpdates: classified.userUpdates,

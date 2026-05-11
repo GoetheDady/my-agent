@@ -33,7 +33,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 
 ### Event System (`src/events/`)
 - `appendEvent()` writes typed runtime events to SQLite.
-- Event types include: `task.*`, `tool.*`, `memory.search`, `memory.propose`, `memory.update`, `memory.extract.*`, `memory.reconsolidate.*`, `memory.dedupe.*`.
+- Event types include: `task.*`, `tool.*`, `memory.search`, `memory.remember`, `memory.update`, `memory.extract.*`, `memory.reconsolidate.*`, `memory.dedupe.*`.
 - Events are exposed via `GET /api/runtime/events?agentId=default`.
 
 ### Tool System (`src/brain/`)

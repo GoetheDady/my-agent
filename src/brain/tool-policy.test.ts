@@ -28,7 +28,7 @@ describe("tool policy", () => {
   });
 
   test("memory write tools write active memories by default", () => {
-    expect(evaluateToolPolicy({ toolName: "memory_propose" })).toEqual({
+    expect(evaluateToolPolicy({ toolName: "memory_remember" })).toEqual({
       allowed: true,
       requiresApproval: false,
       reason: "memory_write_allowed",

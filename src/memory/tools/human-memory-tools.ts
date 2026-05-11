@@ -1,10 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "ai";
 import { z } from "zod";
-import {
-  syncProfileFromMemories,
-  type ProfileSyncPort,
-} from "../../agents/profile/profile-sync";
+import type { ProfileSyncPort } from "../../agents/profile/profile-sync";
 import { appendEvent } from "../../events/event-log";
 import {
   addMemory,
@@ -12,8 +9,10 @@ import {
   listMemories,
   searchMemories,
   setMemoryStatus,
+  updateMemory,
   type Memory,
 } from "../storage/store";
+import { createMemoryService, type MemoryServiceStore } from "../service";
 import { getEpisode, searchEpisodes } from "../episode-store";
 import {
   createReviewItem,
@@ -41,12 +40,8 @@ export interface HumanMemoryToolContext {
   profileSync?: ProfileSyncPort;
 }
 
-export interface HumanMemoryStorePort {
+export interface HumanMemoryStorePort extends MemoryServiceStore {
   searchMemories(query: string, limit?: number): Promise<Memory[]>;
-  listMemories(params: Parameters<typeof listMemories>[0]): ReturnType<typeof listMemories>;
-  getMemory(id: string): Promise<Memory | null>;
-  addMemory(params: Parameters<typeof addMemory>[0]): Promise<Memory | null>;
-  setMemoryStatus(id: string, status: string): Promise<Memory | null>;
 }
 
 const defaultStore: HumanMemoryStorePort = {
@@ -54,6 +49,7 @@ const defaultStore: HumanMemoryStorePort = {
   listMemories,
   getMemory,
   addMemory,
+  updateMemory,
   setMemoryStatus,
 };
 
@@ -213,29 +209,35 @@ export async function memoryRecall(
 export async function memoryRemember(
   input: z.infer<typeof memoryRememberSchema>,
   context: HumanMemoryToolContext = {},
-): Promise<{ memory: ReturnType<typeof toRecallMemory> | null }> {
+): Promise<{
+  action: string;
+  memory: ReturnType<typeof toRecallMemory> | null;
+  duplicateOfMemoryId?: string;
+  reason?: string;
+}> {
   // memory_remember 是显式写入入口，适合“请记住……”这类用户明确授权的内容。
-  // 写入后会尝试同步 user.md / soul.md；同步失败只记事件，不影响记忆本身。
-  const memory = await (context.store ?? defaultStore).addMemory({
+  // 真实写入委托给 MemoryService，保证工具、worker、API 使用同一套去重和 profile 同步规则。
+  const result = await createMemoryService({
+    ...context,
+    store: context.store ?? defaultStore,
+  }).remember({
     content: input.content,
     memory_type: mapKindToMemoryType(input.kind ?? "semantic"),
     confidence: input.confidence ?? 0.8,
     status: "active",
     source_text: JSON.stringify({ reason: input.reason ?? "", kind: input.kind ?? "semantic" }),
+    reason: input.reason ?? "memory_remember",
+    profileSyncSource: "memory_tool",
+  }, {
+    ...context,
+    store: context.store ?? defaultStore,
   });
-  if (memory) {
-    await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
-      agentId: context.agentId ?? "default",
-      userId: "default",
-      taskId: context.taskId ?? null,
-      conversationId: context.conversationId ?? null,
-      database: context.database,
-      source: "memory_tool",
-      memories: [memory],
-      reason: input.reason ?? "memory_remember",
-    });
-  }
-  return { memory: memory ? toRecallMemory(memory) : null };
+  return {
+    action: result.action,
+    memory: result.memory ? toRecallMemory(result.memory) : null,
+    duplicateOfMemoryId: result.duplicateOfMemoryId,
+    reason: result.reason,
+  };
 }
 
 /**
@@ -256,33 +258,39 @@ export async function memoryPlan(
     // prospective memory 是前瞻记忆，表示未来要做的事或计划。
     // v1 只负责“记得有这件事”，不负责真正定时通知。
     if (!input.content) return { memory: null, memories: [] };
-    const memory = await store.addMemory({
+    const result = await createMemoryService({
+      ...context,
+      store,
+    }).remember({
       content: input.content,
       memory_type: "prospective",
       status: "active",
       confidence: 0.8,
       source_text: JSON.stringify({ reason: input.reason ?? "", kind: "prospective" }),
+      reason: input.reason ?? "memory_plan",
+      profileSyncSource: "memory_tool",
+    }, {
+      ...context,
+      store,
     });
-    if (memory) {
-      await syncProfileSafely(context.profileSync ?? syncProfileFromMemories, {
-        agentId: context.agentId ?? "default",
-        userId: "default",
-        taskId: context.taskId ?? null,
-        conversationId: context.conversationId ?? null,
-        database: context.database,
-        source: "memory_tool",
-        memories: [memory],
-        reason: input.reason ?? "memory_plan",
-      });
-    }
+    const memory = result.memory;
     return { memory: memory ? toRecallMemory(memory) : null, memories: [] };
   }
 
   if (input.action === "complete") {
     // 完成计划时不删除记忆，而是改状态。这样以后还能追溯“以前计划过什么”。
     if (!input.memoryId) return { memory: null, memories: [] };
-    const memory = await store.setMemoryStatus(input.memoryId, "completed");
-    return { memory: memory ? toRecallMemory(memory) : null, memories: [] };
+    const result = await createMemoryService({
+      ...context,
+      store,
+    }).completePlan({
+      memoryId: input.memoryId,
+      reason: input.reason ?? "memory_plan_complete",
+    }, {
+      ...context,
+      store,
+    });
+    return { memory: result.memory ? toRecallMemory(result.memory) : null, memories: [] };
   }
 
   const memories = (await store.listMemories({ type: "prospective", status: "active", pageSize: 20 }))
@@ -343,24 +351,6 @@ export function memoryReflect(
     reason: input.reason,
   }, context.database);
   return { reviewItem };
-}
-
-async function syncProfileSafely(sync: ProfileSyncPort, input: Parameters<ProfileSyncPort>[0]): Promise<void> {
-  try {
-    await sync(input);
-  } catch (error) {
-    appendEvent({
-      agent_id: input.agentId ?? "default",
-      task_id: input.taskId ?? null,
-      conversation_id: input.conversationId ?? null,
-      type: "profile.sync.failed",
-      payload: {
-        source: input.source,
-        memoryIds: input.memories.map((memory) => memory.id),
-        error: error instanceof Error ? error.message : String(error),
-      },
-    }, input.database);
-  }
 }
 
 /**

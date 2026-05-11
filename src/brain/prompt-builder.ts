@@ -47,7 +47,7 @@ export function buildAgentSystemPrompt(
   const profileContext = options.profileContext ?? loadProfileContext({
     agentId: task.agent_id,
     userId: task.source_user_id,
-    rootDir: options.profileRootDir,
+    profileRootDir: options.profileRootDir,
     createIfMissing: options.createProfileFiles,
   });
   // working memory 只保存当前 task 的临时状态，不等同于长期记忆。

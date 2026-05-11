@@ -17,7 +17,7 @@ describe("profile files", () => {
   test("creates default soul and user files when missing", () => {
     withTempDir((dir) => {
       const context = loadProfileContext({
-        rootDir: dir,
+        profileRootDir: dir,
         agentId: "default",
         userId: "default",
       });
@@ -32,12 +32,12 @@ describe("profile files", () => {
     withTempDir((dir) => {
       const soulPath = join(dir, "agents", "default", "soul.md");
       const userPath = join(dir, "users", "default", "user.md");
-      loadProfileContext({ rootDir: dir, agentId: "default", userId: "default" });
+      loadProfileContext({ profileRootDir: dir, agentId: "default", userId: "default" });
       writeFileSync(soulPath, "# soul\nUse concise replies.", "utf8");
       writeFileSync(userPath, "# user\nCall the user 戈德斯文.", "utf8");
 
       const context = loadProfileContext({
-        rootDir: dir,
+        profileRootDir: dir,
         agentId: "default",
         userId: "default",
       });
@@ -49,10 +49,10 @@ describe("profile files", () => {
 
   test("updates markdown sections without duplicating equivalent bullets", () => {
     withTempDir((dir) => {
-      loadProfileContext({ rootDir: dir, agentId: "default", userId: "default" });
+      loadProfileContext({ profileRootDir: dir, agentId: "default", userId: "default" });
 
       const first = applyProfileFileUpdates({
-        rootDir: dir,
+        profileRootDir: dir,
         agentId: "default",
         userId: "default",
         userUpdates: [{
@@ -66,7 +66,7 @@ describe("profile files", () => {
         }],
       });
       const second = applyProfileFileUpdates({
-        rootDir: dir,
+        profileRootDir: dir,
         agentId: "default",
         userId: "default",
         userUpdates: [{
@@ -80,7 +80,7 @@ describe("profile files", () => {
         }],
       });
 
-      const context = loadProfileContext({ rootDir: dir, agentId: "default", userId: "default" });
+      const context = loadProfileContext({ profileRootDir: dir, agentId: "default", userId: "default" });
       expect(first.map((update) => update.kind)).toEqual(["soul", "user"]);
       expect(second).toEqual([]);
       expect(context.user?.match(/name: 张三/g)).toHaveLength(1);

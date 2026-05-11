@@ -24,7 +24,6 @@ import {
   applyConflictUpdateDecisions,
   applyEpisodeDerivedMemoryDecisions,
   applyExactDedupeDecisions,
-  syncProfilesForDreamDecisions,
 } from "./decisions";
 import {
   updateDailySummaryMemoryChanges,
@@ -114,6 +113,7 @@ export async function runDreamWorker(
           dreamRunId: dreamRun.id,
           database,
           store: memoryStore,
+          profileSync,
         }),
         ...await applyEpisodeDerivedMemoryDecisions({
           agentId,
@@ -122,6 +122,7 @@ export async function runDreamWorker(
           timezone,
           database,
           store: memoryStore,
+          profileSync,
         }),
       ];
     // dedupe 输出要体现 real-run 已经实际停用/替代了哪些记忆，供前端展示。
@@ -140,14 +141,6 @@ export async function runDreamWorker(
     if (!dryRun && decisions.length > 0) {
       summary.memory_change_ids = decisions.map((decision) => decision.id);
       updateDailySummaryMemoryChanges(summary.id, summary.memory_change_ids, database);
-      // Dream Worker 沉淀出的 active memory 也要同步到 user.md / soul.md 稳定认知层。
-      await syncProfilesForDreamDecisions({
-        agentId,
-        database,
-        profileSync,
-        decisions,
-        store: memoryStore,
-      });
     }
     const pendingReviewCount = listReviewItems({ agentId, status: "pending", limit: 1000 }, database).length;
     const completedRun = completeDreamRun(dreamRun.id, database) ?? dreamRun;
