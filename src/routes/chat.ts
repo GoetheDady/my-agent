@@ -5,18 +5,17 @@ import { createSession, appendMessage, getSession, updateSessionTitle, type Sess
 import { getConfig } from "../core/config";
 import { extractAssistantText, serializeAssistantPartsForStorage } from "../channels/message-parts";
 import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../runtime/agent-runtime";
-import { WebChannelAdapter } from "../channels/web-channel";
+import { defaultChannelService } from "../channels/service";
 import { emitLifecycleHook } from "../lifecycle/hooks";
 
 const app = new Hono();
-const webChannel = new WebChannelAdapter();
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 /**
  * Chat 主入口流程：
  * 1. 前端先确保 sessionId 存在，再把 UI messages 发到这里。
- * 2. WebChannelAdapter 把 Web 会话消息转换为内部 task，并写入 user.message 事件。
+ * 2. ChannelService 把 Web 会话消息转换为内部 task，并写入 user.message 事件。
  * 3. runAgentTask 接管 Agent 串行执行、工具调用和模型流式输出。
  * 4. 流结束后把助手消息写入 sessions/messages，再触发 assistant.message.persisted hook。
  * 5. 记忆提取 worker 由 hook 异步触发，不阻塞用户看到助手回复。
@@ -44,7 +43,8 @@ app.post("/", async (c) => {
     ?? (typeof (lastUserMsg as { content?: string } | undefined)?.content === "string" ? (lastUserMsg as { content: string }).content : "")
     ?? "";
 
-  const received = await webChannel.receive({
+  const received = defaultChannelService.receiveMessage({
+    channel: "web",
     externalConversationId: capturedSessionId,
     externalUserId: "default",
     text: userText,

@@ -44,6 +44,12 @@ bun run build        # 构建到 web/dist
 - 生命周期：`queued → running → completed | failed | canceled`。
 - 每个 Agent 的任务队列串行处理。
 
+**渠道系统** (`src/channels/`):
+- `ChannelService` 是 Web、未来微信/飞书/CLI/HTTP API 的统一入站服务。
+- 入站流程：标准化 channel message → 映射 channel identity → 映射 conversation → 创建 task → 写 `task.created` / `user.message` 事件。
+- Web 的 `sessions/messages` 仍是前端展示层；内部 runtime 使用 `conversations/tasks/events`。
+- 飞书和微信目前只有 stub adapter，不接真实 SDK。
+
 **生命周期钩子** (`src/lifecycle/hooks.ts`):
 - `registerLifecycleHook(type, handler)` / `emitLifecycleHook(event)`。
 - 当前唯一钩子类型：`assistant.message.persisted`。

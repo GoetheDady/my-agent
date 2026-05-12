@@ -41,6 +41,12 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Tasks are created with `createTask()` and dispatched via `task-queue.ts`.
 - Task queue processes tasks one at a time per agent.
 
+### Channel System (`src/channels/`)
+- `ChannelService` owns incoming channel messages: identity mapping, conversation mapping, task creation, and user/task events.
+- Adapters only handle channel-specific delivery or protocol details; they must not create tasks directly.
+- Web sessions remain frontend display state. Runtime context uses `conversations`, `tasks`, and `events`.
+- Feishu and WeChat adapters are stubs for now.
+
 ### Event System (`src/events/`)
 - `appendEvent()` writes typed runtime events to SQLite.
 - Event types include: `task.*`, `tool.*`, `memory.search`, `memory.remember`, `memory.update`, `memory.extract.*`, `memory.reconsolidate.*`, `memory.dedupe.*`.

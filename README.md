@@ -168,9 +168,13 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 
 ## `src/channels/`
 
-- `src/channels/channel-adapter.ts`：渠道适配器接口定义。渠道指 Web、微信、飞书等消息入口。
-- `src/channels/web-channel.ts`：Web 渠道实现，把网页聊天请求转换为内部任务。
-- `src/channels/web-channel.test.ts`：覆盖 Web 渠道创建任务和发送消息流程。
+- `src/channels/service.ts`：ChannelService。统一把 Web、未来微信/飞书等外部消息转换成内部 identity、conversation、task 和 events。
+- `src/channels/types.ts`：渠道输入、输出、adapter、identity 和 conversation 类型定义。
+- `src/channels/identity-store.ts`：封装 `channel_identities` 表，维护外部用户到内部 userId 的映射。
+- `src/channels/conversation-store.ts`：封装 `conversations` 表，维护外部会话到内部 conversation 的映射。
+- `src/channels/web-channel.ts`：Web 渠道轻量适配器；Web 出站仍通过 HTTP stream 返回。
+- `src/channels/feishu-channel.ts`、`src/channels/wechat-channel.ts`：飞书/微信占位适配器，MVP 暂不接真实 SDK。
+- `src/channels/service.test.ts`：覆盖 ChannelService 入站、identity/conversation 复用、事件和 adapter 注册。
 - `src/channels/message-parts.ts`：消息内容 part 的解析和序列化。`part` 指一条消息中的文本块、工具块、推理块等子结构。
 - `src/channels/message-parts.test.ts`：覆盖消息 part 解析、工具卡解析和历史消息兼容。
 
