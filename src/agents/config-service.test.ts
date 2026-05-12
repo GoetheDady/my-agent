@@ -119,6 +119,39 @@ describe("AgentConfigService", () => {
     }
   });
 
+  test("patches feishu channel bindings and redacts public config", () => {
+    const rootDir = createTempRoot();
+    try {
+      const service = new AgentConfigService({ rootDir });
+      const config = service.patchAgentConfig("default", {
+        channels: {
+          feishu: {
+            bindings: {
+              cli_test: {
+                appId: "cli_test",
+                appSecret: "secret",
+                domain: "feishu",
+                enabled: true,
+                verificationToken: "token",
+              },
+            },
+          },
+        },
+      });
+      const publicConfig = service.getPublicAgentConfig("default");
+
+      expect(config.channels.feishu.bindings.cli_test.appSecret).toBe("secret");
+      expect(JSON.stringify(publicConfig)).not.toContain("secret");
+      expect(publicConfig.channels.feishu.bindings.cli_test).toMatchObject({
+        appId: "cli_test",
+        hasAppSecret: true,
+        hasVerificationToken: true,
+      });
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test("rejects invalid config patch", () => {
     const rootDir = createTempRoot();
     try {

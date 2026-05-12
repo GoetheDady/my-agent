@@ -1,15 +1,17 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getConfig, getRuntimeDataDir } from "../core/config";
 import { appendEvent } from "../events/event-log";
 import type {
   AgentConfig,
   AgentConfigContext,
+  AgentFeishuBindingConfig,
   AgentConfigPatch,
   AgentConfigResetResult,
   AgentConfigSkill,
   AgentConfigSkillStatus,
+  PublicAgentConfig,
 } from "./config-types";
 
 const DEFAULT_AGENT_ID = "default";
@@ -81,7 +83,7 @@ function createDefaultConfig(agentId: string): AgentConfig {
     },
     tools: {
       enabledToolsets: ["memory", "file", "runtime", "core", "skill", "agent_config"],
-      requiresApproval: ["write_file", "skill_create", "skill_disable", "agent_config_patch", "agent_config_reset"],
+      requiresApproval: ["write_file", "skill_create", "skill_disable", "agent_create", "agent_config_patch", "agent_config_reset"],
       allowedPaths: [],
     },
     memory: {
@@ -93,6 +95,12 @@ function createDefaultConfig(agentId: string): AgentConfig {
       enabled: true,
       indexEnabled: true,
       items: {},
+    },
+    channels: {
+      feishu: {
+        enabled: true,
+        bindings: {},
+      },
     },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -115,6 +123,34 @@ function normalizeSkillEntry(skillId: string, value: unknown): AgentConfigSkill 
   };
 }
 
+function normalizeDomain(value: unknown): "feishu" | "lark" {
+  return value === "lark" ? "lark" : "feishu";
+}
+
+function normalizeSecret(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeFeishuBinding(appId: string, value: unknown): AgentFeishuBindingConfig | null {
+  if (!isRecord(value)) return null;
+  const timestamp = now();
+  const normalizedAppId = String(value.appId ?? appId).trim();
+  const appSecret = String(value.appSecret ?? "").trim();
+  if (!normalizedAppId || !appSecret) return null;
+  return {
+    appId: normalizedAppId,
+    appSecret,
+    domain: normalizeDomain(value.domain),
+    enabled: asBoolean(value.enabled, true),
+    verificationToken: normalizeSecret(value.verificationToken),
+    encryptKey: normalizeSecret(value.encryptKey),
+    createdAt: Number(value.createdAt ?? timestamp),
+    updatedAt: Number(value.updatedAt ?? timestamp),
+  };
+}
+
 function normalizeConfig(agentId: string, raw: unknown): AgentConfig {
   const defaults = createDefaultConfig(agentId);
   if (!isRecord(raw)) return defaults;
@@ -131,6 +167,14 @@ function normalizeConfig(agentId: string, raw: unknown): AgentConfig {
   const modelRaw = isRecord(raw.model) ? raw.model : {};
   const toolsRaw = isRecord(raw.tools) ? raw.tools : {};
   const memoryRaw = isRecord(raw.memory) ? raw.memory : {};
+  const channelsRaw = isRecord(raw.channels) ? raw.channels : {};
+  const feishuRaw = isRecord(channelsRaw.feishu) ? channelsRaw.feishu : {};
+  const feishuBindingsRaw = isRecord(feishuRaw.bindings) ? feishuRaw.bindings : {};
+  const feishuBindings: Record<string, AgentFeishuBindingConfig> = {};
+  for (const [appId, value] of Object.entries(feishuBindingsRaw)) {
+    const normalized = normalizeFeishuBinding(appId, value);
+    if (normalized) feishuBindings[normalized.appId] = normalized;
+  }
 
   return {
     version: 1,
@@ -160,6 +204,12 @@ function normalizeConfig(agentId: string, raw: unknown): AgentConfig {
       indexEnabled: asBoolean(skillsRaw.indexEnabled, defaults.skills.indexEnabled),
       items: skillItems,
     },
+    channels: {
+      feishu: {
+        enabled: asBoolean(feishuRaw.enabled, defaults.channels.feishu.enabled),
+        bindings: feishuBindings,
+      },
+    },
     createdAt: Number(raw.createdAt ?? defaults.createdAt),
     updatedAt: Number(raw.updatedAt ?? defaults.updatedAt),
   };
@@ -174,6 +224,13 @@ function validateConfig(config: AgentConfig): void {
     if (!skill.name.trim()) throw new Error(`skill ${skillId} name 不能为空`);
     if (skill.status !== "enabled" && skill.status !== "disabled") {
       throw new Error(`skill ${skillId} status 非法`);
+    }
+  }
+  for (const [appId, binding] of Object.entries(config.channels.feishu.bindings)) {
+    if (!appId.trim() || !binding.appId.trim()) throw new Error("feishu appId 不能为空");
+    if (!binding.appSecret.trim()) throw new Error(`feishu ${binding.appId} appSecret 不能为空`);
+    if (binding.domain !== "feishu" && binding.domain !== "lark") {
+      throw new Error(`feishu ${binding.appId} domain 非法`);
     }
   }
 }
@@ -246,6 +303,35 @@ function mergePatch(current: AgentConfig, patch: AgentConfigPatch): AgentConfig 
       }
     }
   }
+  if (patch.channels?.feishu) {
+    const feishuPatch = patch.channels.feishu;
+    if (feishuPatch.enabled !== undefined) next.channels.feishu.enabled = Boolean(feishuPatch.enabled);
+    for (const rawAppId of asStringArray(feishuPatch.removeBindingAppIds)) {
+      delete next.channels.feishu.bindings[rawAppId.trim()];
+    }
+    if (feishuPatch.bindings) {
+      for (const [rawAppId, bindingPatch] of Object.entries(feishuPatch.bindings)) {
+        const appId = rawAppId.trim();
+        if (!appId) continue;
+        if (bindingPatch === null) {
+          delete next.channels.feishu.bindings[appId];
+          continue;
+        }
+        const existing = next.channels.feishu.bindings[appId];
+        const timestamp = now();
+        next.channels.feishu.bindings[appId] = {
+          appId,
+          appSecret: normalizeSecret(bindingPatch.appSecret) ?? existing?.appSecret ?? "",
+          domain: normalizeDomain(bindingPatch.domain ?? existing?.domain),
+          enabled: bindingPatch.enabled ?? existing?.enabled ?? true,
+          verificationToken: normalizeSecret(bindingPatch.verificationToken) ?? existing?.verificationToken,
+          encryptKey: normalizeSecret(bindingPatch.encryptKey) ?? existing?.encryptKey,
+          createdAt: existing?.createdAt ?? bindingPatch.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+      }
+    }
+  }
   next.updatedAt = now();
   return next;
 }
@@ -256,6 +342,7 @@ function emitConfigEvent(
   type: "agent.config.updated" | "agent.config.reset" | "agent.config.validation_failed" | "agent.config.migrated",
   payload: Record<string, unknown>,
 ): void {
+  if (!database) return;
   appendEvent({
     agent_id: context.agentId ?? DEFAULT_AGENT_ID,
     task_id: context.taskId ?? null,
@@ -269,6 +356,22 @@ function safeStructuredClone<T>(value: T): T {
   return globalThis.structuredClone
     ? globalThis.structuredClone(value)
     : JSON.parse(JSON.stringify(value)) as T;
+}
+
+function redactAgentConfig(config: AgentConfig): PublicAgentConfig {
+  const redacted = safeStructuredClone(config) as unknown as PublicAgentConfig;
+  redacted.channels.feishu.bindings = Object.fromEntries(
+    Object.entries(config.channels.feishu.bindings).map(([appId, binding]) => {
+      const { appSecret: _appSecret, verificationToken: _verificationToken, encryptKey: _encryptKey, ...publicBinding } = binding;
+      return [appId, {
+        ...publicBinding,
+        hasAppSecret: Boolean(binding.appSecret),
+        hasVerificationToken: Boolean(binding.verificationToken),
+        hasEncryptKey: Boolean(binding.encryptKey),
+      }];
+    }),
+  );
+  return redacted;
 }
 
 export class AgentConfigService {
@@ -285,6 +388,16 @@ export class AgentConfigService {
 
   getLegacySkillsRegistryPath(agentId = DEFAULT_AGENT_ID): string {
     return resolve(this.rootDir, "agents", safeAgentSegment(agentId), "skills", LEGACY_SKILLS_REGISTRY_FILENAME);
+  }
+
+  listConfiguredAgentIds(): string[] {
+    const agentsDir = resolve(this.rootDir, "agents");
+    if (!existsSync(agentsDir)) return [DEFAULT_AGENT_ID];
+    const ids = readdirSync(agentsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => safeAgentSegment(entry.name))
+      .filter((agentId) => existsSync(this.getConfigPath(agentId)));
+    return Array.from(new Set([DEFAULT_AGENT_ID, ...ids]));
   }
 
   getAgentConfig(agentId = DEFAULT_AGENT_ID, context: AgentConfigContext = {}): AgentConfig {
@@ -315,6 +428,19 @@ export class AgentConfigService {
       this.writeAgentConfig(normalizedAgentId, config);
     }
 
+    this.cache.set(normalizedAgentId, config);
+    return safeStructuredClone(config);
+  }
+
+  getPublicAgentConfig(agentId = DEFAULT_AGENT_ID, context: AgentConfigContext = {}): PublicAgentConfig {
+    return redactAgentConfig(this.getAgentConfig(agentId, context));
+  }
+
+  initializeAgentConfig(agentId: string, patch: AgentConfigPatch = {}, _context: AgentConfigContext = {}): AgentConfig {
+    const normalizedAgentId = safeAgentSegment(agentId);
+    const config = mergePatch(createDefaultConfig(normalizedAgentId), patch);
+    validateConfig(config);
+    this.writeAgentConfig(normalizedAgentId, config);
     this.cache.set(normalizedAgentId, config);
     return safeStructuredClone(config);
   }

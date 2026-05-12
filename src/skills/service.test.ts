@@ -11,6 +11,16 @@ function createTempRoot(): string {
   return mkdtempSync(join(tmpdir(), "my-agent-skills-"));
 }
 
+function insertAgent(db: Database, agentId: string, name: string): void {
+  const now = Date.now();
+  db
+    .query(
+      `INSERT INTO agents (id, name, status, current_task_id, workspace_path, created_at, updated_at)
+       VALUES (?, ?, 'idle', NULL, '', ?, ?)`,
+    )
+    .run(agentId, name, now, now);
+}
+
 describe("SkillService", () => {
   test("creates, lists and toggles skills", () => {
     const rootDir = createTempRoot();
@@ -63,6 +73,33 @@ describe("SkillService", () => {
       expect(content).toContain("Agent Skill");
       expect(content).toContain("Body");
     } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps skill indexes isolated per agent", () => {
+    const rootDir = createTempRoot();
+    const db = new Database(":memory:");
+    db.run("PRAGMA foreign_keys = ON");
+    initializeDatabaseSchema(db);
+    ensureDefaultAgent(db);
+    insertAgent(db, "researcher", "Researcher");
+
+    try {
+      const service = new SkillService({ rootDir });
+      service.createSkill({
+        skillId: "research-notes",
+        name: "Research Notes",
+        description: "整理研究资料",
+        content: "# Research Notes\n\nSummarize sources.",
+      }, { agentId: "researcher", database: db });
+
+      expect(service.listSkills("researcher", "enabled").skills.map((skill) => skill.id)).toEqual(["research-notes"]);
+      expect(service.listSkills("default", "enabled").skills).toHaveLength(0);
+      expect(service.buildSkillIndex("researcher")).toContain("research-notes");
+      expect(service.buildSkillIndex("default")).not.toContain("research-notes");
+    } finally {
+      db.close();
       rmSync(rootDir, { recursive: true, force: true });
     }
   });

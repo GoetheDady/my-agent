@@ -92,6 +92,7 @@ describe("runtimeStore", () => {
       loading: false,
       error: null,
       polling: false,
+      pollingAgentId: "default",
     });
   });
 
@@ -120,6 +121,42 @@ describe("runtimeStore", () => {
       resultIds: ["mem-1"],
     });
     expect(useRuntimeStore.getState().error).toBeNull();
+  });
+
+  test("fetches runtime snapshot for a selected agent", async () => {
+    const researcherAgent = { ...agent, id: "researcher", name: "Researcher" };
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/runtime/agents/researcher") return jsonResponse(researcherAgent);
+      if (url === "/api/runtime/tasks?agentId=researcher") return jsonResponse({ tasks: [] });
+      if (url === "/api/runtime/events?agentId=researcher&limit=50") return jsonResponse({ events: [] });
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await useRuntimeStore.getState().fetchRuntimeSnapshot("researcher");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(useRuntimeStore.getState().agent?.id).toBe("researcher");
+  });
+
+  test("refreshes the selected agent after canceling a task", async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/runtime/tasks/task-queued/cancel" && init?.method === "POST") {
+        return jsonResponse({ task: { ...tasks[1], status: "canceled" } });
+      }
+      if (url === "/api/runtime/agents/researcher") return jsonResponse({ ...agent, id: "researcher" });
+      if (url === "/api/runtime/tasks?agentId=researcher") return jsonResponse({ tasks: [] });
+      if (url === "/api/runtime/events?agentId=researcher&limit=50") return jsonResponse({ events: [] });
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await useRuntimeStore.getState().cancelTask("task-queued", "researcher");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runtime/tasks/task-queued/cancel", { method: "POST" });
+    expect(useRuntimeStore.getState().agent?.id).toBe("researcher");
   });
 
   test("derives the current task and queued tasks", () => {

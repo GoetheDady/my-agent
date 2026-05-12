@@ -77,8 +77,8 @@ cd web && bun run build
 
 - `.opencode/`：OpenCode 相关本地工具目录。
 - `.sisyphus/`：本地任务续跑/工具状态目录。
-- `data/profiles/`：运行时生成的 profile 文件目录，包含 Agent 的 `soul.md` 和用户的 `user.md`。
-- `data/agents/<agentId>/agent.json`：某个 Agent 的统一配置文件，包含名称、模型、工具策略和 skill 元数据。
+- `data/agents/<agentId>/soul.md`、`data/agents/<agentId>/user.md`：运行时生成的 profile 文件，和对应 Agent 的 `agent.json`、`skills/` 放在同一目录。
+- `data/agents/<agentId>/agent.json`：某个 Agent 的统一配置文件，包含名称、模型、工具策略、skill 元数据和 Agent 级渠道绑定。
 - `data/agents/<agentId>/skills/*/SKILL.md`：某个 Agent 的 skill 正文文件；启停状态不写在这里，而是写入同级 Agent 的 `agent.json`。
 - `node_modules/`：后端依赖安装目录。
 - `.git/`：Git 仓库数据目录。
@@ -122,8 +122,11 @@ src/
 
 ## `src/agents/`
 
-- `src/agents/agent-types.ts`：Agent、Agent 状态和相关类型定义。
-- `src/agents/agent-registry.ts`：Agent 注册表。负责创建、读取和更新默认 Agent。
+- `src/agents/agent-types.ts`：Agent、Agent 状态、创建入参和更新入参类型定义。
+- `src/agents/service.ts`：AgentService。负责创建、列出、读取和更新 Agent，并初始化独立 `agent.json`、skill 目录和 `soul.md`。
+- `src/agents/service.test.ts`：覆盖多 Agent 创建、文件初始化、重复创建和互不影响的配置更新。
+- `src/agents/tools.ts`：`agent_list`、`agent_get`、`agent_create` 工具外壳。
+- `src/agents/agent-registry.ts`：默认 Agent 兼容注册表。负责轻量创建、读取和更新 `default` Agent，供旧调用和任务队列使用。
 - `src/agents/agent-registry.test.ts`：覆盖默认 Agent 创建和状态更新。
 - `src/agents/config-types.ts`：Agent 配置类型。这里的配置指某个 Agent 怎么工作，不包含任务运行状态。
 - `src/agents/config-service.ts`：AgentConfigService。统一读取、校验、局部更新、重置 `data/agents/<agentId>/agent.json`；数组字段支持 add/remove 这类细粒度 patch。
@@ -156,7 +159,7 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 
 ## `src/profiles/`
 
-- `src/profiles/files.ts`：读取和更新 `data/profiles/agents/default/soul.md`、`data/profiles/users/default/user.md`。
+- `src/profiles/files.ts`：读取和更新 `data/agents/<agentId>/soul.md`、`data/agents/<agentId>/user.md`，并迁移旧 `data/profiles/` 文件。
 - `src/profiles/files.test.ts`：覆盖 profile 文件读写和结构化 Markdown 更新。
 - `src/profiles/classifier.ts`：判断一条记忆是否应该沉淀到 `user.md` 或 `soul.md`。
 - `src/profiles/sync.ts`：profile 同步主流程。根据记忆类型和分类结果更新稳定认知文件，并写入事件。
@@ -173,7 +176,9 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/channels/identity-store.ts`：封装 `channel_identities` 表，维护外部用户到内部 userId 的映射。
 - `src/channels/conversation-store.ts`：封装 `conversations` 表，维护外部会话到内部 conversation 的映射。
 - `src/channels/web-channel.ts`：Web 渠道轻量适配器；Web 出站仍通过 HTTP stream 返回。
-- `src/channels/feishu-channel.ts`、`src/channels/wechat-channel.ts`：飞书/微信占位适配器，MVP 暂不接真实 SDK。
+- `src/channels/feishu-channel.ts`：飞书出站适配器。飞书入站使用 WebSocket 长连接，绑定配置保存在目标 Agent 的 `agent.json` 的 `channels.feishu.bindings`，不再使用独立 `feishu-bindings.json` 作为配置源。
+- `src/channels/feishu-websocket-service.ts`：飞书长连接服务。长连接指后端主动连飞书开放平台接收事件，因此不需要公网回调 URL。
+- `src/channels/wechat-channel.ts`：微信占位适配器，MVP 暂不接真实 SDK。
 - `src/channels/service.test.ts`：覆盖 ChannelService 入站、identity/conversation 复用、事件和 adapter 注册。
 - `src/channels/message-parts.ts`：消息内容 part 的解析和序列化。`part` 指一条消息中的文本块、工具块、推理块等子结构。
 - `src/channels/message-parts.test.ts`：覆盖消息 part 解析、工具卡解析和历史消息兼容。
@@ -204,8 +209,8 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/routes/runtime.test.ts`：覆盖 runtime 状态和事件接口。
 - `src/routes/sessions.ts`：会话 API。提供会话列表、会话消息、创建和删除会话。
 - `src/routes/tools.ts`：工具 API。提供工具白名单授权接口。
-- `src/routes/agents.ts`：Agent 配置 API，提供读取、局部更新和重置 `agent.json` 的受控入口。
-- `src/routes/agents.test.ts`：覆盖 Agent 配置 API。
+- `src/routes/agents.ts`：Agent API。提供 Agent 创建、列表、读取、运行元信息更新，以及 `agent.json` 的读取、局部更新和重置入口。
+- `src/routes/agents.test.ts`：覆盖 Agent 创建、列表、配置读取和配置更新 API。
 - `src/routes/skills.ts`：Skill API。创建和启停 skill 时只写 `SKILL.md` 正文与 `agent.json` 元数据。
 - `src/routes/skills.test.ts`：覆盖 Skill API。
 
@@ -330,7 +335,7 @@ web/
 - `web/src/pages/EventsPage.tsx`：事件页面。展示 runtime events。
 - `web/src/pages/TasksPage.tsx`：任务页面。展示任务队列和执行历史。
 - `web/src/pages/ToolsPage.tsx`：工具页面。展示工具分类、权限和可用状态。
-- `web/src/pages/AgentsPage.tsx`：Agent 页面。展示默认 Agent 状态，并为多 Agent 预留。
+- `web/src/pages/AgentsPage.tsx`：Agent 页面。展示 Agent 状态，并为后续多 Agent 管理 UI 预留。
 - `web/src/pages/ChannelsPage.tsx`：渠道页面。展示 Web 渠道和未来微信/飞书入口。
 - `web/src/pages/SettingsPage.tsx`：设置页面。为模型、记忆策略、工具权限和 Agent 配置预留。
 
@@ -388,8 +393,8 @@ web/
 
 ## 认知文件
 
-- `data/profiles/agents/default/soul.md`：Agent 对自己的稳定认知，例如身份定位、表达规则、做事边界和长期协作原则。
-- `data/profiles/users/default/user.md`：Agent 对用户的稳定认知，例如用户身份、偏好、长期项目和协作方式。
+- `data/agents/default/soul.md`：Agent 对自己的稳定认知，例如身份定位、表达规则、做事边界和长期协作原则。
+- `data/agents/default/user.md`：Agent 对用户的稳定认知，例如用户身份、偏好、长期项目和协作方式。
 
 这两个文件会由 profile sync 自动维护。长期证据仍以记忆系统和事件系统为准，profile 文件只是更稳定、更短的认知摘要。
 

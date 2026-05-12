@@ -35,6 +35,9 @@ describe("tool registry", () => {
     expect(names).toContain("read_file");
     expect(names).toContain("write_file");
     expect(names).toContain("memory_search");
+    expect(names).toContain("agent_list");
+    expect(names).toContain("agent_get");
+    expect(names).toContain("agent_create");
   });
 
   test("can disable a tool for one agent", () => {

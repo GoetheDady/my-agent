@@ -80,6 +80,14 @@ describe("runtime database schema", () => {
         ["updated_at", "INTEGER", 1, null, 0],
       ]);
 
+      expect(readTableColumns(db, "sessions")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["agent_id", "TEXT", 1, "'default'", 0],
+        ["title", "TEXT", 1, "'新对话'", 0],
+        ["created_at", "INTEGER", 1, null, 0],
+        ["updated_at", "INTEGER", 1, null, 0],
+      ]);
+
       expect(readTableColumns(db, "tasks")).toEqual([
         ["id", "TEXT", 0, null, 1],
         ["agent_id", "TEXT", 1, null, 0],
@@ -225,6 +233,8 @@ describe("runtime database schema", () => {
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
       ]);
 
+      expect(readForeignKeys(db, "sessions")).toEqual([]);
+
       expect(readForeignKeys(db, "events")).toEqual([
         { table: "tasks", from: "task_id", to: "id", on_delete: "NO ACTION" },
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
@@ -275,6 +285,7 @@ describe("runtime database schema", () => {
       ]);
       expect(readIndexColumns(db, "idx_events_agent_created")).toEqual(["agent_id", "created_at"]);
       expect(readIndexColumns(db, "idx_events_task_created")).toEqual(["task_id", "created_at"]);
+      expect(readIndexColumns(db, "idx_sessions_agent_updated")).toEqual(["agent_id", "updated_at"]);
       expect(readIndexColumns(db, "idx_conversations_agent_updated")).toEqual([
         "agent_id",
         "updated_at",
@@ -313,5 +324,38 @@ describe("runtime database schema", () => {
       ]);
       expect(readIndexColumns(db, "idx_memory_decisions_dream_run")).toEqual(["dream_run_id"]);
     });
+  });
+
+  test("migrates old sessions table with default agent binding", () => {
+    const db = new Database(":memory:");
+    db.run("PRAGMA foreign_keys = ON");
+    db.run(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '新对话',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    db.run(
+      "INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('old-session', '旧会话', 1, 2)",
+    );
+
+    try {
+      initializeDatabaseSchema(db);
+      const session = db
+        .query<{ agent_id: string }, []>("SELECT agent_id FROM sessions WHERE id = 'old-session'")
+        .get();
+      expect(session?.agent_id).toBe("default");
+      expect(readTableColumns(db, "sessions")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["title", "TEXT", 1, "'新对话'", 0],
+        ["created_at", "INTEGER", 1, null, 0],
+        ["updated_at", "INTEGER", 1, null, 0],
+        ["agent_id", "TEXT", 1, "'default'", 0],
+      ]);
+    } finally {
+      db.close();
+    }
   });
 });

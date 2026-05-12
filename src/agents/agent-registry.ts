@@ -18,15 +18,15 @@ function readAgent(database: Database, agentId: string): AgentRecord | null {
 /**
  * 确保默认 Agent 存在。
  *
- * 启动阶段会调用这个方法初始化 `default` Agent。MVP 阶段只有一个 Agent，
- * 后续多 Agent 也会继续使用同一张 `agents` 表记录状态。
+ * 启动阶段会调用这个方法初始化 `default` Agent。
+ * 多 Agent 的完整创建、文件初始化和配置同步由 `AgentService` 负责。
  *
  * @param database 可选数据库连接，测试中可传入内存数据库。
  * @returns 已存在或刚创建的默认 Agent 记录。
  */
 export function ensureDefaultAgent(database: Database = getDb()): AgentRecord {
-  // MVP 先固定一个 default agent。启动时确保它存在，
-  // 后续多 Agent 也会沿用这张 agents 表和状态机。
+  // default agent 是系统启动的保底 Agent。这里保持轻量初始化，避免测试环境
+  // 只为了建表就写入 profile/agent.json 文件；完整 Agent 创建由 AgentService 负责。
   const existing = readAgent(database, DEFAULT_AGENT_ID);
   if (existing) return existing;
 

@@ -31,14 +31,18 @@ bun run build        # 构建到 web/dist
 **Database**:
 - SQLite (`data/agent.sqlite`)：会话、消息、Agent、任务、事件。WAL 模式，外键强制。
 - LanceDB (`data/memories.lancedb`)：向量记忆存储，智谱 AI embedding-3（2048 dims）。
-- Profile 文件默认在 `data/profiles/` 下，例如 `data/profiles/agents/default/soul.md` 和 `data/profiles/users/default/user.md`。可通过 `MY_AGENT_DATA_DIR` 改运行时数据根目录。
+- Profile 文件默认在对应 Agent 目录下，例如 `data/agents/default/soul.md` 和 `data/agents/default/user.md`。可通过 `MY_AGENT_DATA_DIR` 改运行时数据根目录。
 
 **Agent 系统** (`src/agents/`, `src/runtime/`):
-- 启动时 `ensureDefaultAgent()` 创建唯一默认 Agent（`id: "default"`）。
-- `AgentConfigService` 负责 `data/agents/<agentId>/agent.json`，这是 Agent 名称、模型、工具策略和 skill 元数据的唯一配置源。
+- 启动时 `ensureDefaultAgent()` 创建兜底默认 Agent（`id: "default"`）。
+- `AgentService` 支持创建、列出、读取和更新多个 Agent；本阶段只做独立运行，不做 delegation。
+- 每个 Agent 有独立 `data/agents/<agentId>/agent.json`、`data/agents/<agentId>/skills/`、`data/agents/<agentId>/soul.md` 和 `data/agents/<agentId>/user.md`。
+- `user.md` 也跟随 Agent 目录，不再放在 `data/profiles/users/`。
+- `AgentConfigService` 负责 `data/agents/<agentId>/agent.json`，这是 Agent 名称、模型、工具策略、skill 元数据和 Agent 级渠道绑定的唯一配置源。
 - `temperature` 不属于 Agent MVP 配置；模型配置只保留 provider 和 model。
 - `runAgentTask()` 编排：标记运行 → 构建 system prompt → 构建工具集 → `streamText` → 标记完成/失败。
 - Agent 状态：`idle | running | paused | error`。45s 模型超时 + abort 信号处理。
+- Agent 工具包括 `agent_list`、`agent_get`、`agent_create`，用于让 Agent 查看和创建可用 Agent。
 
 **任务系统** (`src/tasks/`):
 - 生命周期：`queued → running → completed | failed | canceled`。
@@ -48,7 +52,8 @@ bun run build        # 构建到 web/dist
 - `ChannelService` 是 Web、未来微信/飞书/CLI/HTTP API 的统一入站服务。
 - 入站流程：标准化 channel message → 映射 channel identity → 映射 conversation → 创建 task → 写 `task.created` / `user.message` 事件。
 - Web 的 `sessions/messages` 仍是前端展示层；内部 runtime 使用 `conversations/tasks/events`。
-- 飞书和微信目前只有 stub adapter，不接真实 SDK。
+- 飞书已接入 WebSocket 长连接 MVP，飞书 App 绑定保存在目标 Agent 的 `agent.json` 的 `channels.feishu.bindings`，不再使用独立 `feishu-bindings.json` 作为配置源。
+- 微信目前只有 stub adapter，不接真实 SDK。
 
 **生命周期钩子** (`src/lifecycle/hooks.ts`):
 - `registerLifecycleHook(type, handler)` / `emitLifecycleHook(event)`。

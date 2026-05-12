@@ -1,9 +1,14 @@
+interface ResolvedSession {
+  id: string;
+  agent_id?: string;
+}
+
 interface SessionResolverOptions {
   getSessionId: () => string | null;
   setSessionId: (id: string) => void;
   setActiveSessionId: (id: string) => void;
   fetchSessions: () => Promise<void>;
-  createSession: () => Promise<{ id: string }>;
+  createSession: () => Promise<ResolvedSession>;
   onSessionCreated?: (id: string) => void;
 }
 

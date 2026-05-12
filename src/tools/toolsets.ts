@@ -50,8 +50,11 @@ export const TOOLSETS: ToolsetDefinition[] = [
   },
   {
     name: "agent_config",
-    description: "当前 Agent 的配置读取、局部更新和重置工具。",
+    description: "Agent 列表、创建、配置读取、局部更新和重置工具。",
     tools: [
+      "agent_list",
+      "agent_get",
+      "agent_create",
       "agent_config_get",
       "agent_config_patch",
       "agent_config_reset",

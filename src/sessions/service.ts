@@ -3,9 +3,15 @@ import { getDb } from "../core/database";
 
 export interface Session {
   id: string;
+  agent_id: string;
   title: string;
   created_at: number;
   updated_at: number;
+}
+
+export interface CreateSessionInput {
+  title?: string;
+  agentId?: string;
 }
 
 export interface SessionMessage {
@@ -32,14 +38,19 @@ export interface AssistantToolPartUpdate {
  * @param database 可选数据库连接。
  * @returns 新创建的 session 记录。
  */
-export function createSession(title?: string, database: Database = getDb()): Session {
+export function createSession(
+  input?: string | CreateSessionInput,
+  database: Database = getDb(),
+): Session {
   const id = crypto.randomUUID();
   const now = Date.now();
+  const title = typeof input === "string" ? input : input?.title;
+  const agentId = typeof input === "string" ? "default" : input?.agentId?.trim() || "default";
   database.run(
-    "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-    [id, title ?? "新对话", now, now],
+    "INSERT INTO sessions (id, agent_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    [id, agentId, title ?? "新对话", now, now],
   );
-  return { id, title: title ?? "新对话", created_at: now, updated_at: now };
+  return { id, agent_id: agentId, title: title ?? "新对话", created_at: now, updated_at: now };
 }
 
 /**
@@ -47,9 +58,8 @@ export function createSession(title?: string, database: Database = getDb()): Ses
  *
  * @returns 按更新时间倒序排列的 session 列表。
  */
-export function listSessions(): Session[] {
-  const db = getDb();
-  return db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Session[];
+export function listSessions(database: Database = getDb()): Session[] {
+  return database.query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Session[];
 }
 
 /**
@@ -80,9 +90,8 @@ export function updateSessionTitle(id: string, title: string, database: Database
  *
  * @param id session id。
  */
-export function deleteSession(id: string): void {
-  const db = getDb();
-  db.run("DELETE FROM sessions WHERE id = ?", [id]);
+export function deleteSession(id: string, database: Database = getDb()): void {
+  database.run("DELETE FROM sessions WHERE id = ?", [id]);
 }
 
 /**

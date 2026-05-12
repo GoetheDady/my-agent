@@ -1,9 +1,11 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent } from "../agents/agent-registry";
+import { AgentConfigService } from "../agents/config-service";
 import { initializeDatabaseSchema } from "../core/database";
 import { listConversationEvents } from "../events/event-log";
 import { getTask } from "../tasks/task-store";
+import { FeishuBindingService } from "./feishu-binding-service";
 import { FeishuChannelAdapter } from "./feishu-channel";
 import { ChannelService } from "./service";
 import { WebChannelAdapter } from "./web-channel";
@@ -17,6 +19,16 @@ function createChannelDb(): Database {
   return db;
 }
 
+function insertAgent(db: Database, agentId: string, name: string): void {
+  const now = Date.now();
+  db
+    .query(
+      `INSERT INTO agents (id, name, status, current_task_id, workspace_path, created_at, updated_at)
+       VALUES (?, ?, 'idle', NULL, '', ?, ?)`,
+    )
+    .run(agentId, name, now, now);
+}
+
 async function withChannelService<T>(
   run: (db: Database, service: ChannelService) => T | Promise<T>,
 ): Promise<T> {
@@ -25,7 +37,9 @@ async function withChannelService<T>(
     database: db,
     adapters: [
       new WebChannelAdapter(),
-      new FeishuChannelAdapter(),
+      new FeishuChannelAdapter(new FeishuBindingService(
+        new AgentConfigService({ rootDir: `/tmp/my-agent-channel-service-${crypto.randomUUID()}` }),
+      )),
       new WeChatChannelAdapter(),
     ],
   });
@@ -74,6 +88,26 @@ describe("ChannelService", () => {
 
       expect(second.conversationId).toBe(first.conversationId);
       expect(count?.count).toBe(1);
+    });
+  });
+
+  test("web message can target a non-default agent", async () => {
+    await withChannelService(async (db, service) => {
+      insertAgent(db, "researcher", "Researcher");
+
+      const result = service.receiveMessage({
+        channel: "web",
+        externalConversationId: "session-research",
+        externalUserId: "user-1",
+        agentId: "researcher",
+        text: "research this",
+      }, db);
+
+      expect(result.agentId).toBe("researcher");
+      expect(getTask(result.task.id, db)).toMatchObject({
+        agent_id: "researcher",
+        conversation_id: "session-research",
+      });
     });
   });
 
@@ -138,13 +172,13 @@ describe("ChannelService", () => {
     });
   });
 
-  test("stub channels are registered but delivery is not implemented", async () => {
+  test("feishu delivery requires a configured binding", async () => {
     await withChannelService(async (_db, service) => {
       await expect(service.deliverMessage({
         channel: "feishu",
         conversationId: "conversation-1",
         text: "hello",
-      })).rejects.toThrow("Feishu channel delivery is not implemented");
+      })).rejects.toThrow("Feishu binding not found");
     });
   });
 });

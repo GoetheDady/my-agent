@@ -18,10 +18,10 @@ export interface ProfileSyncInput {
   conversationId?: string | null;
   database?: Database;
   /**
-   * profile 数据根目录。默认使用 data/profiles。
+   * 运行时数据根目录。默认使用 data/，profile 文件位于对应 Agent 目录下。
    *
    * 这里保留 rootDir 作为兼容字段，是为了现有测试和调用点能逐步迁移；
-   * 新代码应优先传 profileRootDir，避免把它误解成项目根目录。
+   * 新代码应优先传 profileRootDir。
    */
   profileRootDir?: string;
   /** @deprecated 请使用 profileRootDir。 */

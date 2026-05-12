@@ -22,11 +22,12 @@ import {
 } from "../../store/runtimeStore";
 
 interface SessionSidebarProps {
+  selectedAgentId: string;
   onLoadSession: (id: string) => Promise<void>;
   onNewSession: () => void;
 }
 
-export default function SessionSidebar({ onLoadSession, onNewSession }: SessionSidebarProps) {
+export default function SessionSidebar({ selectedAgentId, onLoadSession, onNewSession }: SessionSidebarProps) {
   const {
     sessions,
     activeSessionId,
@@ -53,9 +54,9 @@ export default function SessionSidebar({ onLoadSession, onNewSession }: SessionS
   }, [fetchSessions]);
 
   useEffect(() => {
-    startPolling();
+    startPolling(2500, selectedAgentId);
     return () => stopPolling();
-  }, [startPolling, stopPolling]);
+  }, [selectedAgentId, startPolling, stopPolling]);
 
   async function handleNew() {
     onNewSession();
@@ -93,7 +94,7 @@ export default function SessionSidebar({ onLoadSession, onNewSession }: SessionS
   }
 
   async function handleCancelTask(task: RuntimeTask) {
-    await cancelTask(task.id);
+    await cancelTask(task.id, selectedAgentId);
   }
 
   return (
@@ -121,7 +122,7 @@ export default function SessionSidebar({ onLoadSession, onNewSession }: SessionS
         <div className="mb-2 flex items-center justify-between px-2">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-soft)]">Runtime</div>
           <button
-            onClick={() => fetchRuntimeSnapshot()}
+            onClick={() => fetchRuntimeSnapshot(selectedAgentId)}
             className="rounded p-1 text-[var(--color-text-soft)] transition-colors hover:bg-white hover:text-[var(--color-text)]"
             title="刷新运行状态"
           >
@@ -217,6 +218,9 @@ export default function SessionSidebar({ onLoadSession, onNewSession }: SessionS
             }`}
           >
             <span className="min-w-0 flex-1 truncate font-medium">{s.title}</span>
+            <span className="ml-2 shrink-0 rounded-full bg-[var(--color-surface-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-soft)]">
+              {s.agent_id}
+            </span>
             <span className="ml-2 mr-1 shrink-0 text-xs text-[var(--color-text-soft)]">
               {formatTime(s.updated_at)}
             </span>

@@ -36,6 +36,26 @@ export interface AgentSkillConfig {
   items: Record<string, AgentConfigSkill>;
 }
 
+export interface AgentFeishuBindingConfig {
+  appId: string;
+  appSecret: string;
+  domain: "feishu" | "lark";
+  enabled: boolean;
+  verificationToken?: string;
+  encryptKey?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentFeishuChannelConfig {
+  enabled: boolean;
+  bindings: Record<string, AgentFeishuBindingConfig>;
+}
+
+export interface AgentChannelConfig {
+  feishu: AgentFeishuChannelConfig;
+}
+
 export interface AgentConfig {
   version: 1;
   agentId: string;
@@ -45,8 +65,24 @@ export interface AgentConfig {
   tools: AgentToolConfig;
   memory: AgentMemoryConfig;
   skills: AgentSkillConfig;
+  channels: AgentChannelConfig;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface PublicAgentFeishuBindingConfig extends Omit<AgentFeishuBindingConfig, "appSecret" | "verificationToken" | "encryptKey"> {
+  hasAppSecret: boolean;
+  hasVerificationToken: boolean;
+  hasEncryptKey: boolean;
+}
+
+export interface PublicAgentConfig extends Omit<AgentConfig, "channels"> {
+  channels: {
+    feishu: {
+      enabled: boolean;
+      bindings: Record<string, PublicAgentFeishuBindingConfig>;
+    };
+  };
 }
 
 export interface AgentConfigPatch {
@@ -70,6 +106,17 @@ export interface AgentConfigPatch {
       addAllowedTools?: string[];
       removeAllowedTools?: string[];
     }) | null>;
+  };
+  channels?: {
+    feishu?: {
+      enabled?: boolean;
+      bindings?: Record<string, (Partial<AgentFeishuBindingConfig> & {
+        appSecret?: string;
+        verificationToken?: string;
+        encryptKey?: string;
+      }) | null>;
+      removeBindingAppIds?: string[];
+    };
   };
 }
 

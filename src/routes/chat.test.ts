@@ -20,4 +20,14 @@ describe("chat route memory behavior", () => {
     expect(chatRouteSource).toContain("assistant.message.persisted");
     expect(chatRouteSource).toContain("assistantMessageId");
   });
+
+  test("passes optional agentId to ChannelService", () => {
+    expect(chatRouteSource).toContain("agentId");
+    expect(chatRouteSource).toContain("targetAgentId");
+  });
+
+  test("rejects agentId that differs from the session binding", () => {
+    expect(chatRouteSource).toContain("agentId 与 session 绑定的 Agent 不一致");
+    expect(chatRouteSource).toContain("session.agent_id");
+  });
 });

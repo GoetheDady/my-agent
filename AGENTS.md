@@ -21,14 +21,18 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Registered in `main.ts` via `registerMemoryLifecycleHooks()`.
 
 ### Agent System (`src/agents/`, `src/runtime/`)
-- Single default agent (`id: "default"`) created by `ensureDefaultAgent()` on startup.
+- `ensureDefaultAgent()` still creates the fallback `default` Agent on startup.
+- `AgentService` can create/list/read/update additional Agents without schema changes.
+- Each Agent has independent `data/agents/<agentId>/agent.json`, `data/agents/<agentId>/skills/`, `data/agents/<agentId>/soul.md`, and `data/agents/<agentId>/user.md`.
+- `user.md` is now agent-scoped and lives next to `soul.md`; do not add new writers under `data/profiles/`.
 - Agent states: `idle` | `running` | `paused` | `error`.
 - `src/runtime/agent-runtime.ts` `runAgentTask()` orchestrates: mark task running → build system prompt → build tools → `streamText` → mark complete/fail.
 - Has 45s model timeout + abort signal handling. Uses `failTaskOnce` guard to prevent double-completion.
-- `AgentConfigService` owns `data/agents/<agentId>/agent.json`: agent name, description, model, tool policy, memory switches, and skill metadata.
+- `AgentConfigService` owns `data/agents/<agentId>/agent.json`: agent name, description, model, tool policy, memory switches, skill metadata, and agent-scoped channel bindings.
 - Runtime reads the latest Agent config before each run. Do not add new direct writers for `agent.json`.
 - `temperature` is intentionally not part of MVP config.
 - `agent_config_patch` supports precise add/remove operations for tool arrays and skill metadata; prefer those over replacing whole arrays when possible.
+- Agent tools now include `agent_list`, `agent_get`, and `agent_create`; they belong to the `agent_config` toolset.
 
 ### Skill System (`src/skills/`)
 - `SKILL.md` stores skill body only.
@@ -45,7 +49,8 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - `ChannelService` owns incoming channel messages: identity mapping, conversation mapping, task creation, and user/task events.
 - Adapters only handle channel-specific delivery or protocol details; they must not create tasks directly.
 - Web sessions remain frontend display state. Runtime context uses `conversations`, `tasks`, and `events`.
-- Feishu and WeChat adapters are stubs for now.
+- Feishu uses a WebSocket long connection MVP. Its app binding lives in the target Agent's `agent.json` under `channels.feishu.bindings`; do not add new writers for `data/channels/feishu-bindings.json`.
+- WeChat adapter is still a stub for now.
 
 ### Event System (`src/events/`)
 - `appendEvent()` writes typed runtime events to SQLite.

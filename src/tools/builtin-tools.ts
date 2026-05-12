@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readFile, writeFile, isInputPathAllowlisted } from './executor';
 import { defaultAgentConfigService } from '../agents/config-service';
 import { createAgentConfigTools } from '../agents/config-tools';
+import { createAgentTools } from '../agents/tools';
 import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
 import { createHumanMemoryTools } from '../memory/human-memory-tools';
 import { createSkillTools } from '../skills';
@@ -91,6 +92,7 @@ registerTool({
 const humanMemoryTools = createHumanMemoryTools();
 const skillTools = createSkillTools();
 const agentConfigTools = createAgentConfigTools();
+const agentTools = createAgentTools();
 registerTool({
   name: 'memory_recall',
   tool: humanMemoryTools.memory_recall,
@@ -153,6 +155,24 @@ registerTool({
   category: 'write',
 });
 registerTool({
+  name: 'agent_list',
+  tool: agentTools.agent_list,
+  toolset: 'agent_config',
+  category: 'read',
+});
+registerTool({
+  name: 'agent_get',
+  tool: agentTools.agent_get,
+  toolset: 'agent_config',
+  category: 'read',
+});
+registerTool({
+  name: 'agent_create',
+  tool: agentTools.agent_create,
+  toolset: 'agent_config',
+  category: 'write',
+});
+registerTool({
   name: 'agent_config_get',
   tool: agentConfigTools.agent_config_get,
   toolset: 'agent_config',
@@ -192,6 +212,7 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     ...createMemoryTools(context),
     ...createHumanMemoryTools(context),
     ...createSkillTools(context),
+    ...createAgentTools(context),
     ...createAgentConfigTools(context),
   };
   const toolsetByName = new Map([
@@ -211,6 +232,9 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     ['skill_create', 'skill'],
     ['skill_enable', 'skill'],
     ['skill_disable', 'skill'],
+    ['agent_list', 'agent_config'],
+    ['agent_get', 'agent_config'],
+    ['agent_create', 'agent_config'],
     ['agent_config_get', 'agent_config'],
     ['agent_config_patch', 'agent_config'],
     ['agent_config_reset', 'agent_config'],

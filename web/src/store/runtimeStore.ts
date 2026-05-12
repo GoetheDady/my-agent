@@ -53,9 +53,10 @@ interface RuntimeState {
   loading: boolean;
   error: string | null;
   polling: boolean;
+  pollingAgentId: string;
 
   fetchRuntimeSnapshot: (agentId?: string) => Promise<void>;
-  cancelTask: (taskId: string) => Promise<void>;
+  cancelTask: (taskId: string, agentId?: string) => Promise<void>;
   startPolling: (intervalMs?: number, agentId?: string) => void;
   stopPolling: () => void;
 }
@@ -425,6 +426,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   loading: false,
   error: null,
   polling: false,
+  pollingAgentId: "default",
 
   fetchRuntimeSnapshot: async (agentId = "default") => {
     set({ loading: true, error: null });
@@ -458,15 +460,19 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     }
   },
 
-  cancelTask: async (taskId) => {
+  cancelTask: async (taskId, agentId) => {
     const res = await fetch(`/api/runtime/tasks/${taskId}/cancel`, { method: "POST" });
     if (!res.ok) throw new Error("取消任务失败");
-    await get().fetchRuntimeSnapshot();
+    await get().fetchRuntimeSnapshot(agentId ?? get().agent?.id ?? get().pollingAgentId);
   },
 
   startPolling: (intervalMs = 2500, agentId = "default") => {
-    if (pollTimer) return;
-    set({ polling: true });
+    if (pollTimer && get().pollingAgentId === agentId) return;
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    set({ polling: true, pollingAgentId: agentId });
     get().fetchRuntimeSnapshot(agentId);
     pollTimer = setInterval(() => {
       get().fetchRuntimeSnapshot(agentId);

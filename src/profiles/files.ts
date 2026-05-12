@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getRuntimeDataDir } from "../core/config";
 
@@ -23,9 +23,10 @@ export interface LoadProfileContextOptions {
   agentId?: string;
   userId?: string;
   /**
-   * profile 数据根目录。
+   * 运行时数据根目录。
    *
-   * 生产默认是运行时数据目录下的 `profiles/`，测试可传临时目录隔离文件写入。
+   * 生产默认是 `data/`，profile 文件位于 `data/agents/<agentId>/soul.md`
+   * 和 `data/agents/<agentId>/user.md`。
    */
   profileRootDir?: string;
   /** @deprecated 请使用 profileRootDir；保留给现有测试和调用点过渡。 */
@@ -77,6 +78,7 @@ export function loadProfileContext(options: LoadProfileContextOptions = {}): Pro
   const userId = safeProfileSegment(options.userId ?? "default");
   const createIfMissing = options.createIfMissing ?? true;
   const { soulPath, userPath } = getProfileFilePaths({ profileRootDir, agentId, userId });
+  migrateLegacyProfileFiles({ profileRootDir, agentId, userId });
 
   if (createIfMissing) {
     writeFileIfMissing(soulPath, buildDefaultSoulTemplate(agentId));
@@ -111,10 +113,9 @@ export function getProfileFilePaths(options: {
 } = {}): ProfileFilePaths {
   const profileRootDir = resolveProfileRootDir(options);
   const agentId = safeProfileSegment(options.agentId ?? "default");
-  const userId = safeProfileSegment(options.userId ?? "default");
   return {
     soulPath: resolve(profileRootDir, "agents", agentId, DEFAULT_SOUL_FILENAME),
-    userPath: resolve(profileRootDir, "users", userId, DEFAULT_USER_FILENAME),
+    userPath: resolve(profileRootDir, "agents", agentId, DEFAULT_USER_FILENAME),
   };
 }
 
@@ -134,6 +135,7 @@ export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): Ap
   const agentId = safeProfileSegment(options.agentId ?? "default");
   const userId = safeProfileSegment(options.userId ?? "default");
   const { soulPath, userPath } = getProfileFilePaths({ profileRootDir, agentId, userId });
+  migrateLegacyProfileFiles({ profileRootDir, agentId, userId });
   writeFileIfMissing(soulPath, buildDefaultSoulTemplate(agentId));
   writeFileIfMissing(userPath, buildDefaultUserTemplate(userId));
 
@@ -154,9 +156,68 @@ export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): Ap
 }
 
 function resolveProfileRootDir(options: { profileRootDir?: string; rootDir?: string } = {}): string {
-  // profile 文件属于运行时数据，而不是源码。默认集中到 data/profiles，
-  // 这样把项目交给别人使用时，用户数据可以整体复制、备份或通过 MY_AGENT_DATA_DIR 改位置。
-  return options.profileRootDir ?? options.rootDir ?? resolve(getRuntimeDataDir(), "profiles");
+  // profile 文件属于 Agent 私有运行时数据，默认直接放在 data/agents/<agentId>/ 下。
+  // profileRootDir/rootDir 表示运行时数据根目录，测试可传临时 data 根目录隔离写入。
+  return options.profileRootDir ?? options.rootDir ?? getRuntimeDataDir();
+}
+
+function getLegacyProfileFilePaths(options: {
+  profileRootDir: string;
+  agentId: string;
+  userId: string;
+}): ProfileFilePaths & { legacyRoot: string } {
+  const legacyRoot = resolve(options.profileRootDir, "profiles");
+  return {
+    legacyRoot,
+    soulPath: resolve(legacyRoot, "agents", options.agentId, DEFAULT_SOUL_FILENAME),
+    userPath: resolve(legacyRoot, "users", options.userId, DEFAULT_USER_FILENAME),
+  };
+}
+
+function migrateLegacyProfileFiles(options: { profileRootDir: string; agentId: string; userId: string }): void {
+  const current = getProfileFilePaths(options);
+  const legacy = getLegacyProfileFilePaths(options);
+  const movedSoul = moveLegacyProfileFile(legacy.soulPath, current.soulPath);
+  const movedUser = moveLegacyProfileFile(legacy.userPath, current.userPath);
+  if (movedSoul || movedUser) removeEmptyDirectories(legacy.legacyRoot);
+}
+
+function moveLegacyProfileFile(sourcePath: string, targetPath: string): boolean {
+  if (!existsSync(sourcePath)) return false;
+  mkdirSync(dirname(targetPath), { recursive: true });
+  if (!existsSync(targetPath)) {
+    renameSync(sourcePath, targetPath);
+    return true;
+  }
+
+  const sourceContent = readFileSync(sourcePath, "utf8").trim();
+  const targetContent = readFileSync(targetPath, "utf8").trim();
+  if (!sourceContent || sourceContent === targetContent || targetContent.includes(sourceContent)) {
+    unlinkSync(sourcePath);
+    return true;
+  }
+
+  // 如果新旧文件都存在且内容不同，先把旧内容并入新文件再删除旧文件。
+  // 这样能完成目录收口，同时避免迁移时丢掉用户手写内容。
+  writeFileSync(targetPath, `${targetContent}\n\n## Migrated Legacy Profile\n\n${sourceContent}\n`, "utf8");
+  unlinkSync(sourcePath);
+  return true;
+}
+
+function removeEmptyDirectories(rootDir: string): boolean {
+  if (!existsSync(rootDir)) return true;
+  let hasContent = false;
+  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+    const childPath = resolve(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      if (!removeEmptyDirectories(childPath)) hasContent = true;
+    } else {
+      hasContent = true;
+    }
+  }
+  if (hasContent) return false;
+  rmdirSync(rootDir);
+  return true;
 }
 
 function writeFileIfMissing(path: string, content: string): void {

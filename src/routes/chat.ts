@@ -26,10 +26,25 @@ app.post("/", async (c) => {
     return c.json({ error: "消息为空" }, 400);
   }
 
-  const { messages: uiMessages, sessionId, thinkingEnabled } = body;
+  const { messages: uiMessages, sessionId, thinkingEnabled, agentId } = body;
   console.log("[chat] received sessionId:", sessionId, "type:", typeof sessionId);
+  const requestedAgentId = typeof agentId === "string" && agentId.trim() ? agentId.trim() : "default";
   // 理想情况下前端永远传 sessionId；这里保留兜底，避免旧客户端直接请求时崩溃。
-  const capturedSessionId = sessionId ?? createSession().id;
+  const session = typeof sessionId === "string" && sessionId.trim()
+    ? getSession(sessionId)
+    : createSession({ agentId: requestedAgentId });
+  if (!session) {
+    return c.json({ error: "Session not found" }, 404);
+  }
+  if (typeof agentId === "string" && agentId.trim() && agentId.trim() !== session.agent_id) {
+    return c.json({
+      error: "agentId 与 session 绑定的 Agent 不一致",
+      sessionAgentId: session.agent_id,
+      requestedAgentId: agentId.trim(),
+    }, 400);
+  }
+  const capturedSessionId = session.id;
+  const targetAgentId = session.agent_id;
   if (!sessionId) {
     console.log("[chat] WARNING: sessionId is null/undefined, creating new session:", capturedSessionId);
   }
@@ -48,6 +63,7 @@ app.post("/", async (c) => {
     externalConversationId: capturedSessionId,
     externalUserId: "default",
     text: userText,
+    agentId: targetAgentId,
   });
   const { task } = received;
 

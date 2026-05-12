@@ -4,8 +4,10 @@ import { resolve, extname, relative } from "path";
 import { readFile, stat } from "fs/promises";
 import { initializeRuntime } from "./core/runtime";
 import chatRoutes from "./routes/chat";
-import sessionRoutes from "./routes/sessions";
-import agentRoutes from "./routes/agents";
+import { createSessionRoutes } from "./routes/sessions";
+import { createAgentRoutes } from "./routes/agents";
+import { createChannelRoutes } from "./routes/channels";
+import { startFeishuWebSocketService } from "./channels/feishu-websocket-service";
 import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
 import skillRoutes from "./routes/skills";
@@ -24,14 +26,16 @@ import { startDreamScheduler } from "./memory/dream-scheduler";
 initializeRuntime();
 registerMemoryLifecycleHooks();
 startDreamScheduler();
+void startFeishuWebSocketService();
 
 const app = new Hono();
 
 app.use("*", cors());
 
 app.route("/api/chat", chatRoutes);
-app.route("/api/agents", agentRoutes);
-app.route("/api/sessions", sessionRoutes);
+app.route("/api/agents", createAgentRoutes());
+app.route("/api/channels", createChannelRoutes());
+app.route("/api/sessions", createSessionRoutes());
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);
 app.route("/api/tools", toolRoutes);

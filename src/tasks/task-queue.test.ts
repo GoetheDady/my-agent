@@ -24,6 +24,16 @@ function withTaskDb<T>(run: (db: Database) => T): T {
   }
 }
 
+function insertAgent(db: Database, agentId: string, name: string): void {
+  const now = Date.now();
+  db
+    .query(
+      `INSERT INTO agents (id, name, status, current_task_id, workspace_path, created_at, updated_at)
+       VALUES (?, ?, 'idle', NULL, '', ?, ?)`,
+    )
+    .run(agentId, name, now, now);
+}
+
 describe("task queue", () => {
   test("createTask stores queued task", () => {
     withTaskDb((db) => {
@@ -90,6 +100,19 @@ describe("task queue", () => {
       expect(claimNextTask("default", db)?.id).toBe("first");
       expect(claimNextTask("default", db)).toBeNull();
       expect(getTask("second", db)?.status).toBe("queued");
+    });
+  });
+
+  test("different agents can hold independent running tasks", () => {
+    withTaskDb((db) => {
+      insertAgent(db, "researcher", "Researcher");
+      createTask({ id: "default-task", agent_id: "default", source_channel: "web", input: "default" }, db);
+      createTask({ id: "research-task", agent_id: "researcher", source_channel: "web", input: "research" }, db);
+
+      expect(claimNextTask("default", db)).toMatchObject({ id: "default-task", status: "running" });
+      expect(claimNextTask("researcher", db)).toMatchObject({ id: "research-task", status: "running" });
+      expect(getAgent("default", db)).toMatchObject({ status: "running", current_task_id: "default-task" });
+      expect(getAgent("researcher", db)).toMatchObject({ status: "running", current_task_id: "research-task" });
     });
   });
 

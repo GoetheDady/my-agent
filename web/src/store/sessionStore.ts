@@ -7,7 +7,7 @@ interface SessionState {
   loading: boolean;
 
   fetchSessions: () => Promise<void>;
-  createSession: () => Promise<Session>;
+  createSession: (agentId?: string) => Promise<Session>;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => Promise<void>;
   setActiveSessionId: (id: string | null) => void;
@@ -30,10 +30,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  createSession: async () => {
+  createSession: async (agentId = "default") => {
     const res = await fetch("/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId }),
     });
     if (!res.ok) throw new Error("创建会话失败");
     const session = (await res.json()) as Session;

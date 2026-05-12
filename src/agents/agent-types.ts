@@ -9,3 +9,20 @@ export interface AgentRecord {
   created_at: number;
   updated_at: number;
 }
+
+export interface CreateAgentInput {
+  agentId: string;
+  name: string;
+  description?: string;
+  workspacePath?: string;
+  model?: {
+    provider?: string;
+    model?: string;
+  };
+}
+
+export interface UpdateAgentInput {
+  name?: string;
+  description?: string;
+  workspacePath?: string;
+}

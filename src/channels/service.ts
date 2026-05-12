@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import { createTask } from "../tasks/task-store";
+import { getAgent } from "../agents/agent-registry";
 import { FeishuChannelAdapter } from "./feishu-channel";
 import { WebChannelAdapter } from "./web-channel";
 import { WeChatChannelAdapter } from "./wechat-channel";
@@ -69,6 +70,9 @@ export class ChannelService {
     }
 
     const agentId = input.agentId?.trim() || "default";
+    if (!getAgent(agentId, database)) {
+      throw new Error(`Agent not found: ${agentId}`);
+    }
     const identity = this.identityStore.ensureIdentity({
       channel,
       externalUserId: input.externalUserId,

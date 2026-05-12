@@ -59,6 +59,22 @@ const agentConfigPatchSchema = z.object({
         updatedAt: z.number().optional(),
       }).nullable()).optional(),
     }).optional(),
+    channels: z.object({
+      feishu: z.object({
+        enabled: z.boolean().optional(),
+        removeBindingAppIds: z.array(z.string()).optional(),
+        bindings: z.record(z.string(), z.object({
+          appId: z.string().optional(),
+          appSecret: z.string().optional(),
+          domain: z.enum(["feishu", "lark"]).optional(),
+          enabled: z.boolean().optional(),
+          verificationToken: z.string().optional(),
+          encryptKey: z.string().optional(),
+          createdAt: z.number().optional(),
+          updatedAt: z.number().optional(),
+        }).nullable()).optional(),
+      }).optional(),
+    }).optional(),
   }),
 });
 
@@ -81,7 +97,7 @@ export function createAgentConfigTools(context: AgentConfigToolContext = {}) {
       inputSchema: agentConfigGetSchema,
       execute: async (input: z.infer<typeof agentConfigGetSchema>) => {
         const agentId = input.agentId ?? baseContext.agentId ?? "default";
-        return { success: true, config: service.getAgentConfig(agentId, { ...baseContext, agentId }) };
+        return { success: true, config: service.getPublicAgentConfig(agentId, { ...baseContext, agentId }) };
       },
     }),
     agent_config_patch: tool({
@@ -89,12 +105,13 @@ export function createAgentConfigTools(context: AgentConfigToolContext = {}) {
         "局部更新当前 Agent 的配置。只能修改允许的配置字段，不能直接写 agent.json 文件。",
         "数组字段支持精细操作：tools.addEnabledToolsets/removeEnabledToolsets、tools.addRequiresApproval/removeRequiresApproval、tools.addAllowedPaths/removeAllowedPaths。",
         "skill 支持 skills.enableSkillIds/disableSkillIds/removeSkillIds，以及 skills.items[skillId].addAllowedTools/removeAllowedTools。",
+        "飞书绑定写入 channels.feishu.bindings[appId]，读取时 appSecret 会脱敏；删除用 channels.feishu.removeBindingAppIds。",
       ].join(" "),
       inputSchema: agentConfigPatchSchema,
       execute: async (input: z.infer<typeof agentConfigPatchSchema>) => {
         const agentId = input.agentId ?? baseContext.agentId ?? "default";
-        const config = service.patchAgentConfig(agentId, input.patch as AgentConfigPatch, { ...baseContext, agentId });
-        return { success: true, config };
+        service.patchAgentConfig(agentId, input.patch as AgentConfigPatch, { ...baseContext, agentId });
+        return { success: true, config: service.getPublicAgentConfig(agentId, { ...baseContext, agentId }) };
       },
     }),
     agent_config_reset: tool({

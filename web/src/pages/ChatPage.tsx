@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Bot, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
@@ -8,16 +8,32 @@ import MessageList from "../features/chat/MessageList";
 import SessionSidebar from "../features/sessions/SessionSidebar";
 import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionPath } from "../lib/sessionRoute";
+import { useAgentStore } from "../store/agentStore";
 import { parseDbContent, useChatStore } from "../store/chatStore";
+import { useRuntimeStore } from "../store/runtimeStore";
 import { useSessionStore } from "../store/sessionStore";
+import type { Session } from "../types";
+
+type RawSessionMessage = { id: string; role: "user" | "assistant"; content: string };
+type SessionMessagesResponse =
+  | RawSessionMessage[]
+  | { session: Session; messages: RawSessionMessage[] };
 
 export default function ChatPage() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
   const navigate = useNavigate();
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
   const { thinkingEnabled, setSessionId } = useChatStore();
+  const agents = useAgentStore((s) => s.agents);
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
+  const fetchAgents = useAgentStore((s) => s.fetchAgents);
+  const setSelectedAgentId = useAgentStore((s) => s.setSelectedAgentId);
+  const agentLoading = useAgentStore((s) => s.loading);
+  const agentError = useAgentStore((s) => s.error);
+  const sessions = useSessionStore((s) => s.sessions);
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
+  const fetchRuntimeSnapshot = useRuntimeStore((s) => s.fetchRuntimeSnapshot);
   const workerPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLoadingRef = useRef(false);
 
@@ -39,12 +55,7 @@ export default function ChatPage() {
     setActiveSessionId,
     fetchSessions,
     createSession: async () => {
-      const res = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-      });
-      if (!res.ok) throw new Error("创建会话失败");
-      return await res.json() as { id: string };
+      return await useSessionStore.getState().createSession(useAgentStore.getState().selectedAgentId);
     },
     onSessionCreated: (id) => navigateToSession(id, true),
   }), [fetchSessions, navigateToSession, setActiveSessionId, setSessionId]);
@@ -78,6 +89,14 @@ export default function ChatPage() {
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
+  useEffect(() => {
+    void fetchAgents();
+  }, [fetchAgents]);
+
+  useEffect(() => {
+    void fetchRuntimeSnapshot(selectedAgentId);
+  }, [fetchRuntimeSnapshot, selectedAgentId]);
+
   const stopWorkerMessagePolling = useCallback(() => {
     if (workerPollTimerRef.current) {
       clearTimeout(workerPollTimerRef.current);
@@ -88,7 +107,8 @@ export default function ChatPage() {
   const loadSession = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
     if (!res.ok) return false;
-    const rawMessages = await res.json() as Array<{ id: string; role: "user" | "assistant"; content: string }>;
+    const data = await res.json() as SessionMessagesResponse;
+    const { session, messages: rawMessages } = normalizeSessionMessages(data, id, sessions);
     const uiMessages = rawMessages.map((m) => ({
       id: m.id,
       role: m.role,
@@ -97,13 +117,16 @@ export default function ChatPage() {
     setMessages(uiMessages as Parameters<typeof setMessages>[0]);
     setSessionId(id);
     setActiveSessionId(id);
+    setSelectedAgentId(session.agent_id);
+    void fetchRuntimeSnapshot(session.agent_id);
     return true;
-  }, [setActiveSessionId, setMessages, setSessionId]);
+  }, [fetchRuntimeSnapshot, sessions, setActiveSessionId, setMessages, setSelectedAgentId, setSessionId]);
 
   const fetchSessionUiMessages = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
     if (!res.ok) return null;
-    const rawMessages = await res.json() as Array<{ id: string; role: "user" | "assistant"; content: string }>;
+    const data = await res.json() as SessionMessagesResponse;
+    const { messages: rawMessages } = normalizeSessionMessages(data, id, useSessionStore.getState().sessions);
     return rawMessages.map((m) => ({
       id: m.id,
       role: m.role,
@@ -175,11 +198,14 @@ export default function ChatPage() {
   const handleSend = useCallback(async (text: string) => {
     stopWorkerMessagePolling();
     const currentSessionId = await sessionResolver.ensureSessionId();
+    const boundSession = useSessionStore.getState().sessions.find((session) => session.id === currentSessionId);
+    const boundAgentId = boundSession?.agent_id ?? useAgentStore.getState().selectedAgentId;
     sendMessage(
       { text },
       {
         body: {
           sessionId: currentSessionId,
+          agentId: boundAgentId,
           thinkingEnabled,
         },
       },
@@ -197,6 +223,25 @@ export default function ChatPage() {
     useChatStore.getState().clearSession();
     navigateToNewSession();
   }, [navigateToNewSession, setMessages, stopWorkerMessagePolling]);
+
+  const handleAgentChange = useCallback((agentId: string) => {
+    setSelectedAgentId(agentId);
+    void fetchRuntimeSnapshot(agentId);
+    if (useChatStore.getState().sessionId) {
+      stopWorkerMessagePolling();
+      setMessages([]);
+      useChatStore.getState().clearSession();
+      setActiveSessionId(null);
+      navigateToNewSession();
+    }
+  }, [
+    fetchRuntimeSnapshot,
+    navigateToNewSession,
+    setActiveSessionId,
+    setMessages,
+    setSelectedAgentId,
+    stopWorkerMessagePolling,
+  ]);
 
   const handleApprove = useCallback(async (toolCallId: string, rememberChoice: boolean) => {
     addToolApprovalResponse({
@@ -230,7 +275,11 @@ export default function ChatPage() {
   return (
     <main className="flex min-h-0 flex-1 bg-[var(--color-bg)]">
       {sessionSidebarOpen && (
-        <SessionSidebar onLoadSession={handleLoadSession} onNewSession={handleNewSession} />
+        <SessionSidebar
+          selectedAgentId={selectedAgentId}
+          onLoadSession={handleLoadSession}
+          onNewSession={handleNewSession}
+        />
       )}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] bg-white px-4 py-2">
@@ -244,9 +293,33 @@ export default function ChatPage() {
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-[var(--color-text)]">Control Chat</div>
             <div className="text-xs text-[var(--color-text-soft)]">
-              长期记忆通过工具查询；后台 hook 会在助手消息保存后提取记忆。
+              当前 Agent：{selectedAgentId}；新会话会绑定到选中的 Agent。
             </div>
           </div>
+          <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-3 py-2">
+            <Bot size={16} className="text-[var(--color-accent)]" />
+            <span className="text-xs font-semibold text-[var(--color-text-muted)]">Agent</span>
+            <select
+              value={selectedAgentId}
+              onChange={(event) => handleAgentChange(event.target.value)}
+              disabled={agentLoading || agents.length === 0}
+              className="max-w-[220px] bg-transparent text-sm font-semibold text-[var(--color-text)] outline-none disabled:text-[var(--color-text-soft)]"
+              title="选择对话 Agent"
+            >
+              {agents.length === 0 ? (
+                <option value={selectedAgentId}>{agentLoading ? "加载中" : selectedAgentId}</option>
+              ) : agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.config.name || agent.name} ({agent.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          {agentError && (
+            <div className="max-w-[240px] truncate rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
+              {agentError}
+            </div>
+          )}
         </div>
         <MessageList messages={messages} handleApprove={handleApprove} handleDeny={handleDeny} />
         <ChatInput
@@ -259,6 +332,26 @@ export default function ChatPage() {
       </section>
     </main>
   );
+}
+
+function normalizeSessionMessages(
+  data: SessionMessagesResponse,
+  sessionId: string,
+  sessions: Session[],
+): { session: Session; messages: RawSessionMessage[] } {
+  if (Array.isArray(data)) {
+    return {
+      session: sessions.find((session) => session.id === sessionId) ?? {
+        id: sessionId,
+        agent_id: "default",
+        title: "新对话",
+        created_at: 0,
+        updated_at: 0,
+      },
+      messages: data,
+    };
+  }
+  return data;
 }
 
 function hasCompletedMemoryWorkerPart(messages: Array<{ role: string; parts: Array<{ type: string; state?: string }> }>): boolean {

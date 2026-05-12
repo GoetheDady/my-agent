@@ -25,11 +25,13 @@ export function initializeDatabaseSchema(database: Database): void {
   database.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL DEFAULT 'default',
       title TEXT NOT NULL DEFAULT '新对话',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `);
+  ensureColumn(database, "sessions", "agent_id", "TEXT NOT NULL DEFAULT 'default'");
 
   database.run(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -43,6 +45,7 @@ export function initializeDatabaseSchema(database: Database): void {
   `);
 
   database.run(`CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_updated ON sessions(agent_id, updated_at)`);
 
   // Runtime 层：Agent、task、event 是后端执行的主干。
   // task 表示一次待执行/执行中的工作；event 是所有运行过程的可观察日志。
@@ -271,6 +274,12 @@ export function initializeDatabaseSchema(database: Database): void {
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_memory_decisions_dream_run ON memory_decisions(dream_run_id)`,
   );
+}
+
+function ensureColumn(database: Database, tableName: string, columnName: string, definition: string): void {
+  const columns = database.query<{ name: string }, []>(`PRAGMA table_info(${tableName})`).all();
+  if (columns.some((column) => column.name === columnName)) return;
+  database.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }
 
 /**

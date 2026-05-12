@@ -59,7 +59,7 @@ describe("profile sync", () => {
         ],
       });
 
-      const user = readFileSync(join(dir, "users", "default", "user.md"), "utf8");
+      const user = readFileSync(join(dir, "agents", "default", "user.md"), "utf8");
       const soul = readFileSync(join(dir, "agents", "default", "soul.md"), "utf8");
       expect(result.status).toBe("completed");
       expect(user).toContain("- name: 张三");
