@@ -180,5 +180,19 @@ describe("runtimeStore", () => {
       detail: "新增身份记忆",
       tone: "memory",
     });
+    expect(getRuntimeEventView({
+      id: "event-skill",
+      agent_id: "default",
+      task_id: null,
+      conversation_id: null,
+      type: "skill.enabled",
+      payload: JSON.stringify({ skillId: "web-debug" }),
+      payloadJson: { skillId: "web-debug" },
+      created_at: 70,
+    })).toMatchObject({
+      label: "Skill 启用",
+      detail: "web-debug",
+      tone: "memory",
+    });
   });
 });

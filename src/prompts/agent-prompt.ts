@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { getAgent } from "../agents/agent-registry";
 import { loadProfileContext, type ProfileContext } from "../profiles/files";
+import { defaultSkillService, type SkillService } from "../skills";
 import { listWorkingMemory } from "../memory/working-memory";
 import type { TaskRecord } from "../tasks/task-types";
 
@@ -24,6 +25,7 @@ export interface BuildAgentSystemPromptOptions {
   profileContext?: ProfileContext;
   profileRootDir?: string;
   createProfileFiles?: boolean;
+  skillService?: Pick<SkillService, "buildSkillIndex">;
 }
 
 /**
@@ -50,6 +52,7 @@ export function buildAgentSystemPrompt(
     profileRootDir: options.profileRootDir,
     createIfMissing: options.createProfileFiles,
   });
+  const skillIndex = (options.skillService ?? defaultSkillService).buildSkillIndex(task.agent_id);
   // working memory 只保存当前 task 的临时状态，不等同于长期记忆。
   const workingMemory = listWorkingMemory(task.agent_id, task.id, database);
   const workingMemoryLines = Object.entries(workingMemory)
@@ -70,10 +73,25 @@ export function buildAgentSystemPrompt(
     `source_user_id: ${task.source_user_id}`,
     `</task>`,
     buildProfileContextSection(profileContext),
+    buildSkillIndexSection(skillIndex),
     workingMemoryLines ? `\n<working-memory>\n${workingMemoryLines}\n</working-memory>` : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function buildSkillIndexSection(skillIndex: string): string {
+  if (!skillIndex.trim()) return "";
+
+  return [
+    "",
+    `<skill-index>`,
+    "下面是当前 Agent 已启用的 skill 索引。先看索引，再决定是否调用 skill_view(skillId) 读取全文。",
+    "如果需要知道有哪些 skill，使用 skill_list；如果需要加载某个 skill 的完整说明，使用 skill_view。",
+    "",
+    skillIndex,
+    `</skill-index>`,
+  ].join("\n");
 }
 
 function buildProfileContextSection(profileContext: ProfileContext): string {

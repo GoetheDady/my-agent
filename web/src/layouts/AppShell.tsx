@@ -23,6 +23,7 @@ import {
   MEMORY_PATH,
   PROFILES_PATH,
   SETTINGS_PATH,
+  SKILLS_PATH,
   TASKS_PATH,
   TOOLS_PATH,
 } from "../lib/sessionRoute";
@@ -47,6 +48,7 @@ const secondaryNav: NavItem[] = [
   { label: "Agents", path: AGENTS_PATH, icon: Bot, description: "单 Agent 与多 Agent 预留" },
   { label: "Channels", path: CHANNELS_PATH, icon: Cable, description: "Web / 微信 / 飞书入口" },
   { label: "Tools", path: TOOLS_PATH, icon: Wrench, description: "工具权限与策略" },
+  { label: "Skills", path: SKILLS_PATH, icon: Brain, description: "Agent 本地技能索引" },
   { label: "Settings", path: SETTINGS_PATH, icon: Settings, description: "模型、记忆、工具配置" },
 ];
 
@@ -60,6 +62,7 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   [AGENTS_PATH]: { title: "Agent 管理", description: "当前默认 Agent 状态，以及后续多 Agent 协同入口。" },
   [CHANNELS_PATH]: { title: "渠道入口", description: "Web channel 已启用，微信和飞书预留接入位置。" },
   [TOOLS_PATH]: { title: "工具权限", description: "查看工具类别、权限策略和后续配置入口。" },
+  [SKILLS_PATH]: { title: "Skills", description: "查看、创建、启停 Agent 本地技能索引和正文。" },
   [SETTINGS_PATH]: { title: "系统配置", description: "模型、记忆策略、Agent 和工具权限配置入口。" },
 };
 

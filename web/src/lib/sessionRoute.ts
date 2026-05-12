@@ -5,6 +5,7 @@ export const PROFILES_PATH = "/profiles";
 export const AGENTS_PATH = "/agents";
 export const CHANNELS_PATH = "/channels";
 export const TOOLS_PATH = "/tools";
+export const SKILLS_PATH = "/skills";
 export const TASKS_PATH = "/tasks";
 export const EVENTS_PATH = "/events";
 export const SETTINGS_PATH = "/settings";

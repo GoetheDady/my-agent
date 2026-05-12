@@ -7,6 +7,7 @@ import chatRoutes from "./routes/chat";
 import sessionRoutes from "./routes/sessions";
 import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
+import skillRoutes from "./routes/skills";
 import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
 import { startDreamScheduler } from "./memory/dream-scheduler";
@@ -32,6 +33,7 @@ app.route("/api/sessions", sessionRoutes);
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);
 app.route("/api/tools", toolRoutes);
+app.route("/api/skills", skillRoutes);
 app.route("/api/runtime", createRuntimeRoutes());
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));

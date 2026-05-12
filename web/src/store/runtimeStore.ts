@@ -334,6 +334,30 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
     };
   }
 
+  if (event.type.startsWith("skill.")) {
+    if (event.type === "skill.created" || event.type === "skill.updated") {
+      return {
+        label: event.type === "skill.created" ? "Skill 创建" : "Skill 更新",
+        detail: getString(payload, "skillId") ?? getString(payload, "name") ?? event.type,
+        tone: "memory",
+      };
+    }
+    if (event.type === "skill.enabled" || event.type === "skill.disabled") {
+      return {
+        label: event.type === "skill.enabled" ? "Skill 启用" : "Skill 停用",
+        detail: getString(payload, "skillId") ?? getString(payload, "name") ?? event.type,
+        tone: "memory",
+      };
+    }
+    if (event.type === "skill.viewed") {
+      return {
+        label: "Skill 读取",
+        detail: getString(payload, "skillId") ?? getString(payload, "skillName") ?? event.type,
+        tone: "memory",
+      };
+    }
+  }
+
   if (event.type === "task.failed") {
     return {
       label: "任务失败",

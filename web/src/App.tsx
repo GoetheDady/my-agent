@@ -8,6 +8,7 @@ import EventsPage from "./pages/EventsPage";
 import MemoryPage from "./pages/MemoryPage";
 import ProfilesPage from "./pages/ProfilesPage";
 import SettingsPage from "./pages/SettingsPage";
+import SkillsPage from "./pages/SkillsPage";
 import TasksPage from "./pages/TasksPage";
 import ToolsPage from "./pages/ToolsPage";
 import {
@@ -18,6 +19,7 @@ import {
   MEMORY_PATH,
   PROFILES_PATH,
   SETTINGS_PATH,
+  SKILLS_PATH,
   TASKS_PATH,
   TOOLS_PATH,
 } from "./lib/sessionRoute";
@@ -35,6 +37,7 @@ export default function App() {
           <Route path={AGENTS_PATH.slice(1)} element={<AgentsPage />} />
           <Route path={CHANNELS_PATH.slice(1)} element={<ChannelsPage />} />
           <Route path={TOOLS_PATH.slice(1)} element={<ToolsPage />} />
+          <Route path={SKILLS_PATH.slice(1)} element={<SkillsPage />} />
           <Route path={TASKS_PATH.slice(1)} element={<TasksPage />} />
           <Route path={EVENTS_PATH.slice(1)} element={<EventsPage />} />
           <Route path={SETTINGS_PATH.slice(1)} element={<SettingsPage />} />

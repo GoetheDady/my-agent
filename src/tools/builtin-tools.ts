@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readFile, writeFile, isInputPathAllowlisted } from './executor';
 import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
 import { createHumanMemoryTools } from '../memory/human-memory-tools';
+import { createSkillTools } from '../skills';
 import { evaluateToolPolicy } from './policy';
 import { buildAiToolSet, registerTool } from './registry';
 
@@ -86,6 +87,7 @@ registerTool({
 });
 
 const humanMemoryTools = createHumanMemoryTools();
+const skillTools = createSkillTools();
 registerTool({
   name: 'memory_recall',
   tool: humanMemoryTools.memory_recall,
@@ -117,6 +119,37 @@ registerTool({
   category: 'memory_write',
 });
 
+registerTool({
+  name: 'skill_list',
+  tool: skillTools.skill_list,
+  toolset: 'skill',
+  category: 'read',
+});
+registerTool({
+  name: 'skill_view',
+  tool: skillTools.skill_view,
+  toolset: 'skill',
+  category: 'read',
+});
+registerTool({
+  name: 'skill_create',
+  tool: skillTools.skill_create,
+  toolset: 'skill',
+  category: 'write',
+});
+registerTool({
+  name: 'skill_enable',
+  tool: skillTools.skill_enable,
+  toolset: 'skill',
+  category: 'write',
+});
+registerTool({
+  name: 'skill_disable',
+  tool: skillTools.skill_disable,
+  toolset: 'skill',
+  category: 'write',
+});
+
 export const tools = buildAiToolSet('default');
 
 /**
@@ -135,5 +168,6 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     write_file: writeFileTool,
     ...createMemoryTools(context),
     ...createHumanMemoryTools(context),
+    ...createSkillTools(context),
   };
 }

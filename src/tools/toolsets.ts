@@ -37,6 +37,17 @@ export const TOOLSETS: ToolsetDefinition[] = [
     description: "基础能力工具预留分组。",
     tools: [],
   },
+  {
+    name: "skill",
+    description: "Agent 本地 skill 索引、读取、创建和启停工具。",
+    tools: [
+      "skill_list",
+      "skill_view",
+      "skill_create",
+      "skill_enable",
+      "skill_disable",
+    ],
+  },
 ];
 
 /**

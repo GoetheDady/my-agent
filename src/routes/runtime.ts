@@ -48,6 +48,14 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     return c.json({ events: listAgentEvents(agentId, limit, database) });
   });
 
+  app.get("/events/skills", (c) => {
+    const agentId = c.req.query("agentId") ?? "default";
+    const limit = parseInt(c.req.query("limit") ?? "50", 10);
+    return c.json({
+      events: listAgentEvents(agentId, limit, database).filter((event) => event.type.startsWith("skill.")),
+    });
+  });
+
   app.post("/tasks/:id/cancel", (c) => {
     const taskId = c.req.param("id");
     const task = getTask(taskId, database);
