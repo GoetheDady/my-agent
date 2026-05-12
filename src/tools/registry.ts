@@ -1,4 +1,5 @@
 import type { Tool } from "ai";
+import { defaultAgentConfigService } from "../agents/config-service";
 
 export type ToolCategory = "read" | "write" | "memory_read" | "memory_write";
 
@@ -48,9 +49,11 @@ export function getTool(name: string): RegisteredTool | null {
 export function listToolsForAgent(agentId: string): RegisteredTool[] {
   // 这里按 agent 过滤工具，为后续多 Agent 预留不同工具权限。
   // 目前 default agent 使用大多数默认启用工具。
+  const enabledToolsets = new Set(defaultAgentConfigService.getAgentConfig(agentId).tools.enabledToolsets);
   return Array.from(registry.values())
     .filter((registeredTool) => registeredTool.defaultEnabled !== false)
     .filter((registeredTool) => !registeredTool.disabledForAgents?.includes(agentId))
+    .filter((registeredTool) => enabledToolsets.has(registeredTool.toolset))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

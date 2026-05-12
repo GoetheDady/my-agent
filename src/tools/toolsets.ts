@@ -48,6 +48,15 @@ export const TOOLSETS: ToolsetDefinition[] = [
       "skill_disable",
     ],
   },
+  {
+    name: "agent_config",
+    description: "当前 Agent 的配置读取、局部更新和重置工具。",
+    tools: [
+      "agent_config_get",
+      "agent_config_patch",
+      "agent_config_reset",
+    ],
+  },
 ];
 
 /**

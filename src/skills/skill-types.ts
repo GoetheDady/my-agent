@@ -1,6 +1,6 @@
 export type SkillStatus = "enabled" | "disabled";
 
-export interface SkillRegistryEntry {
+export interface SkillMetadata {
   name: string;
   description: string;
   category: string;
@@ -11,13 +11,7 @@ export interface SkillRegistryEntry {
   updatedAt: number;
 }
 
-export interface SkillRegistryFile {
-  version: 1;
-  agentId: string;
-  skills: Record<string, SkillRegistryEntry>;
-}
-
-export interface SkillRecord extends SkillRegistryEntry {
+export interface SkillRecord extends SkillMetadata {
   id: string;
   agentId: string;
   directory: string;
@@ -70,4 +64,3 @@ export interface SkillServiceContext {
   conversationId?: string | null;
   database?: import("bun:sqlite").Database;
 }
-

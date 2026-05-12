@@ -11,19 +11,19 @@ describe("tool policy", () => {
     });
   });
 
-  test("write tools require approval unless allowlisted", () => {
+  test("write tools follow agent approval config even when allowlisted", () => {
     expect(evaluateToolPolicy({ toolName: "write_file", operation: "write" })).toMatchObject({
       allowed: true,
       requiresApproval: true,
-      reason: "write_requires_approval",
+      reason: "write_requires_configured_approval",
     });
 
     expect(
       evaluateToolPolicy({ toolName: "write_file", operation: "write", allowlisted: true }),
     ).toMatchObject({
       allowed: true,
-      requiresApproval: false,
-      reason: "write_allowlisted",
+      requiresApproval: true,
+      reason: "write_requires_configured_approval",
     });
   });
 

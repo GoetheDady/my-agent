@@ -5,6 +5,7 @@ import { readFile, stat } from "fs/promises";
 import { initializeRuntime } from "./core/runtime";
 import chatRoutes from "./routes/chat";
 import sessionRoutes from "./routes/sessions";
+import agentRoutes from "./routes/agents";
 import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
 import skillRoutes from "./routes/skills";
@@ -29,6 +30,7 @@ const app = new Hono();
 app.use("*", cors());
 
 app.route("/api/chat", chatRoutes);
+app.route("/api/agents", agentRoutes);
 app.route("/api/sessions", sessionRoutes);
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);

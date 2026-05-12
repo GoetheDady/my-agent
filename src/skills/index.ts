@@ -11,11 +11,9 @@ export type {
   SkillIndexItem,
   SkillListResult,
   SkillRecord,
-  SkillRegistryEntry,
-  SkillRegistryFile,
+  SkillMetadata,
   SkillServiceContext,
   SkillStatus,
   SkillStatusUpdateResult,
   SkillViewResult,
 } from "./skill-types";
-

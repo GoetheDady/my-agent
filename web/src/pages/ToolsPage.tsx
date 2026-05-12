@@ -16,7 +16,7 @@ export default function ToolsPage() {
         <PageSection title="Skill 工具" description="skill 作为 Agent 本地能力目录，和普通工具分开管理。">
           <div className="grid gap-3 xl:grid-cols-3">
             <InfoCard title="skill_list / skill_view" description="先看索引，再按需加载全文，减少 prompt token 使用。" />
-            <InfoCard title="skill_create" description="创建后默认启用，写入本地 skills 目录和 registry。" />
+            <InfoCard title="skill_create" description="创建后默认启用，正文写入 SKILL.md，元数据写入 agent.json。" />
             <InfoCard title="skill_enable / skill_disable" description="只保留启用和停用两种状态，目录保持干净。" />
           </div>
         </PageSection>

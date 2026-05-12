@@ -93,6 +93,7 @@ function getDisplayValue(payload: Record<string, unknown>, key: string): string 
   const value = payload[key];
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
   return null;
 }
 
@@ -140,6 +141,37 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
       return {
         label: "认知文件同步失败",
         detail: getString(payload, "error") ?? "profile.sync.failed",
+        tone: "error",
+      };
+    }
+  }
+
+  if (event.type.startsWith("agent.config.")) {
+    if (event.type === "agent.config.updated") {
+      return {
+        label: "Agent 配置更新",
+        detail: getDisplayValue(payload, "changedKeys") ?? "agent.config.updated",
+        tone: "tool",
+      };
+    }
+    if (event.type === "agent.config.reset") {
+      return {
+        label: "Agent 配置重置",
+        detail: getString(payload, "agentId") ?? "agent.config.reset",
+        tone: "tool",
+      };
+    }
+    if (event.type === "agent.config.migrated") {
+      return {
+        label: "Agent 配置迁移",
+        detail: getDisplayValue(payload, "migratedCount") ?? "agent.config.migrated",
+        tone: "tool",
+      };
+    }
+    if (event.type === "agent.config.validation_failed") {
+      return {
+        label: "Agent 配置校验失败",
+        detail: getString(payload, "error") ?? "agent.config.validation_failed",
         tone: "error",
       };
     }

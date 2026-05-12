@@ -1,5 +1,6 @@
 import { resolve, relative, dirname } from 'node:path';
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, lstatSync } from 'node:fs';
+import { defaultAgentConfigService } from '../agents/config-service';
 import { getProjectRoot, loadConfig } from '../core/config';
 
 // ============================================================
@@ -101,6 +102,22 @@ export function isInputPathAllowlisted(inputPath: string): boolean {
   }
 }
 
+/**
+ * 判断路径是否指向任意 Agent 的受控配置文件。
+ *
+ * agent.json 是 AgentConfigService 的唯一写入口，通用文件工具不能修改它，
+ * 否则模型可以绕过 schema 校验、审计和权限策略。
+ */
+export function isAgentConfigPath(absolutePath: string): boolean {
+  const configRoot = defaultAgentConfigService.getConfigPath("default");
+  const dataAgentsRoot = resolve(configRoot, "../..");
+  const relativePath = relative(dataAgentsRoot, absolutePath);
+  return !relativePath.startsWith("..")
+    && !relativePath.startsWith("/")
+    && relativePath.split(/[\\/]/).length === 2
+    && relativePath.endsWith(`agent.json`);
+}
+
 // ============================================================
 // 文件操作
 // ============================================================
@@ -170,6 +187,17 @@ export function writeFile(
 ): ToolResult {
   try {
     const absolutePath = normalizePath(path);
+
+    if (isAgentConfigPath(absolutePath)) {
+      return {
+        success: false,
+        error: {
+          type: 'permission_denied',
+          message: 'agent.json 只能通过 AgentConfigService 修改，不能使用通用文件工具写入',
+          suggestion: 'Use agent_config_patch instead',
+        },
+      };
+    }
 
     if (!isPathInWhitelist(absolutePath)) {
       return {

@@ -5,6 +5,8 @@
 专业术语说明：
 
 - **Agent Runtime**：Agent 的运行时系统，负责接收任务、构建提示词、调用模型、执行工具、写入事件和更新状态。
+- **Service**：后端内部业务服务层，负责规则和状态变化，例如 `MemoryService`、`AgentConfigService`。
+- **Tool**：暴露给 Agent 调用的工具外壳，只负责参数结构、权限和输出格式，业务判断交给 Service。
 - **Memory-as-Tool**：长期记忆不直接塞进提示词，而是通过记忆工具按需查询、写入和更新。
 - **Lifecycle Hook**：生命周期钩子。某个关键事件发生后触发后台逻辑，例如助手消息保存后触发记忆提取。
 - **Dream Worker**：后台记忆整理器，类似“睡觉时整理记忆”，用于总结、去重、合并和沉淀经验。
@@ -75,8 +77,9 @@ cd web && bun run build
 
 - `.opencode/`：OpenCode 相关本地工具目录。
 - `.sisyphus/`：本地任务续跑/工具状态目录。
-- `.test-backups/`：人工或自动测试过程中保存的数据备份。
 - `data/profiles/`：运行时生成的 profile 文件目录，包含 Agent 的 `soul.md` 和用户的 `user.md`。
+- `data/agents/<agentId>/agent.json`：某个 Agent 的统一配置文件，包含名称、模型、工具策略和 skill 元数据。
+- `data/agents/<agentId>/skills/*/SKILL.md`：某个 Agent 的 skill 正文文件；启停状态不写在这里，而是写入同级 Agent 的 `agent.json`。
 - `node_modules/`：后端依赖安装目录。
 - `.git/`：Git 仓库数据目录。
 - `.gitignore`：Git 忽略规则。
@@ -122,6 +125,10 @@ src/
 - `src/agents/agent-types.ts`：Agent、Agent 状态和相关类型定义。
 - `src/agents/agent-registry.ts`：Agent 注册表。负责创建、读取和更新默认 Agent。
 - `src/agents/agent-registry.test.ts`：覆盖默认 Agent 创建和状态更新。
+- `src/agents/config-types.ts`：Agent 配置类型。这里的配置指某个 Agent 怎么工作，不包含任务运行状态。
+- `src/agents/config-service.ts`：AgentConfigService。统一读取、校验、局部更新、重置 `data/agents/<agentId>/agent.json`；数组字段支持 add/remove 这类细粒度 patch。
+- `src/agents/config-service.test.ts`：覆盖默认配置创建、patch、reset、坏配置恢复和事件记录。
+- `src/agents/config-tools.ts`：`agent_config_get`、`agent_config_patch`、`agent_config_reset` 工具外壳。
 
 ## `src/runtime/`
 
@@ -142,6 +149,7 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/tools/policy.ts`：工具权限策略。决定哪些工具可直接执行，哪些需要审批。
 - `src/tools/policy.test.ts`：覆盖工具权限、路径白名单和 allowlist 规则。
 - `src/tools/executor.ts`：文件工具执行和路径安全工具。
+- `src/tools/executor.test.ts`：覆盖文件路径安全和 `agent.json` 写保护。
 - `src/tools/builtin-tools.ts`：内置工具注册，包括文件工具和记忆工具外壳。
 - `src/tools/toolsets.ts`：工具分组定义，例如 memory、file、runtime、core。
 - `src/tools/service.ts`：工具系统门面。统一导出工具列表、工具集构建、权限评估和执行包装。
@@ -192,6 +200,10 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/routes/runtime.test.ts`：覆盖 runtime 状态和事件接口。
 - `src/routes/sessions.ts`：会话 API。提供会话列表、会话消息、创建和删除会话。
 - `src/routes/tools.ts`：工具 API。提供工具白名单授权接口。
+- `src/routes/agents.ts`：Agent 配置 API，提供读取、局部更新和重置 `agent.json` 的受控入口。
+- `src/routes/agents.test.ts`：覆盖 Agent 配置 API。
+- `src/routes/skills.ts`：Skill API。创建和启停 skill 时只写 `SKILL.md` 正文与 `agent.json` 元数据。
+- `src/routes/skills.test.ts`：覆盖 Skill API。
 
 ## `src/memory/`
 

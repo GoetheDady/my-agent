@@ -35,6 +35,8 @@ bun run build        # 构建到 web/dist
 
 **Agent 系统** (`src/agents/`, `src/runtime/`):
 - 启动时 `ensureDefaultAgent()` 创建唯一默认 Agent（`id: "default"`）。
+- `AgentConfigService` 负责 `data/agents/<agentId>/agent.json`，这是 Agent 名称、模型、工具策略和 skill 元数据的唯一配置源。
+- `temperature` 不属于 Agent MVP 配置；模型配置只保留 provider 和 model。
 - `runAgentTask()` 编排：标记运行 → 构建 system prompt → 构建工具集 → `streamText` → 标记完成/失败。
 - Agent 状态：`idle | running | paused | error`。45s 模型超时 + abort 信号处理。
 
@@ -53,6 +55,12 @@ bun run build        # 构建到 web/dist
 - `src/tools/service.ts` 是工具系统门面，统一提供工具列表、工具集构建、权限评估和执行包装。
 - `buildAgentTools(context: MemoryToolContext)` 工厂函数，为记忆工具注入 `agentId/taskId/conversationId` 上下文。
 - 只读工具默认允许，写工具需审批（除非加入白名单）。
+- 通用文件工具不能写 `data/agents/<agentId>/agent.json`；修改 Agent 配置必须走 `agent_config_patch` 或 HTTP 配置接口。
+
+**Skill 系统** (`src/skills/`):
+- `SKILL.md` 只保存 skill 正文。
+- skill 的名称、描述、工具范围和 enabled/disabled 状态统一保存在 `agent.json`。
+- `SkillService` 负责 skill 文件和展示，但启停、索引元数据会委托给 `AgentConfigService`。
 
 **记忆系统** (`src/memory/`):
 - 混合检索：向量相似度 + TF-IDF 文本匹配。

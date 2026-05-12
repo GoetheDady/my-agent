@@ -8,12 +8,12 @@ describe("tool registry", () => {
   test("registers built-in tools", () => {
     expect(getTool("read_file")).toMatchObject({
       name: "read_file",
-      toolset: "filesystem",
+      toolset: "file",
       category: "read",
     });
     expect(getTool("write_file")).toMatchObject({
       name: "write_file",
-      toolset: "filesystem",
+      toolset: "file",
       category: "write",
     });
   });
@@ -44,7 +44,7 @@ describe("tool registry", () => {
         description: "test tool",
         inputSchema: z.object({}),
       }),
-      toolset: "test",
+      toolset: "memory",
       category: "read",
       disabledForAgents: ["researcher"],
     });

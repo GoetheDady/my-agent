@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureDefaultAgent } from "../agents/agent-registry";
@@ -38,6 +38,9 @@ describe("SkillService", () => {
       const disabled = service.disableSkill("web-debug", { agentId: "default", database: db });
       expect(disabled.skill?.status).toBe("disabled");
       expect(service.listSkills("default", "enabled").skills).toHaveLength(0);
+      expect(existsSync(join(rootDir, "agents", "default", "skills", "skills.json"))).toBe(false);
+      const agentConfig = JSON.parse(readFileSync(join(rootDir, "agents", "default", "agent.json"), "utf8"));
+      expect(agentConfig.skills.items["web-debug"].status).toBe("disabled");
     } finally {
       db.close();
       rmSync(rootDir, { recursive: true, force: true });
@@ -59,6 +62,36 @@ describe("SkillService", () => {
       const content = readFileSync(filePath, "utf8");
       expect(content).toContain("Agent Skill");
       expect(content).toContain("Body");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test("migrates legacy skills registry into agent config", () => {
+      const rootDir = createTempRoot();
+    try {
+      const registryDir = join(rootDir, "agents", "default", "skills");
+      mkdirSync(registryDir, { recursive: true });
+      writeFileSync(join(registryDir, "skills.json"), JSON.stringify({
+        version: 1,
+        agentId: "default",
+        skills: {
+          legacy: {
+            name: "Legacy Skill",
+            description: "旧索引",
+            category: "general",
+            allowedTools: [],
+            source: "test",
+            status: "enabled",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        },
+      }, null, 2));
+
+      const service = new SkillService({ rootDir });
+      expect(service.listSkills("default", "enabled").skills.map((skill) => skill.id)).toEqual(["legacy"]);
+      expect(existsSync(join(registryDir, "skills.json"))).toBe(false);
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }

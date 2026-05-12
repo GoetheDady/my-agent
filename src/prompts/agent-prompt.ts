@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { getAgent } from "../agents/agent-registry";
+import { defaultAgentConfigService } from "../agents/config-service";
 import { loadProfileContext, type ProfileContext } from "../profiles/files";
 import { defaultSkillService, type SkillService } from "../skills";
 import { listWorkingMemory } from "../memory/working-memory";
@@ -45,6 +46,7 @@ export function buildAgentSystemPrompt(
   options: BuildAgentSystemPromptOptions = {},
 ): string {
   const agent = getAgent(task.agent_id, database);
+  const agentConfig = defaultAgentConfigService.getAgentConfig(task.agent_id, { agentId: task.agent_id, database });
   // profile 文件是稳定认知层，会注入 prompt；长期记忆仍坚持 Memory-as-Tool，不整体注入。
   const profileContext = options.profileContext ?? loadProfileContext({
     agentId: task.agent_id,
@@ -64,7 +66,8 @@ export function buildAgentSystemPrompt(
     "",
     `<agent>`,
     `id: ${task.agent_id}`,
-    `name: ${agent?.name ?? task.agent_id}`,
+    `name: ${agentConfig.name || agent?.name || task.agent_id}`,
+    `description: ${agentConfig.description}`,
     `</agent>`,
     "",
     `<task>`,

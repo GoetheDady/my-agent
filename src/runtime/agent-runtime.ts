@@ -7,6 +7,7 @@ import {
 } from "ai";
 import { createDeepSeek, deepseek } from "@ai-sdk/deepseek";
 import type { Database } from "bun:sqlite";
+import { defaultAgentConfigService } from "../agents/config-service";
 import { appendEvent } from "../events/event-log";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
@@ -158,7 +159,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       database,
     });
     const result = runner({
-      model: getModel(),
+      model: getModel(input.task.agent_id),
       system: buildAgentSystemPrompt(input.task, database, {
         skillService: defaultSkillService,
       }),
@@ -312,10 +313,11 @@ export function toAgentUiMessageStreamResponse(
   });
 }
 
-function getModel() {
+function getModel(agentId = "default") {
   const config = getConfig();
+  const agentConfig = defaultAgentConfigService.getAgentConfig(agentId);
   const provider = config.provider.baseURL
     ? createDeepSeek({ baseURL: config.provider.baseURL })
     : deepseek;
-  return provider(config.provider.model);
+  return provider(agentConfig.model.model);
 }

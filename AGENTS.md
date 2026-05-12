@@ -25,6 +25,16 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Agent states: `idle` | `running` | `paused` | `error`.
 - `src/runtime/agent-runtime.ts` `runAgentTask()` orchestrates: mark task running → build system prompt → build tools → `streamText` → mark complete/fail.
 - Has 45s model timeout + abort signal handling. Uses `failTaskOnce` guard to prevent double-completion.
+- `AgentConfigService` owns `data/agents/<agentId>/agent.json`: agent name, description, model, tool policy, memory switches, and skill metadata.
+- Runtime reads the latest Agent config before each run. Do not add new direct writers for `agent.json`.
+- `temperature` is intentionally not part of MVP config.
+- `agent_config_patch` supports precise add/remove operations for tool arrays and skill metadata; prefer those over replacing whole arrays when possible.
+
+### Skill System (`src/skills/`)
+- `SKILL.md` stores skill body only.
+- Skill metadata and enabled/disabled status live in the same `agent.json` managed by `AgentConfigService`.
+- `SkillService` creates/reads skill content, but uses `AgentConfigService` for skill metadata changes.
+- Legacy `skills.json` is migration-only and should not be used as a new config source.
 
 ### Task System (`src/tasks/`)
 - Task lifecycle: `queued` → `running` → `completed` | `failed` | `canceled`.
@@ -42,6 +52,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - `buildAgentTools(context: MemoryToolContext)` builds context-aware tools and passes task/agent info to memory tools.
 - Policy: read-only tools allowed by default. Write tools need approval unless allowlisted. Memory write tools write active memories directly (no more "candidate" pattern).
 - `isInputPathAllowlisted` controls which file paths write_file can target.
+- `write_file` must not modify `data/agents/<agentId>/agent.json`; use `agent_config_patch` instead.
 
 ### Memory System (`src/memory/`)
 - LanceDB for vector storage. Zhipu AI embedding-3 model (2048 dims).
@@ -99,7 +110,7 @@ bun run build        # tsc -b && vite build → web/dist
 6. **Web build required for production**: Backend serves `web/dist`. Must run `cd web && bun run build` before `bun run start`.
 7. **Vite dev proxy**: `web/vite.config.ts` proxies `/api` to `http://localhost:3000`. Start backend first, then frontend.
 8. **ESLint ignores `web/`** — frontend has its own tsc check in build step (`web/tsconfig.json`).
-9. **No `.env.example` or `README`** — setup requires `DEEPSEEK_API_KEY` and `ZHIPU_API_KEY` env vars.
+9. **Runtime data lives under `data/` by default** — `agent.json`, `SKILL.md`, SQLite, LanceDB, and profile files are generated there. Do not commit generated runtime data.
 
 ## Code Style
 

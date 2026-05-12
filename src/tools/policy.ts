@@ -1,10 +1,12 @@
 import { getTool, type RegisteredTool } from "./registry";
+import { defaultAgentConfigService } from "../agents/config-service";
 
 export interface ToolPolicyInput {
   toolName: string;
   operation?: "read" | "write";
   allowlisted?: boolean;
   tool?: RegisteredTool | null;
+  agentId?: string;
 }
 
 export interface ToolPolicyDecision {
@@ -35,6 +37,15 @@ export function evaluateToolPolicy(input: ToolPolicyInput): ToolPolicyDecision {
     };
   }
 
+  const agentConfig = defaultAgentConfigService.getAgentConfig(input.agentId ?? "default");
+  if (!agentConfig.tools.enabledToolsets.includes(registeredTool.toolset)) {
+    return {
+      allowed: false,
+      requiresApproval: true,
+      reason: "toolset_disabled",
+    };
+  }
+
   if (registeredTool.category === "read" || registeredTool.category === "memory_read") {
     return {
       allowed: true,
@@ -53,10 +64,16 @@ export function evaluateToolPolicy(input: ToolPolicyInput): ToolPolicyDecision {
   }
 
   const allowlisted = input.allowlisted === true;
+  const configuredApproval = agentConfig.tools.requiresApproval.includes(input.toolName);
   // 未列入 allowlist 的普通写操作仍可执行，但前端必须先展示审批卡。
+  const reason = configuredApproval
+    ? "write_requires_configured_approval"
+    : allowlisted
+      ? "write_allowlisted"
+      : "write_requires_approval";
   return {
     allowed: true,
-    requiresApproval: !allowlisted,
-    reason: allowlisted ? "write_allowlisted" : "write_requires_approval",
+    requiresApproval: configuredApproval || !allowlisted,
+    reason,
   };
 }

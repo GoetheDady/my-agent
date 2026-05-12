@@ -1,14 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
+import { AgentConfigService, defaultAgentConfigService } from "../agents/config-service";
 import { getRuntimeDataDir } from "../core/config";
 import { appendEvent } from "../events/event-log";
 import type {
   SkillCreateInput,
   SkillListResult,
   SkillRecord,
-  SkillRegistryEntry,
-  SkillRegistryFile,
+  SkillMetadata,
   SkillServiceContext,
   SkillStatus,
   SkillStatusUpdateResult,
@@ -17,7 +17,6 @@ import type {
 
 const DEFAULT_AGENT_ID = "default";
 const DEFAULT_SKILLS_DIR_NAME = "skills";
-const REGISTRY_FILENAME = "skills.json";
 const SKILL_MARKDOWN_FILENAME = "SKILL.md";
 
 function now(): number {
@@ -36,47 +35,6 @@ function safeSkillSegment(value: string): string {
 
 function jsonValue(value: string): string {
   return JSON.stringify(value);
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => String(item).trim()).filter((item) => item.length > 0);
-}
-
-function createDefaultRegistry(agentId: string): SkillRegistryFile {
-  return {
-    version: 1,
-    agentId,
-    skills: {},
-  };
-}
-
-function parseRegistryContent(content: string, agentId: string): SkillRegistryFile {
-  const parsed = JSON.parse(content) as Partial<SkillRegistryFile>;
-  if (!parsed || parsed.version !== 1 || typeof parsed.skills !== "object" || parsed.skills === null) {
-    throw new Error("Invalid skills registry");
-  }
-  const skills: Record<string, SkillRegistryEntry> = {};
-  for (const [skillId, value] of Object.entries(parsed.skills)) {
-    if (!value || typeof value !== "object") continue;
-    const entry = value as Partial<SkillRegistryEntry>;
-    const normalizedId = safeSkillSegment(skillId);
-    skills[normalizedId] = {
-      name: String(entry.name ?? normalizedId),
-      description: String(entry.description ?? ""),
-      category: String(entry.category ?? "general"),
-      allowedTools: asStringArray(entry.allowedTools),
-      source: String(entry.source ?? "agent-created"),
-      status: entry.status === "disabled" ? "disabled" : "enabled",
-      createdAt: Number(entry.createdAt ?? now()),
-      updatedAt: Number(entry.updatedAt ?? now()),
-    };
-  }
-  return {
-    version: 1,
-    agentId: String(parsed.agentId ?? agentId),
-    skills,
-  };
 }
 
 function buildFrontmatter(input: {
@@ -126,10 +84,6 @@ function buildSkillMarkdown(input: {
   return `${frontmatter}\n\n${body.trim()}\n`;
 }
 
-function registryPathFor(agentId: string, rootDir: string): string {
-  return resolve(rootDir, "agents", agentId, DEFAULT_SKILLS_DIR_NAME, REGISTRY_FILENAME);
-}
-
 function skillDirectoryFor(agentId: string, skillId: string, rootDir: string): string {
   return resolve(rootDir, "agents", agentId, DEFAULT_SKILLS_DIR_NAME, skillId);
 }
@@ -142,32 +96,7 @@ function ensureDirectory(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
-function loadRegistry(agentId: string, rootDir: string): SkillRegistryFile {
-  const registryPath = registryPathFor(agentId, rootDir);
-  if (!existsSync(registryPath)) {
-    const registry = createDefaultRegistry(agentId);
-    ensureDirectory(dirname(registryPath));
-    writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
-    return registry;
-  }
-
-  const content = readFileSync(registryPath, "utf8").trim();
-  if (!content) {
-    const registry = createDefaultRegistry(agentId);
-    writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
-    return registry;
-  }
-
-  return parseRegistryContent(content, agentId);
-}
-
-function saveRegistry(agentId: string, rootDir: string, registry: SkillRegistryFile): void {
-  const registryPath = registryPathFor(agentId, rootDir);
-  ensureDirectory(dirname(registryPath));
-  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
-}
-
-function toSkillRecord(agentId: string, rootDir: string, skillId: string, entry: SkillRegistryEntry): SkillRecord {
+function toSkillRecord(agentId: string, rootDir: string, skillId: string, entry: SkillMetadata): SkillRecord {
   const directory = skillDirectoryFor(agentId, skillId, rootDir);
   const filePath = skillFilePathFor(agentId, skillId, rootDir);
   return {
@@ -218,47 +147,32 @@ function emitSkillEvent(
 
 export class SkillService {
   private readonly rootDir: string;
+  private readonly agentConfigService: AgentConfigService;
 
-  constructor(options: { rootDir?: string } = {}) {
+  constructor(options: { rootDir?: string; agentConfigService?: AgentConfigService } = {}) {
     this.rootDir = options.rootDir ?? getRuntimeDataDir();
+    this.agentConfigService = options.agentConfigService ?? new AgentConfigService({ rootDir: this.rootDir });
   }
 
   private getAgentId(input: SkillServiceContext = {}): string {
     return safeSkillSegment(input.agentId ?? DEFAULT_AGENT_ID);
   }
 
-  private getRegistry(agentId: string): SkillRegistryFile {
-    return loadRegistry(agentId, this.rootDir);
+  private getSkillItems(agentId: string, context: SkillServiceContext = {}): Record<string, SkillMetadata> {
+    return this.agentConfigService.getAgentConfig(agentId, context).skills.items;
   }
 
-  private saveRegistry(agentId: string, registry: SkillRegistryFile): void {
-    saveRegistry(agentId, this.rootDir, registry);
-  }
-
-  private getEntry(agentId: string, skillId: string): SkillRecord | null {
-    const registry = this.getRegistry(agentId);
-    const entry = registry.skills[skillId];
+  private getEntry(agentId: string, skillId: string, context: SkillServiceContext = {}): SkillRecord | null {
+    const entry = this.getSkillItems(agentId, context)[skillId];
     if (!entry) return null;
     return toSkillRecord(agentId, this.rootDir, skillId, entry);
-  }
-
-  private updateEntry(
-    agentId: string,
-    skillId: string,
-    updater: (entry: SkillRegistryEntry | undefined) => SkillRegistryEntry,
-  ): SkillRecord {
-    const registry = this.getRegistry(agentId);
-    const nextEntry = updater(registry.skills[skillId]);
-    registry.skills[skillId] = nextEntry;
-    this.saveRegistry(agentId, registry);
-    return toSkillRecord(agentId, this.rootDir, skillId, nextEntry);
   }
 
   listSkills(agentIdOrContext: string | SkillServiceContext = DEFAULT_AGENT_ID, status: "enabled" | "disabled" | "all" = "all"): SkillListResult {
     const input = typeof agentIdOrContext === "string" ? { agentId: agentIdOrContext } : agentIdOrContext;
     const agentId = this.getAgentId(input);
-    const registry = this.getRegistry(agentId);
-    const records = Object.entries(registry.skills).map(([skillId, entry]) => toSkillRecord(agentId, this.rootDir, skillId, entry));
+    const config = this.agentConfigService.getAgentConfig(agentId, input);
+    const records = Object.entries(config.skills.items).map(([skillId, entry]) => toSkillRecord(agentId, this.rootDir, skillId, entry));
     const filtered = status === "all"
       ? records
       : records.filter((skill) => skill.status === status);
@@ -279,8 +193,10 @@ export class SkillService {
   }
 
   buildSkillIndex(agentIdOrContext: string | SkillServiceContext = DEFAULT_AGENT_ID): string {
-    const agentId = this.getAgentId(typeof agentIdOrContext === "string" ? { agentId: agentIdOrContext } : agentIdOrContext);
-    return formatSkillIndex(this.listEnabledSkills(agentId).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)));
+    const context = typeof agentIdOrContext === "string" ? { agentId: agentIdOrContext } : agentIdOrContext;
+    return formatSkillIndex(
+      this.listEnabledSkills(context).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)),
+    );
   }
 
   viewSkill(
@@ -290,7 +206,7 @@ export class SkillService {
   ): SkillViewResult {
     const agentId = this.getAgentId(context);
     const normalizedSkillId = safeSkillSegment(skillId);
-    const skill = this.getEntry(agentId, normalizedSkillId);
+    const skill = this.getEntry(agentId, normalizedSkillId, context);
     if (!skill) {
       return { agentId, skill: null, content: null, filePath: null, error: "skill_not_found" };
     }
@@ -323,10 +239,9 @@ export class SkillService {
     const agentId = this.getAgentId(context);
     const skillId = safeSkillSegment(input.skillId);
     const nowTs = now();
-    const existing = this.getEntry(agentId, skillId);
-    const registry = this.getRegistry(agentId);
+    const existing = this.getEntry(agentId, skillId, context);
     const status: SkillStatus = input.status ?? existing?.status ?? "enabled";
-    const record: SkillRegistryEntry = {
+    const record: SkillMetadata = {
       name: input.name.trim(),
       description: input.description.trim(),
       category: (input.category ?? existing?.category ?? "general").trim() || "general",
@@ -351,8 +266,13 @@ export class SkillService {
     });
     writeFileSync(skillFilePath, markdown, "utf8");
 
-    registry.skills[skillId] = record;
-    saveRegistry(agentId, this.rootDir, registry);
+    this.agentConfigService.patchAgentConfig(agentId, {
+      skills: {
+        items: {
+          [skillId]: record,
+        },
+      },
+    }, context);
 
     emitSkillEvent(context.database, { ...context, agentId }, existing ? "skill.updated" : "skill.created", {
       skillId,
@@ -369,20 +289,26 @@ export class SkillService {
   enableSkill(skillId: string, context: SkillServiceContext = {}): SkillStatusUpdateResult {
     const agentId = this.getAgentId(context);
     const normalizedSkillId = safeSkillSegment(skillId);
-    const record = this.getEntry(agentId, normalizedSkillId);
+    const record = this.getEntry(agentId, normalizedSkillId, context);
     if (!record) {
       return { agentId, skill: null, changed: false };
     }
-    const next = this.updateEntry(agentId, normalizedSkillId, (entry) => ({
-      name: entry?.name ?? record.name,
-      description: entry?.description ?? record.description,
-      category: entry?.category ?? record.category,
-      allowedTools: entry?.allowedTools ?? record.allowedTools,
-      source: entry?.source ?? record.source,
+    this.agentConfigService.patchAgentConfig(agentId, {
+      skills: {
+        items: {
+          [normalizedSkillId]: {
+            ...record,
+            status: "enabled",
+            updatedAt: now(),
+          },
+        },
+      },
+    }, context);
+    const next = this.getEntry(agentId, normalizedSkillId, context) ?? {
+      ...record,
       status: "enabled",
-      createdAt: entry?.createdAt ?? record.createdAt,
       updatedAt: now(),
-    }));
+    };
     emitSkillEvent(context.database, { ...context, agentId }, "skill.enabled", {
       skillId: normalizedSkillId,
       name: next.name,
@@ -394,20 +320,26 @@ export class SkillService {
   disableSkill(skillId: string, context: SkillServiceContext = {}): SkillStatusUpdateResult {
     const agentId = this.getAgentId(context);
     const normalizedSkillId = safeSkillSegment(skillId);
-    const record = this.getEntry(agentId, normalizedSkillId);
+    const record = this.getEntry(agentId, normalizedSkillId, context);
     if (!record) {
       return { agentId, skill: null, changed: false };
     }
-    const next = this.updateEntry(agentId, normalizedSkillId, (entry) => ({
-      name: entry?.name ?? record.name,
-      description: entry?.description ?? record.description,
-      category: entry?.category ?? record.category,
-      allowedTools: entry?.allowedTools ?? record.allowedTools,
-      source: entry?.source ?? record.source,
+    this.agentConfigService.patchAgentConfig(agentId, {
+      skills: {
+        items: {
+          [normalizedSkillId]: {
+            ...record,
+            status: "disabled",
+            updatedAt: now(),
+          },
+        },
+      },
+    }, context);
+    const next = this.getEntry(agentId, normalizedSkillId, context) ?? {
+      ...record,
       status: "disabled",
-      createdAt: entry?.createdAt ?? record.createdAt,
       updatedAt: now(),
-    }));
+    };
     emitSkillEvent(context.database, { ...context, agentId }, "skill.disabled", {
       skillId: normalizedSkillId,
       name: next.name,
@@ -427,7 +359,7 @@ export class SkillService {
   }
 }
 
-export const defaultSkillService = new SkillService();
+export const defaultSkillService = new SkillService({ agentConfigService: defaultAgentConfigService });
 
 export function buildSkillIndex(agentId: string, database?: Database): string {
   void database;
