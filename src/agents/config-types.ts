@@ -43,6 +43,9 @@ export interface AgentFeishuBindingConfig {
   enabled: boolean;
   verificationToken?: string;
   encryptKey?: string;
+  openId?: string;
+  botName?: string;
+  botOpenId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -114,6 +117,9 @@ export interface AgentConfigPatch {
         appSecret?: string;
         verificationToken?: string;
         encryptKey?: string;
+        openId?: string;
+        botName?: string;
+        botOpenId?: string;
       }) | null>;
       removeBindingAppIds?: string[];
     };

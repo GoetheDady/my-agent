@@ -53,6 +53,7 @@ bun run build        # 构建到 web/dist
 - 入站流程：标准化 channel message → 映射 channel identity → 映射 conversation → 创建 task → 写 `task.created` / `user.message` 事件。
 - Web 的 `sessions/messages` 仍是前端展示层；内部 runtime 使用 `conversations/tasks/events`。
 - 飞书已接入 WebSocket 长连接 MVP，飞书 App 绑定保存在目标 Agent 的 `agent.json` 的 `channels.feishu.bindings`，不再使用独立 `feishu-bindings.json` 作为配置源。
+- 飞书扫码创建机器人由 `FeishuOnboardingService` 负责：生成二维码、轮询飞书注册结果、通过 `FeishuBindingService` 写入绑定，并且 API 不返回明文 App Secret。
 - 微信目前只有 stub adapter，不接真实 SDK。
 
 **生命周期钩子** (`src/lifecycle/hooks.ts`):

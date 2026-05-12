@@ -129,8 +129,25 @@ export class FeishuWebSocketService {
     this.clients.clear();
   }
 
+  stopBinding(appId: string): boolean {
+    const client = this.clients.get(appId);
+    if (!client) return false;
+    client.close({ force: true });
+    this.clients.delete(appId);
+    appendEvent({
+      agent_id: this.bindingService.getBinding(appId)?.agentId ?? "default",
+      type: "channel.binding.updated",
+      payload: { channel: "feishu", transport: "websocket", appId, status: "stopped" },
+    }, this.database);
+    return true;
+  }
+
   isRunning(appId: string): boolean {
     return this.clients.has(appId);
+  }
+
+  getBindingStatus(appId: string): "running" | "stopped" {
+    return this.isRunning(appId) ? "running" : "stopped";
   }
 
   private get bindingService(): FeishuBindingService {

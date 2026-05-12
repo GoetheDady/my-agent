@@ -15,6 +15,9 @@ export interface FeishuBinding {
   enabled: boolean;
   verificationToken?: string;
   encryptKey?: string;
+  openId?: string;
+  botName?: string;
+  botOpenId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -27,6 +30,9 @@ export interface FeishuBindingInput {
   enabled?: boolean;
   verificationToken?: string;
   encryptKey?: string;
+  openId?: string;
+  botName?: string;
+  botOpenId?: string;
 }
 
 interface LegacyFeishuBindingFile {
@@ -82,12 +88,21 @@ export class FeishuBindingService {
     hasVerificationToken: boolean;
     hasEncryptKey: boolean;
   }> {
-    return this.listBindings().map(({ appSecret, verificationToken, encryptKey, ...binding }) => ({
-      ...binding,
+    return this.listBindings().map((binding) => this.toPublicBinding(binding));
+  }
+
+  toPublicBinding(binding: FeishuBinding): Omit<FeishuBinding, "appSecret" | "verificationToken" | "encryptKey"> & {
+    hasAppSecret: boolean;
+    hasVerificationToken: boolean;
+    hasEncryptKey: boolean;
+  } {
+    const { appSecret, verificationToken, encryptKey, ...publicBinding } = binding;
+    return {
+      ...publicBinding,
       hasAppSecret: Boolean(appSecret),
       hasVerificationToken: Boolean(verificationToken),
       hasEncryptKey: Boolean(encryptKey),
-    }));
+    };
   }
 
   getBinding(appId: string): FeishuBinding | null {
@@ -142,6 +157,9 @@ export class FeishuBindingService {
               enabled: input.enabled ?? existing?.enabled ?? true,
               verificationToken: normalizeSecret(input.verificationToken) ?? existing?.verificationToken,
               encryptKey: normalizeSecret(input.encryptKey) ?? existing?.encryptKey,
+              openId: normalizeSecret(input.openId) ?? existing?.openId,
+              botName: normalizeSecret(input.botName) ?? existing?.botName,
+              botOpenId: normalizeSecret(input.botOpenId) ?? existing?.botOpenId,
               createdAt: existing?.createdAt,
             },
           },
@@ -150,6 +168,38 @@ export class FeishuBindingService {
     }, { ...context, agentId });
     const binding = updated.channels.feishu.bindings[appId];
     return { ...binding, agentId };
+  }
+
+  updateBinding(appId: string, patch: {
+    agentId?: string;
+    enabled?: boolean;
+    domain?: "feishu" | "lark";
+    verificationToken?: string;
+    encryptKey?: string;
+  }, context: AgentConfigContext = {}): FeishuBinding {
+    const existing = this.getBinding(appId);
+    if (!existing) throw new Error(`Feishu binding not found: ${appId}`);
+    return this.upsertBinding({
+      ...existing,
+      agentId: normalizeAgentId(patch.agentId ?? existing.agentId),
+      domain: normalizeDomain(patch.domain ?? existing.domain),
+      enabled: patch.enabled ?? existing.enabled,
+      verificationToken: patch.verificationToken ?? existing.verificationToken,
+      encryptKey: patch.encryptKey ?? existing.encryptKey,
+    }, context);
+  }
+
+  deleteBinding(appId: string, context: AgentConfigContext = {}): FeishuBinding {
+    const existing = this.getBinding(appId);
+    if (!existing) throw new Error(`Feishu binding not found: ${appId}`);
+    this.agentConfigService.patchAgentConfig(existing.agentId, {
+      channels: {
+        feishu: {
+          removeBindingAppIds: [existing.appId],
+        },
+      },
+    }, { ...context, agentId: existing.agentId });
+    return existing;
   }
 
   private migrateLegacyBindings(context: AgentConfigContext = {}): void {

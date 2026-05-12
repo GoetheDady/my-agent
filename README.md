@@ -178,6 +178,8 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/channels/web-channel.ts`：Web 渠道轻量适配器；Web 出站仍通过 HTTP stream 返回。
 - `src/channels/feishu-channel.ts`：飞书出站适配器。飞书入站使用 WebSocket 长连接，绑定配置保存在目标 Agent 的 `agent.json` 的 `channels.feishu.bindings`，不再使用独立 `feishu-bindings.json` 作为配置源。
 - `src/channels/feishu-websocket-service.ts`：飞书长连接服务。长连接指后端主动连飞书开放平台接收事件，因此不需要公网回调 URL。
+- `src/channels/feishu-onboarding-service.ts`：飞书扫码创建机器人服务。它使用设备码流程生成二维码、轮询扫码结果，成功后把新 App 绑定到目标 Agent。
+- `src/channels/feishu-binding-service.ts`：飞书绑定服务。负责脱敏列表、手动绑定、启停、删除和旧绑定迁移，外部代码不直接写 `agent.json`。
 - `src/channels/wechat-channel.ts`：微信占位适配器，MVP 暂不接真实 SDK。
 - `src/channels/service.test.ts`：覆盖 ChannelService 入站、identity/conversation 复用、事件和 adapter 注册。
 - `src/channels/message-parts.ts`：消息内容 part 的解析和序列化。`part` 指一条消息中的文本块、工具块、推理块等子结构。
@@ -336,7 +338,7 @@ web/
 - `web/src/pages/TasksPage.tsx`：任务页面。展示任务队列和执行历史。
 - `web/src/pages/ToolsPage.tsx`：工具页面。展示工具分类、权限和可用状态。
 - `web/src/pages/AgentsPage.tsx`：Agent 页面。展示 Agent 状态，并为后续多 Agent 管理 UI 预留。
-- `web/src/pages/ChannelsPage.tsx`：渠道页面。展示 Web 渠道和未来微信/飞书入口。
+- `web/src/pages/ChannelsPage.tsx`：渠道页面。展示 Web / 飞书 / 微信状态；飞书支持扫码创建机器人、手动绑定、启停和删除绑定。
 - `web/src/pages/SettingsPage.tsx`：设置页面。为模型、记忆策略、工具权限和 Agent 配置预留。
 
 ## `web/src/features/`

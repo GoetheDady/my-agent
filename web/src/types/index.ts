@@ -58,3 +58,47 @@ export interface CreateAgentInput {
     model?: string;
   };
 }
+
+export type ChannelStatus = "enabled" | "not_configured" | "reserved";
+
+export interface ChannelSummary {
+  id: "web" | "feishu" | "wechat" | string;
+  name: string;
+  status: ChannelStatus;
+  bindingCount: number;
+  enabledCount: number;
+  runningCount: number;
+  transport?: string;
+}
+
+export interface FeishuBindingSummary {
+  appId: string;
+  agentId: string;
+  domain: "feishu" | "lark";
+  enabled: boolean;
+  openId?: string;
+  botName?: string;
+  botOpenId?: string;
+  createdAt: number;
+  updatedAt: number;
+  hasAppSecret: boolean;
+  hasVerificationToken: boolean;
+  hasEncryptKey: boolean;
+  websocketStatus: "running" | "stopped";
+}
+
+export type FeishuOnboardingStatus = "pending" | "succeeded" | "failed" | "expired" | "canceled";
+
+export interface FeishuOnboardingState {
+  onboardingId: string;
+  agentId: string;
+  domain: "feishu" | "lark";
+  status: FeishuOnboardingStatus;
+  qrUrl: string;
+  userCode: string;
+  expiresAt: number;
+  createdAt: number;
+  updatedAt: number;
+  error?: string;
+  binding?: FeishuBindingSummary;
+}

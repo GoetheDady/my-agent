@@ -146,6 +146,9 @@ function normalizeFeishuBinding(appId: string, value: unknown): AgentFeishuBindi
     enabled: asBoolean(value.enabled, true),
     verificationToken: normalizeSecret(value.verificationToken),
     encryptKey: normalizeSecret(value.encryptKey),
+    openId: normalizeSecret(value.openId),
+    botName: normalizeSecret(value.botName),
+    botOpenId: normalizeSecret(value.botOpenId),
     createdAt: Number(value.createdAt ?? timestamp),
     updatedAt: Number(value.updatedAt ?? timestamp),
   };
@@ -326,6 +329,9 @@ function mergePatch(current: AgentConfig, patch: AgentConfigPatch): AgentConfig 
           enabled: bindingPatch.enabled ?? existing?.enabled ?? true,
           verificationToken: normalizeSecret(bindingPatch.verificationToken) ?? existing?.verificationToken,
           encryptKey: normalizeSecret(bindingPatch.encryptKey) ?? existing?.encryptKey,
+          openId: normalizeSecret(bindingPatch.openId) ?? existing?.openId,
+          botName: normalizeSecret(bindingPatch.botName) ?? existing?.botName,
+          botOpenId: normalizeSecret(bindingPatch.botOpenId) ?? existing?.botOpenId,
           createdAt: existing?.createdAt ?? bindingPatch.createdAt ?? timestamp,
           updatedAt: timestamp,
         };

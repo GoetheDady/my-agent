@@ -76,4 +76,23 @@ describe("FeishuBindingService", () => {
       rmSync(rootDir, { recursive: true, force: true });
     }
   });
+
+  test("updates and deletes bindings from agent config", () => {
+    const rootDir = createTempRoot();
+    try {
+      const configService = new AgentConfigService({ rootDir });
+      const service = new FeishuBindingService(configService, join(rootDir, "channels", "feishu-bindings.json"));
+
+      service.upsertBinding({ appId: "cli_test", appSecret: "secret", agentId: "default" });
+      const disabled = service.updateBinding("cli_test", { enabled: false });
+      expect(disabled.enabled).toBe(false);
+      expect(configService.getAgentConfig("default").channels.feishu.bindings.cli_test.enabled).toBe(false);
+
+      const deleted = service.deleteBinding("cli_test");
+      expect(deleted.appId).toBe("cli_test");
+      expect(service.getBinding("cli_test")).toBeNull();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
 });

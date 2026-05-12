@@ -62,6 +62,9 @@ describe("FeishuWebSocketService", () => {
         .get();
 
       expect(service.isRunning("cli_test")).toBe(true);
+      expect(service.getBindingStatus("cli_test")).toBe("running");
+      expect(service.stopBinding("cli_test")).toBe(true);
+      expect(service.getBindingStatus("cli_test")).toBe("stopped");
       expect(task ? getTask(task.id, db) : null).toMatchObject({
         agent_id: "default",
         source_channel: "feishu",

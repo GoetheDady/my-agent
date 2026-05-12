@@ -50,6 +50,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Adapters only handle channel-specific delivery or protocol details; they must not create tasks directly.
 - Web sessions remain frontend display state. Runtime context uses `conversations`, `tasks`, and `events`.
 - Feishu uses a WebSocket long connection MVP. Its app binding lives in the target Agent's `agent.json` under `channels.feishu.bindings`; do not add new writers for `data/channels/feishu-bindings.json`.
+- Feishu scan-to-create onboarding lives in `FeishuOnboardingService`: it generates a QR URL, polls Feishu's registration endpoint, writes the resulting binding through `FeishuBindingService`, and never returns raw app secrets from APIs.
 - WeChat adapter is still a stub for now.
 
 ### Event System (`src/events/`)

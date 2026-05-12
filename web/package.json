@@ -21,6 +21,7 @@
     "@ai-sdk/react": "^3.0.177",
     "ai": "^6.0.175",
     "lucide-react": "^1.14.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
