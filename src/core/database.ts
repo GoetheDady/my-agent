@@ -94,6 +94,71 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  // Tool approval 层：记录工具调用审批状态，用于聊天审批卡、审计和记住路径。
+  database.run(`
+    CREATE TABLE IF NOT EXISTS tool_approvals (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      session_id TEXT,
+      task_id TEXT,
+      channel TEXT,
+      conversation_id TEXT,
+      external_conversation_id TEXT,
+      external_user_id TEXT,
+      tool_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      args TEXT NOT NULL DEFAULT '{}',
+      risk_level TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      remember_choice INTEGER NOT NULL DEFAULT 0,
+      resume_payload TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      UNIQUE(agent_id, tool_call_id),
+      FOREIGN KEY (agent_id) REFERENCES agents(id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id)
+    )
+  `);
+  ensureColumn(database, "tool_approvals", "channel", "TEXT");
+  ensureColumn(database, "tool_approvals", "conversation_id", "TEXT");
+  ensureColumn(database, "tool_approvals", "external_conversation_id", "TEXT");
+  ensureColumn(database, "tool_approvals", "external_user_id", "TEXT");
+  ensureColumn(database, "tool_approvals", "resume_payload", "TEXT");
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tool_approvals_agent_created ON tool_approvals(agent_id, created_at)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tool_approvals_channel ON tool_approvals(channel, external_conversation_id, external_user_id)`);
+
+  // Delegation 层：记录 Agent A 异步委派给 Agent B 的生命周期。
+  // child task 是 Agent B 的后台执行，callback task 是 Agent A 整理结果并通知用户。
+  database.run(`
+    CREATE TABLE IF NOT EXISTS delegations (
+      id TEXT PRIMARY KEY,
+      parent_session_id TEXT,
+      parent_agent_id TEXT NOT NULL,
+      parent_task_id TEXT NOT NULL,
+      parent_conversation_id TEXT,
+      callback_task_id TEXT,
+      child_agent_id TEXT NOT NULL,
+      child_task_id TEXT NOT NULL,
+      source_channel TEXT NOT NULL,
+      source_user_id TEXT NOT NULL DEFAULT 'default',
+      source_metadata TEXT NOT NULL DEFAULT '{}',
+      instruction TEXT NOT NULL,
+      status TEXT NOT NULL,
+      result TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      FOREIGN KEY (parent_agent_id) REFERENCES agents(id),
+      FOREIGN KEY (child_agent_id) REFERENCES agents(id),
+      FOREIGN KEY (parent_task_id) REFERENCES tasks(id),
+      FOREIGN KEY (child_task_id) REFERENCES tasks(id),
+      FOREIGN KEY (callback_task_id) REFERENCES tasks(id)
+    )
+  `);
+  ensureColumn(database, "delegations", "parent_conversation_id", "TEXT");
+  ensureColumn(database, "delegations", "source_metadata", "TEXT NOT NULL DEFAULT '{}'");
+
   // Working memory 是 task 级短期状态，不进入长期记忆，也不会跨 task 自动复用。
   database.run(`
     CREATE TABLE IF NOT EXISTS working_memory (
@@ -245,6 +310,14 @@ export function initializeDatabaseSchema(database: Database): void {
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_tasks_agent_status ON tasks(agent_id, status, priority, created_at)`,
   );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_delegations_parent_agent ON delegations(parent_agent_id, status, created_at)`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_delegations_parent_session ON delegations(parent_session_id, created_at)`,
+  );
+  database.run(`CREATE INDEX IF NOT EXISTS idx_delegations_child_task ON delegations(child_task_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_delegations_callback_task ON delegations(callback_task_id)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_events_agent_created ON events(agent_id, created_at)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_events_task_created ON events(task_id, created_at)`);
   database.run(

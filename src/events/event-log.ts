@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "../core/database";
+import { defaultRealtimeService } from "../realtime/service";
 import type { RuntimeEvent, RuntimeEventType } from "./event-types";
 
 export interface AppendEventInput {
@@ -53,7 +54,86 @@ export function appendEvent(input: AppendEventInput, database: Database = getDb(
       event.created_at,
     );
 
+  defaultRealtimeService.broadcast({
+    type: "runtime.event.created",
+    agentId: event.agent_id,
+    taskId: event.task_id ?? undefined,
+    eventId: event.id,
+    payload: {
+      event: {
+        ...event,
+        payloadJson: input.payload ?? {},
+      },
+    },
+    createdAt: event.created_at,
+  });
+  broadcastDomainNotification(event, input.payload ?? {});
+
   return event;
+}
+
+function broadcastDomainNotification(event: RuntimeEvent, payload: unknown): void {
+  if (event.type.startsWith("tool.approval.")) {
+    defaultRealtimeService.broadcast({
+      type: "tool.approval.updated",
+      agentId: event.agent_id,
+      taskId: event.task_id ?? undefined,
+      eventId: event.id,
+      payload,
+      createdAt: event.created_at,
+    });
+    return;
+  }
+
+  if (event.type.startsWith("channel.")) {
+    defaultRealtimeService.broadcast({
+      type: "channel.updated",
+      agentId: event.agent_id,
+      taskId: event.task_id ?? undefined,
+      eventId: event.id,
+      payload,
+      createdAt: event.created_at,
+    });
+    return;
+  }
+
+  if (event.type.startsWith("memory.")) {
+    defaultRealtimeService.broadcast({
+      type: "memory.updated",
+      agentId: event.agent_id,
+      taskId: event.task_id ?? undefined,
+      eventId: event.id,
+      payload,
+      createdAt: event.created_at,
+    });
+    return;
+  }
+
+  if (event.type.startsWith("skill.")) {
+    defaultRealtimeService.broadcast({
+      type: "skill.updated",
+      agentId: event.agent_id,
+      eventId: event.id,
+      payload,
+      createdAt: event.created_at,
+    });
+    return;
+  }
+
+  if (event.type.startsWith("agent.delegation.")) {
+    const record = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {};
+    defaultRealtimeService.broadcast({
+      type: "delegation.updated",
+      agentId: event.agent_id,
+      taskId: event.task_id ?? undefined,
+      eventId: event.id,
+      delegationId: typeof record.delegationId === "string" ? record.delegationId : undefined,
+      payload,
+      createdAt: event.created_at,
+    });
+  }
 }
 
 /**

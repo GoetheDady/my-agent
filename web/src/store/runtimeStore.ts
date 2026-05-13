@@ -61,8 +61,6 @@ interface RuntimeState {
   stopPolling: () => void;
 }
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
-
 function parsePayload(payload: string): unknown {
   try {
     return JSON.parse(payload);
@@ -360,6 +358,41 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   }
 
   if (event.type.startsWith("tool.")) {
+    if (event.type === "tool.approval.created") {
+      return {
+        label: "工具审批创建",
+        detail: getString(payload, "toolName") ?? getString(payload, "approvalId") ?? event.type,
+        tone: "tool",
+      };
+    }
+    if (event.type === "tool.approval.approved") {
+      return {
+        label: "工具审批批准",
+        detail: getString(payload, "toolName") ?? getString(payload, "approvalId") ?? event.type,
+        tone: "tool",
+      };
+    }
+    if (event.type === "tool.approval.denied") {
+      return {
+        label: "工具审批拒绝",
+        detail: getString(payload, "toolName") ?? getString(payload, "approvalId") ?? event.type,
+        tone: "error",
+      };
+    }
+    if (event.type === "tool.approval.failed") {
+      return {
+        label: "工具审批失败",
+        detail: getString(payload, "error") ?? getString(payload, "approvalId") ?? event.type,
+        tone: "error",
+      };
+    }
+    if (event.type === "tool.policy.updated") {
+      return {
+        label: "工具策略更新",
+        detail: getString(payload, "toolName") ?? getDisplayValue(payload, "changedKeys") ?? event.type,
+        tone: "tool",
+      };
+    }
     return {
       label: event.type === "tool.result" ? "工具结果" : "工具调用",
       detail: getString(payload, "toolName") ?? getString(payload, "name") ?? event.type,
@@ -466,24 +499,12 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     await get().fetchRuntimeSnapshot(agentId ?? get().agent?.id ?? get().pollingAgentId);
   },
 
-  startPolling: (intervalMs = 2500, agentId = "default") => {
-    if (pollTimer && get().pollingAgentId === agentId) return;
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
+  startPolling: (_intervalMs = 2500, agentId = "default") => {
     set({ polling: true, pollingAgentId: agentId });
     get().fetchRuntimeSnapshot(agentId);
-    pollTimer = setInterval(() => {
-      get().fetchRuntimeSnapshot(agentId);
-    }, intervalMs);
   },
 
   stopPolling: () => {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
     set({ polling: false });
   },
 }));

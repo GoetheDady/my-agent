@@ -159,6 +159,24 @@ describe("runtimeStore", () => {
     expect(useRuntimeStore.getState().agent?.id).toBe("researcher");
   });
 
+  test("startPolling keeps a selected snapshot without creating an interval", async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/runtime/agents/default") return jsonResponse(agent);
+      if (url === "/api/runtime/tasks?agentId=default") return jsonResponse({ tasks });
+      if (url === "/api/runtime/events?agentId=default&limit=50") return jsonResponse({ events });
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    useRuntimeStore.getState().startPolling(10, "default");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(useRuntimeStore.getState().polling).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   test("derives the current task and queued tasks", () => {
     expect(getCurrentTask(agent, tasks)?.id).toBe("task-running");
     expect(getQueuedTasks(tasks).map((task) => task.id)).toEqual(["task-queued"]);

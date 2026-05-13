@@ -18,16 +18,13 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
     error,
     fetchRuntimeSnapshot,
     cancelTask,
-    startPolling,
-    stopPolling,
   } = useRuntimeStore();
   const currentTask = getCurrentTask(agent, tasks);
   const queuedTasks = getQueuedTasks(tasks);
 
   useEffect(() => {
-    startPolling();
-    return () => stopPolling();
-  }, [startPolling, stopPolling]);
+    void fetchRuntimeSnapshot();
+  }, [fetchRuntimeSnapshot]);
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">

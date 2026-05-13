@@ -62,9 +62,12 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Tools registered via `registerTool({ name, tool, toolset, category })`.
 - `src/tools/service.ts` is the tools facade: list tools, build agent tools, evaluate policy, and expose execution helpers.
 - `buildAgentTools(context: MemoryToolContext)` builds context-aware tools and passes task/agent info to memory tools.
-- Policy: read-only tools allowed by default. Write tools need approval unless allowlisted. Memory write tools write active memories directly (no more "candidate" pattern).
-- `isInputPathAllowlisted` controls which file paths write_file can target.
+- Policy: read-only tools allowed by default. Write tools need approval unless a concrete path is allowlisted. Memory write tools write active memories directly (no more "candidate" pattern).
+- `ApprovalService` persists tool approvals in `tool_approvals` and emits `tool.approval.*` events. It records the audit trail only; ChatPage still calls `addToolApprovalResponse()` so the AI SDK can continue or stop the tool call.
+- Tool policy is Agent-scoped. `enabledToolsets`, `requiresApproval`, and `allowedPaths` are read from `data/agents/<agentId>/agent.json` through `AgentConfigService`.
+- `isInputPathAllowlisted` controls which file paths `write_file` can target without another approval.
 - `write_file` must not modify `data/agents/<agentId>/agent.json`; use `agent_config_patch` instead.
+- Legacy `/api/tools/whitelist` must not write global `config.json`; it is only a compatibility route that creates and approves a tool approval, then updates the target Agent config.
 
 ### Memory System (`src/memory/`)
 - LanceDB for vector storage. Zhipu AI embedding-3 model (2048 dims).
@@ -74,7 +77,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - Memory tools now accept `MemoryToolContext` with `agentId`, `taskId`, `conversationId` for event context.
 
 ### Database Schema
-Tables: `sessions`, `messages`, `agents`, `tasks`, `events`, `working_memory`, `conversations`, `channel_identities`.
+Tables: `sessions`, `messages`, `agents`, `tasks`, `events`, `tool_approvals`, `working_memory`, `conversations`, `channel_identities`.
 - WAL mode enabled, foreign keys enforced.
 - All store functions accept optional `database: Database` parameter (DI pattern for testing).
 

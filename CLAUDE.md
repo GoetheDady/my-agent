@@ -66,7 +66,9 @@ bun run build        # 构建到 web/dist
 - `registerTool({ name, tool, toolset, category })` 注册工具。
 - `src/tools/service.ts` 是工具系统门面，统一提供工具列表、工具集构建、权限评估和执行包装。
 - `buildAgentTools(context: MemoryToolContext)` 工厂函数，为记忆工具注入 `agentId/taskId/conversationId` 上下文。
-- 只读工具默认允许，写工具需审批（除非加入白名单）。
+- 只读工具默认允许，写工具需审批（除非具体路径已加入当前 Agent 的白名单）。
+- `ApprovalService` 把聊天内工具审批持久化到 SQLite 的 `tool_approvals` 表，并写入 `tool.approval.created/approved/denied` 事件。
+- 工具策略按 Agent 生效，`enabledToolsets`、`requiresApproval`、`allowedPaths` 都来自目标 Agent 的 `agent.json`，不再写全局 `config.json`。
 - 通用文件工具不能写 `data/agents/<agentId>/agent.json`；修改 Agent 配置必须走 `agent_config_patch` 或 HTTP 配置接口。
 
 **Skill 系统** (`src/skills/`):

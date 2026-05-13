@@ -1,34 +1,101 @@
+import * as Lark from "@larksuiteoapi/node-sdk";
+import type { Database } from "bun:sqlite";
+import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import type { ChannelAdapter, ChannelMessageOutput } from "./types";
 import { defaultFeishuBindingService, type FeishuBinding, type FeishuBindingService } from "./feishu-binding-service";
+import { buildFeishuPostContent } from "./feishu-format";
 
-interface TenantTokenResponse {
+type FeishuMessageType = "text" | "post" | "interactive";
+
+interface FeishuSdkResponse {
   code?: number;
   msg?: string;
-  tenant_access_token?: string;
-  expire?: number;
+  data?: {
+    message_id?: string;
+  };
 }
 
-function getOpenBaseUrl(domain: "feishu" | "lark"): string {
-  return domain === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn";
+interface FeishuMessageClientLike {
+  im: {
+    v1: {
+      message: {
+        create(payload: {
+          params: { receive_id_type: "chat_id" };
+          data: {
+            receive_id: string;
+            msg_type: FeishuMessageType;
+            content: string;
+          };
+        }): Promise<FeishuSdkResponse>;
+        reply(payload: {
+          path: { message_id: string };
+          data: {
+            msg_type: FeishuMessageType;
+            content: string;
+          };
+        }): Promise<FeishuSdkResponse>;
+      };
+    };
+  };
 }
+
+type FeishuMessageClientFactory = (binding: FeishuBinding) => FeishuMessageClientLike;
 
 function getStringMetadata(metadata: Record<string, unknown> | undefined, key: string): string {
   const value = metadata?.[key];
   return typeof value === "string" ? value : "";
 }
 
+function getSdkDomain(domain: "feishu" | "lark"): typeof Lark.Domain.Feishu | typeof Lark.Domain.Lark {
+  return domain === "lark" ? Lark.Domain.Lark : Lark.Domain.Feishu;
+}
+
+function createDefaultMessageClient(binding: FeishuBinding): FeishuMessageClientLike {
+  return new Lark.Client({
+    appId: binding.appId,
+    appSecret: binding.appSecret,
+    appType: Lark.AppType.SelfBuild,
+    domain: getSdkDomain(binding.domain),
+    loggerLevel: Lark.LoggerLevel.warn,
+    source: "my-agent",
+  });
+}
+
+function getMessagePayload(output: ChannelMessageOutput): { msgType: FeishuMessageType; content: string } {
+  if (output.metadata?.messageType === "interactive" && output.metadata.card) {
+    return {
+      msgType: "interactive",
+      content: JSON.stringify(output.metadata.card),
+    };
+  }
+  if (output.metadata?.messageType !== "text") {
+    return {
+      msgType: "post",
+      content: JSON.stringify(buildFeishuPostContent(output.text)),
+    };
+  }
+  return {
+    msgType: "text",
+    content: JSON.stringify({ text: output.text }),
+  };
+}
+
 /**
  * FeishuChannelAdapter 负责飞书出站消息。
  *
- * 入站事件由 routes/channels 解析后交给 ChannelService；这里专注把 Agent
- * 的最终文本回复发回飞书会话。MVP 使用飞书 HTTP OpenAPI，不依赖 lark-oapi SDK。
+ * 入站事件由 WebSocket / routes 解析后交给 ChannelService；这里专注把 Agent
+ * 的最终回复发回飞书会话。出站消息使用飞书 SDK，让 token 获取、刷新和
+ * OpenAPI 细节由 SDK 管理。
  */
 export class FeishuChannelAdapter implements ChannelAdapter {
   readonly channel = "feishu";
-  private readonly tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-  constructor(private readonly bindingService: FeishuBindingService = defaultFeishuBindingService) {}
+  constructor(
+    private readonly bindingService: FeishuBindingService = defaultFeishuBindingService,
+    private readonly clientFactory: FeishuMessageClientFactory = createDefaultMessageClient,
+    private readonly database: Database = getDb(),
+  ) {}
 
   async deliver(output: ChannelMessageOutput): Promise<void> {
     const appId = getStringMetadata(output.metadata, "appId");
@@ -44,40 +111,48 @@ export class FeishuChannelAdapter implements ChannelAdapter {
       throw new Error("Feishu chatId 不能为空");
     }
 
-    const token = await this.getTenantAccessToken(binding);
-    const baseUrl = getOpenBaseUrl(binding.domain);
-    const url = replyToMessageId
-      ? `${baseUrl}/open-apis/im/v1/messages/${encodeURIComponent(replyToMessageId)}/reply`
-      : `${baseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
-    const body = replyToMessageId
-      ? {
-          msg_type: "text",
-          content: JSON.stringify({ text: output.text }),
-        }
-      : {
-          receive_id: chatId,
-          msg_type: "text",
-          content: JSON.stringify({ text: output.text }),
-        };
+    const messagePayload = getMessagePayload(output);
+    const client = this.clientFactory(binding);
+    let response: FeishuSdkResponse;
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({})) as { code?: number; msg?: string };
-    if (!response.ok || payload.code !== 0) {
-      const message = payload.msg || `HTTP ${response.status}`;
+    try {
+      response = replyToMessageId
+        ? await client.im.v1.message.reply({
+          path: { message_id: replyToMessageId },
+          data: {
+            msg_type: messagePayload.msgType,
+            content: messagePayload.content,
+          },
+        })
+        : await client.im.v1.message.create({
+          params: { receive_id_type: "chat_id" },
+          data: {
+            receive_id: chatId,
+            msg_type: messagePayload.msgType,
+            content: messagePayload.content,
+          },
+        });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       appendEvent({
         agent_id: binding.agentId,
         task_id: output.taskId,
         conversation_id: output.conversationId,
         type: "channel.delivery.failed",
-        payload: { channel: "feishu", appId: binding.appId, chatId, error: message },
-      });
+        payload: { channel: "feishu", appId: binding.appId, chatId, replyToMessageId, messageType: messagePayload.msgType, error: message },
+      }, this.database);
+      throw new Error(`Feishu delivery failed: ${message}`, { cause: error });
+    }
+
+    if (response.code !== undefined && response.code !== 0) {
+      const message = response.msg || `SDK code ${response.code}`;
+      appendEvent({
+        agent_id: binding.agentId,
+        task_id: output.taskId,
+        conversation_id: output.conversationId,
+        type: "channel.delivery.failed",
+        payload: { channel: "feishu", appId: binding.appId, chatId, replyToMessageId, messageType: messagePayload.msgType, error: message },
+      }, this.database);
       throw new Error(`Feishu delivery failed: ${message}`);
     }
 
@@ -86,28 +161,14 @@ export class FeishuChannelAdapter implements ChannelAdapter {
       task_id: output.taskId,
       conversation_id: output.conversationId,
       type: "channel.delivery.completed",
-      payload: { channel: "feishu", appId: binding.appId, chatId, replyToMessageId },
-    });
-  }
-
-  private async getTenantAccessToken(binding: FeishuBinding): Promise<string> {
-    const cached = this.tokenCache.get(binding.appId);
-    if (cached && cached.expiresAt > Date.now() + 60_000) {
-      return cached.token;
-    }
-
-    const response = await fetch(`${getOpenBaseUrl(binding.domain)}/open-apis/auth/v3/tenant_access_token/internal`, {
-      method: "POST",
-      headers: { "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ app_id: binding.appId, app_secret: binding.appSecret }),
-    });
-    const payload = await response.json().catch(() => ({})) as TenantTokenResponse;
-    if (!response.ok || payload.code !== 0 || !payload.tenant_access_token) {
-      throw new Error(`Feishu token failed: ${payload.msg || `HTTP ${response.status}`}`);
-    }
-
-    const expiresAt = Date.now() + Math.max((payload.expire ?? 7200) - 120, 60) * 1000;
-    this.tokenCache.set(binding.appId, { token: payload.tenant_access_token, expiresAt });
-    return payload.tenant_access_token;
+      payload: {
+        channel: "feishu",
+        appId: binding.appId,
+        chatId,
+        replyToMessageId,
+        messageId: response.data?.message_id,
+        messageType: messagePayload.msgType,
+      },
+    }, this.database);
   }
 }

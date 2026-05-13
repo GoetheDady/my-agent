@@ -151,6 +151,8 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/tools/registry.test.ts`：覆盖工具注册、查询和工具集构建。
 - `src/tools/policy.ts`：工具权限策略。决定哪些工具可直接执行，哪些需要审批。
 - `src/tools/policy.test.ts`：覆盖工具权限、路径白名单和 allowlist 规则。
+- `src/tools/approval-service.ts`：ApprovalService。持久化工具审批记录，写入审批事件，并在用户选择“记住此选择”时把具体路径写入目标 Agent 的 `agent.json`。
+- `src/tools/approval-service.test.ts`：覆盖审批创建、幂等、批准、拒绝和路径记住逻辑。
 - `src/tools/executor.ts`：文件工具执行和路径安全工具。
 - `src/tools/executor.test.ts`：覆盖文件路径安全和 `agent.json` 写保护。
 - `src/tools/builtin-tools.ts`：内置工具注册，包括文件工具和记忆工具外壳。
@@ -210,7 +212,8 @@ Tool 是暴露给 Agent 调用的外壳；Service 才承载业务规则。工具
 - `src/routes/runtime.ts`：运行时 API。提供 Agent 状态、任务队列和事件流。
 - `src/routes/runtime.test.ts`：覆盖 runtime 状态和事件接口。
 - `src/routes/sessions.ts`：会话 API。提供会话列表、会话消息、创建和删除会话。
-- `src/routes/tools.ts`：工具 API。提供工具白名单授权接口。
+- `src/routes/tools.ts`：工具 API。提供按 Agent 生效的工具权限摘要、审批记录、审批批准/拒绝、toolset 开关、requiresApproval 和 allowedPaths 配置入口。旧 `/api/tools/whitelist` 仅保留兼容，最终仍写目标 Agent 的 `agent.json`，不再写全局 `config.json`。
+- `src/routes/tools.test.ts`：覆盖工具权限 API、审批 API 和旧 whitelist 兼容入口。
 - `src/routes/agents.ts`：Agent API。提供 Agent 创建、列表、读取、运行元信息更新，以及 `agent.json` 的读取、局部更新和重置入口。
 - `src/routes/agents.test.ts`：覆盖 Agent 创建、列表、配置读取和配置更新 API。
 - `src/routes/skills.ts`：Skill API。创建和启停 skill 时只写 `SKILL.md` 正文与 `agent.json` 元数据。
@@ -336,7 +339,7 @@ web/
 - `web/src/pages/ArchitecturePage.tsx`：架构页面。用工程控制台方式展示系统架构和输入到回复流程。
 - `web/src/pages/EventsPage.tsx`：事件页面。展示 runtime events。
 - `web/src/pages/TasksPage.tsx`：任务页面。展示任务队列和执行历史。
-- `web/src/pages/ToolsPage.tsx`：工具页面。展示工具分类、权限和可用状态。
+- `web/src/pages/ToolsPage.tsx`：工具页面。按当前 Agent 展示 toolset、工具审批策略、路径白名单和最近审批记录，并通过 `AgentConfigService` 后端接口更新配置。
 - `web/src/pages/AgentsPage.tsx`：Agent 页面。展示 Agent 状态，并为后续多 Agent 管理 UI 预留。
 - `web/src/pages/ChannelsPage.tsx`：渠道页面。展示 Web / 飞书 / 微信状态；飞书支持扫码创建机器人、手动绑定、启停和删除绑定。
 - `web/src/pages/SettingsPage.tsx`：设置页面。为模型、记忆策略、工具权限和 Agent 配置预留。

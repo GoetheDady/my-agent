@@ -7,6 +7,7 @@ import chatRoutes from "./routes/chat";
 import { createSessionRoutes } from "./routes/sessions";
 import { createAgentRoutes } from "./routes/agents";
 import { createChannelRoutes } from "./routes/channels";
+import { createDelegationRoutes } from "./routes/delegations";
 import { startFeishuWebSocketService } from "./channels/feishu-websocket-service";
 import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
@@ -14,6 +15,8 @@ import skillRoutes from "./routes/skills";
 import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
 import { startDreamScheduler } from "./memory/dream-scheduler";
+import { defaultRealtimeService } from "./realtime/service";
+import type { RealtimeSocketData } from "./realtime/types";
 
 /**
  * 后端启动顺序：
@@ -35,6 +38,7 @@ app.use("*", cors());
 app.route("/api/chat", chatRoutes);
 app.route("/api/agents", createAgentRoutes());
 app.route("/api/channels", createChannelRoutes());
+app.route("/api/delegations", createDelegationRoutes());
 app.route("/api/sessions", createSessionRoutes());
 app.route("/api/memories", memoryRoutes);
 app.route("/api/memory", memoryRoutes);
@@ -96,10 +100,32 @@ app.onError((err, c) => {
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
-Bun.serve({
+Bun.serve<RealtimeSocketData>({
   port: PORT,
   idleTimeout: 120,
-  fetch: app.fetch,
+  fetch: (request, server) => {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/ws") {
+      const upgraded = server.upgrade(request, {
+        data: defaultRealtimeService.createSocketData(),
+      });
+      return upgraded
+        ? undefined
+        : new Response("WebSocket upgrade failed", { status: 400 });
+    }
+    return app.fetch(request);
+  },
+  websocket: {
+    open(socket) {
+      defaultRealtimeService.addSocket(socket);
+    },
+    message(socket, message) {
+      defaultRealtimeService.handleMessage(socket, message);
+    },
+    close(socket) {
+      defaultRealtimeService.removeSocket(socket);
+    },
+  },
 });
 
 console.log(`[server] 服务已启动: http://localhost:${PORT}`);

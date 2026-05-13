@@ -3,6 +3,7 @@ import MarkdownContent from "./MarkdownContent";
 import { Brain, CheckCircle2, ChevronDown, Clock3, Wrench, XCircle } from "lucide-react";
 import { ToolApprovalCard } from "./ToolApprovalCard";
 import { getNormalizedToolPart } from "../../lib/toolPart";
+import type { ToolApprovalSummary } from "../../types";
 
 interface MessagePart {
   type: string;
@@ -27,10 +28,18 @@ export default function MessageBubble({
   message,
   handleApprove,
   handleDeny,
+  approvals,
+  approvalLoading,
+  approvalErrors,
+  registerApproval,
 }: {
   message: AIMessage;
-  handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
-  handleDeny?: (toolCallId: string) => void;
+  handleApprove?: (toolCallId: string, rememberChoice: boolean) => Promise<void> | void;
+  handleDeny?: (toolCallId: string) => Promise<void> | void;
+  approvals?: Record<string, ToolApprovalSummary>;
+  approvalLoading?: Record<string, boolean>;
+  approvalErrors?: Record<string, string | null>;
+  registerApproval?: (input: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
 }) {
   const isUser = message.role === "user";
 
@@ -56,16 +65,25 @@ export default function MessageBubble({
 
           // 检测工具审批请求
           if (tool?.state === 'approval-requested') {
+            const approvalId = tool.approvalId ?? tool.toolCallId ?? "";
             return (
               <ToolApprovalCard
-                key={`approval-${tool.approvalId ?? tool.toolCallId ?? i}`}
+                key={`approval-${approvalId || i}`}
                 toolName={tool.toolName}
                 args={tool.args}
-                toolCallId={tool.approvalId ?? tool.toolCallId ?? ""}
+                toolCallId={approvalId}
+                approval={approvals?.[approvalId]}
+                loading={approvalLoading?.[approvalId]}
+                error={approvalErrors?.[approvalId]}
+                onRegister={() => registerApproval?.({
+                  toolCallId: approvalId,
+                  toolName: tool.toolName,
+                  args: tool.args,
+                })}
                 onApprove={(rememberChoice) =>
-                  handleApprove?.(tool.approvalId ?? tool.toolCallId ?? "", rememberChoice)
+                  handleApprove?.(approvalId, rememberChoice)
                 }
-                onDeny={() => handleDeny?.(tool.approvalId ?? tool.toolCallId ?? "")}
+                onDeny={() => handleDeny?.(approvalId)}
               />
             );
           }

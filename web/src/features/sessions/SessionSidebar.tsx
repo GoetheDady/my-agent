@@ -43,8 +43,6 @@ export default function SessionSidebar({ selectedAgentId, onLoadSession, onNewSe
     error,
     fetchRuntimeSnapshot,
     cancelTask,
-    startPolling,
-    stopPolling,
   } = useRuntimeStore();
   const currentTask = getCurrentTask(agent, tasks);
   const queuedTasks = getQueuedTasks(tasks);
@@ -54,9 +52,8 @@ export default function SessionSidebar({ selectedAgentId, onLoadSession, onNewSe
   }, [fetchSessions]);
 
   useEffect(() => {
-    startPolling(2500, selectedAgentId);
-    return () => stopPolling();
-  }, [selectedAgentId, startPolling, stopPolling]);
+    void fetchRuntimeSnapshot(selectedAgentId);
+  }, [fetchRuntimeSnapshot, selectedAgentId]);
 
   async function handleNew() {
     onNewSession();

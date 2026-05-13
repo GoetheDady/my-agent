@@ -1,15 +1,44 @@
 import { tool } from "ai";
 import { z } from "zod";
+import type { PublicDelegation } from "../delegations/types";
 import { defaultAgentService, type AgentService } from "./service";
 import type { AgentServiceContext } from "./service";
 
+interface AgentDelegationService {
+  delegateTask(input: {
+    parentAgentId: string;
+    parentTaskId: string;
+    parentSessionId?: string | null;
+    parentConversationId?: string | null;
+    sourceChannel: string;
+    sourceUserId: string;
+    sourceMetadata?: Record<string, unknown>;
+    targetAgentId: string;
+    instruction: string;
+    reason?: string;
+  }): PublicDelegation;
+}
+
 export interface AgentToolContext extends AgentServiceContext {
   agentId?: string;
+  taskId?: string | null;
+  conversationId?: string | null;
+  sessionId?: string | null;
+  sourceChannel?: string | null;
+  sourceUserId?: string | null;
+  sourceMetadata?: Record<string, unknown>;
   agentService?: AgentService;
+  delegationService?: AgentDelegationService;
 }
 
 function getService(context: AgentToolContext): AgentService {
   return context.agentService ?? defaultAgentService;
+}
+
+async function getDelegationService(context: AgentToolContext): Promise<AgentDelegationService> {
+  if (context.delegationService) return context.delegationService;
+  const { defaultDelegationService } = await import("../delegations/service");
+  return defaultDelegationService;
 }
 
 const agentListSchema = z.object({});
@@ -27,6 +56,12 @@ const agentCreateSchema = z.object({
     provider: z.string().optional(),
     model: z.string().optional(),
   }).optional(),
+});
+
+const agentDelegateSchema = z.object({
+  targetAgentId: z.string().min(1),
+  instruction: z.string().min(1),
+  reason: z.string().optional(),
 });
 
 function summarizeAgent(result: ReturnType<AgentService["getAgent"]>) {
@@ -85,6 +120,42 @@ export function createAgentTools(context: AgentToolContext = {}) {
           return {
             success: false,
             error: error instanceof Error ? error.message : "agent_create_failed",
+          };
+        }
+      },
+    }),
+    agent_delegate: tool({
+      description: "把一个明确子任务异步委派给另一个已存在的 Agent。调用后立即返回 delegationId，不等待目标 Agent 完成；目标 Agent 完成后会由当前 Agent 整理结果并通知用户。",
+      inputSchema: agentDelegateSchema,
+      execute: async (input: z.infer<typeof agentDelegateSchema>) => {
+        try {
+          const delegationService = await getDelegationService(context);
+          if (!context.taskId) {
+            return { success: false, error: "当前运行上下文缺少 taskId，不能委派任务" };
+          }
+          const delegation = delegationService.delegateTask({
+            parentAgentId: context.agentId ?? "default",
+            parentTaskId: context.taskId,
+            parentSessionId: context.sessionId,
+            parentConversationId: context.conversationId,
+            sourceChannel: context.sourceChannel ?? "web",
+            sourceUserId: context.sourceUserId ?? "default",
+            sourceMetadata: context.sourceMetadata,
+            targetAgentId: input.targetAgentId,
+            instruction: input.instruction,
+            reason: input.reason,
+          });
+          return {
+            success: true,
+            delegationId: delegation.id,
+            childTaskId: delegation.childTaskId,
+            status: delegation.status,
+            message: "已派发给目标 Agent，完成后会回到原会话通知用户。",
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : "agent_delegate_failed",
           };
         }
       },

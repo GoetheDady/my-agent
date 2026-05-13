@@ -22,7 +22,10 @@ export interface ChannelMessageOutput {
   conversationId: string;
   text: string;
   taskId?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & {
+    messageType?: "text" | "post" | "interactive";
+    card?: Record<string, unknown>;
+  };
 }
 
 export interface ChannelAdapter {

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
+import { defaultRealtimeService } from "../realtime/service";
 import { getTask } from "./task-store";
 import type { TaskRecord } from "./task-types";
 
@@ -47,6 +48,56 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
     }
 
     // 队列顺序：priority 高的优先；同优先级下创建更早的先执行。
+    return claimQueuedTask(nextTask, database);
+  });
+
+  return claim();
+}
+
+/**
+ * 为指定 Agent 领取下一条来自指定渠道的任务。
+ *
+ * 外部渠道（例如飞书）需要后台队列自动续跑，但 Web task 依赖 HTTP stream，
+ * 不能被外部渠道 runner 误领取，所以这里额外限制 source_channel。
+ *
+ * @param agentId 要领取任务的 Agent 标识。
+ * @param sourceChannels 允许领取的渠道列表。
+ * @param database 可选数据库连接。
+ * @returns 成功领取时返回任务记录；Agent 忙、无任务或渠道列表为空时返回 `null`。
+ */
+export function claimNextTaskForChannels(
+  agentId: string,
+  sourceChannels: string[],
+  database: Database = getDb(),
+): TaskRecord | null {
+  if (sourceChannels.length === 0) return null;
+
+  const claim = database.transaction(() => {
+    const agent = getAgent(agentId, database);
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentId}`);
+    }
+
+    if (agent.status === "running") {
+      return null;
+    }
+
+    const placeholders = sourceChannels.map(() => "?").join(", ");
+    const nextTask = database
+      .query<TaskRecord, [string, ...string[]]>(
+        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
+                priority, input, result, error, created_at, started_at, completed_at
+         FROM tasks
+         WHERE agent_id = ? AND status = 'queued' AND source_channel IN (${placeholders})
+         ORDER BY priority DESC, created_at ASC
+         LIMIT 1`,
+      )
+      .get(agentId, ...sourceChannels) ?? null;
+
+    if (!nextTask) {
+      return null;
+    }
+
     return claimQueuedTask(nextTask, database);
   });
 
@@ -104,5 +155,12 @@ function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
   if (!claimed) {
     throw new Error(`Task not found after claim: ${task.id}`);
   }
+  defaultRealtimeService.broadcast({
+    type: "runtime.task.updated",
+    agentId: claimed.agent_id,
+    taskId: claimed.id,
+    payload: { task: claimed },
+    createdAt: Date.now(),
+  });
   return claimed;
 }

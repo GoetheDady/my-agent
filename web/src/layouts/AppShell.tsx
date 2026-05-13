@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import {
   Bot,
@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import MemoryPanel from "../features/memory/MemoryPanel";
+import { useAgentStore } from "../store/agentStore";
+import { useChatStore } from "../store/chatStore";
+import { buildCurrentRealtimeSubscription, useRealtimeStore } from "../store/realtimeStore";
 import {
   AGENTS_PATH,
   ARCHITECTURE_PATH,
@@ -69,10 +72,24 @@ const pageMeta: Record<string, { title: string; description: string }> = {
 export default function AppShell() {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const location = useLocation();
+  const realtimeStatus = useRealtimeStore((s) => s.status);
+  const realtimeError = useRealtimeStore((s) => s.error);
+  const connectRealtime = useRealtimeStore((s) => s.connect);
+  const subscribeRealtime = useRealtimeStore((s) => s.subscribe);
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
+  const sessionId = useChatStore((s) => s.sessionId);
   const meta = useMemo(() => {
     if (location.pathname.startsWith("/sessions/")) return pageMeta["/"];
     return pageMeta[location.pathname] ?? pageMeta["/"];
   }, [location.pathname]);
+
+  useEffect(() => {
+    connectRealtime();
+  }, [connectRealtime]);
+
+  useEffect(() => {
+    subscribeRealtime(buildCurrentRealtimeSubscription());
+  }, [selectedAgentId, sessionId, subscribeRealtime]);
 
   return (
     <div className="flex h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -106,6 +123,18 @@ export default function AppShell() {
             <Brain size={16} />
             快速记忆
           </button>
+          <div
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              realtimeStatus === "connected"
+                ? "bg-emerald-50 text-emerald-700"
+                : realtimeStatus === "connecting"
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
+            }`}
+            title={realtimeError ?? "WebSocket 实时连接状态"}
+          >
+            {realtimeStatus === "connected" ? "实时已连接" : realtimeStatus === "connecting" ? "实时连接中" : "实时离线"}
+          </div>
           <NavLink
             to={SETTINGS_PATH}
             className={({ isActive }) => `flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${

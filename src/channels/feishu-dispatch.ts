@@ -5,6 +5,8 @@ import { defaultChannelService, type ChannelService } from "./service";
 import { runExternalChannelTask } from "./external-runner";
 import type { FeishuInboundMessage } from "./feishu-events";
 import type { ChannelReceiveResult } from "./types";
+import { maybeHandleFeishuApprovalCommand } from "./feishu-approval";
+import { defaultApprovalService, type ApprovalService } from "../tools/approval-service";
 
 export type ExternalChannelRunner = (input: {
   received: ChannelReceiveResult;
@@ -18,18 +20,43 @@ export type ExternalChannelRunner = (input: {
  *
  * Webhook 和 WebSocket 都复用这里，避免两个入口各自拼 conversation/task/event。
  */
-export function dispatchFeishuMessage(
+export async function dispatchFeishuMessage(
   message: FeishuInboundMessage,
   options: {
     database?: Database;
-    channelService?: ChannelService;
-    externalChannelRunner?: ExternalChannelRunner;
+  channelService?: ChannelService;
+  externalChannelRunner?: ExternalChannelRunner;
+  approvalService?: ApprovalService;
   } = {},
-): ChannelReceiveResult {
+): Promise<ChannelReceiveResult | null> {
   const database = options.database ?? getDb();
   const channelService = options.channelService ?? defaultChannelService;
   const externalChannelRunner = options.externalChannelRunner ?? runExternalChannelTask;
+  const approvalService = options.approvalService ?? defaultApprovalService;
   const externalConversationId = `${message.appId}:${message.chatId}`;
+
+  const handledApprovalCommand = await maybeHandleFeishuApprovalCommand(message, {
+    database,
+    approvalService,
+    channelService,
+  }).catch((error) => {
+    appendEvent({
+      agent_id: message.binding.agentId,
+      type: "tool.approval.failed",
+      payload: {
+        channel: "feishu",
+        appId: message.appId,
+        chatId: message.chatId,
+        messageId: message.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }, database);
+    return true;
+  });
+  if (handledApprovalCommand) {
+    return null;
+  }
+
   const received = channelService.receiveMessage({
     channel: "feishu",
     externalConversationId,
@@ -54,6 +81,10 @@ export function dispatchFeishuMessage(
       appId: message.appId,
       chatId: message.chatId,
       messageId: message.messageId,
+      chatType: message.chatType,
+      rawEventType: message.rawEventType,
+      externalConversationId,
+      externalUserId: message.senderId,
     },
   }, database);
 

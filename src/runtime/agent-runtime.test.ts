@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent, getAgent, updateAgentStatus } from "../agents/agent-registry";
-import { AgentBusyError, runAgentTask } from "./agent-runtime";
+import { AgentBusyError, runAgentTask, toModelMessages } from "./agent-runtime";
 import { initializeDatabaseSchema } from "../core/database";
 import { listTaskEvents } from "../events/event-log";
 import { createTask, getTask } from "../tasks/task-store";
@@ -163,5 +163,26 @@ describe("agent runtime", () => {
       });
       expect(listTaskEvents(task.id, db)).toEqual([]);
     });
+  });
+
+  test("filters synthetic memory worker tool parts before converting history to model messages", async () => {
+    const messages = await toModelMessages([
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "我记下了。" },
+          {
+            type: "tool-memory_extract",
+            toolCallId: "memory_extract-1",
+            state: "input-available",
+            input: { assistantMessageId: "message-1" },
+          },
+        ],
+      },
+    ]);
+
+    const serialized = JSON.stringify(messages);
+    expect(serialized).toContain("我记下了。");
+    expect(serialized).not.toContain("memory_extract-1");
   });
 });

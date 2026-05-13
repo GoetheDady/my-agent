@@ -9,6 +9,7 @@ import {
   listTasks,
   markTaskCompleted,
   markTaskFailed,
+  recoverRunningTasks,
 } from "./task-store";
 
 function withTaskDb<T>(run: (db: Database) => T): T {
@@ -175,6 +176,24 @@ describe("task queue", () => {
       claimNextTask("default", db);
 
       expect(listTasks("default", ["queued"], db).map((task) => task.id)).toEqual(["running"]);
+    });
+  });
+
+  test("recoverRunningTasks fails stale running task and releases agent", () => {
+    withTaskDb((db) => {
+      createTask({ id: "stale", source_channel: "feishu", input: "stale" }, db);
+      claimNextTask("default", db);
+
+      expect(recoverRunningTasks(db)).toBe(1);
+
+      expect(getTask("stale", db)).toMatchObject({
+        status: "failed",
+        error: "Recovered stale running task after service restart",
+      });
+      expect(getAgent("default", db)).toMatchObject({
+        status: "idle",
+        current_task_id: null,
+      });
     });
   });
 });

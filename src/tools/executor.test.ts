@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isAgentConfigPath, writeFile } from "./executor";
+import { isAgentConfigPath, readFile, searchFiles, writeFile } from "./executor";
 import { getProjectRoot } from "../core/config";
 
 describe("tool executor", () => {
@@ -27,5 +27,19 @@ describe("tool executor", () => {
     } finally {
       rmSync(join(projectRoot, "data", "agents", "executor-test"), { recursive: true, force: true });
     }
+  });
+
+  test("read_file can read project files without write allowlist", () => {
+    const result = readFile("README.md");
+
+    expect(result.success).toBe(true);
+    expect(result.data?.content).toContain("my-agent");
+  });
+
+  test("search_files finds project files by path fragment", () => {
+    const result = searchFiles({ query: "delegations", root: "src", limit: 20 });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.matches.some((match) => match.path === "src/delegations/service.ts")).toBe(true);
   });
 });

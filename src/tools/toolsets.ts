@@ -24,8 +24,8 @@ export const TOOLSETS: ToolsetDefinition[] = [
   },
   {
     name: "file",
-    description: "项目内文件读取和写入工具。",
-    tools: ["read_file", "write_file"],
+    description: "项目内文件查找、读取和写入工具。",
+    tools: ["search_files", "read_file", "write_file"],
   },
   {
     name: "runtime",

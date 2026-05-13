@@ -36,8 +36,9 @@ describe("FeishuWebSocketService", () => {
       channelService,
       externalChannelRunner: async () => undefined,
       clientFactory: () => ({
-        async start(params: { eventDispatcher: { handles?: Map<string, (data: unknown) => Promise<void>> } }) {
-          eventHandler = params.eventDispatcher.handles?.get("im.message.receive_v1");
+        async start(params: { eventDispatcher: { handles?: Record<string, (data: unknown) => Promise<void>> | Map<string, (data: unknown) => Promise<void>> } }) {
+          const handles = params.eventDispatcher.handles;
+          eventHandler = handles instanceof Map ? handles.get("im.message.receive_v1") : handles?.["im.message.receive_v1"];
         },
         close() {},
       }),
@@ -71,6 +72,38 @@ describe("FeishuWebSocketService", () => {
         source_user_id: "ou_user",
         input: "hello via ws",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("registers card action callback handler", async () => {
+    const db = createDb();
+    const configService = new AgentConfigService({ rootDir: `/tmp/my-agent-feishu-ws-card-${crypto.randomUUID()}` });
+    const bindingService = new FeishuBindingService(configService);
+    bindingService.upsertBinding({ appId: "cli_test", appSecret: "secret", agentId: "default" });
+    let cardHandler: ((data: unknown) => Promise<void>) | undefined;
+    const channelService = new ChannelService({
+      database: db,
+      adapters: [new WebChannelAdapter(), new FeishuChannelAdapter(bindingService), new WeChatChannelAdapter()],
+    });
+    const service = new FeishuWebSocketService({
+      database: db,
+      bindingService,
+      channelService,
+      externalChannelRunner: async () => undefined,
+      clientFactory: () => ({
+        async start(params: { eventDispatcher: { handles?: Record<string, (data: unknown) => Promise<void>> | Map<string, (data: unknown) => Promise<void>> } }) {
+          const handles = params.eventDispatcher.handles;
+          cardHandler = handles instanceof Map ? handles.get("card.action.trigger") : handles?.["card.action.trigger"];
+        },
+        close() {},
+      }),
+    });
+
+    try {
+      await service.startAll();
+      expect(cardHandler).toBeTypeOf("function");
     } finally {
       db.close();
     }

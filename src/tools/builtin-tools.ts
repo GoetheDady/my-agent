@@ -1,6 +1,7 @@
 import { tool } from 'ai';
+import type { Tool } from 'ai';
 import { z } from 'zod';
-import { readFile, writeFile, isInputPathAllowlisted } from './executor';
+import { readFile, writeFile, searchFiles, isInputPathAllowlisted } from './executor';
 import { defaultAgentConfigService } from '../agents/config-service';
 import { createAgentConfigTools } from '../agents/config-tools';
 import { createAgentTools } from '../agents/tools';
@@ -10,8 +11,63 @@ import { createSkillTools } from '../skills';
 import { evaluateToolPolicy } from './policy';
 import { buildAiToolSet, registerTool } from './registry';
 
+interface ToolRuntimeContext {
+  approvedWritePaths?: string[];
+}
+
+function getApprovedWritePaths(context: unknown): string[] {
+  const runtimeContext = context as ToolRuntimeContext | undefined;
+  return Array.isArray(runtimeContext?.approvedWritePaths)
+    ? runtimeContext.approvedWritePaths.filter((path): path is string => typeof path === 'string')
+    : [];
+}
+
+const toolsetByName = new Map<string, string>([
+  ['search_files', 'file'],
+  ['read_file', 'file'],
+  ['write_file', 'file'],
+  ['memory_search', 'memory'],
+  ['memory_get', 'memory'],
+  ['memory_update', 'memory'],
+  ['memory_forget', 'memory'],
+  ['memory_recall', 'memory'],
+  ['memory_evidence', 'memory'],
+  ['memory_remember', 'memory'],
+  ['memory_plan', 'memory'],
+  ['memory_reflect', 'memory'],
+  ['skill_list', 'skill'],
+  ['skill_view', 'skill'],
+  ['skill_create', 'skill'],
+  ['skill_enable', 'skill'],
+  ['skill_disable', 'skill'],
+  ['agent_list', 'agent_config'],
+  ['agent_get', 'agent_config'],
+  ['agent_create', 'agent_config'],
+  ['agent_delegate', 'agent_config'],
+  ['agent_config_get', 'agent_config'],
+  ['agent_config_patch', 'agent_config'],
+  ['agent_config_reset', 'agent_config'],
+]);
+
+const writeToolNames = new Set([
+  'write_file',
+  'skill_create',
+  'skill_enable',
+  'skill_disable',
+  'agent_create',
+  'agent_delegate',
+  'agent_config_patch',
+  'agent_config_reset',
+]);
+
 const readFileSchema = z.object({
   path: z.string().describe('文件路径（相对或绝对）'),
+});
+
+const searchFilesSchema = z.object({
+  query: z.string().describe('文件名或路径片段，例如 "delegation"、"service.ts"、"agent-runtime"'),
+  root: z.string().optional().describe('可选搜索根目录，默认项目根目录，例如 "src"'),
+  limit: z.number().int().min(1).max(200).optional().describe('最多返回多少条结果，默认 50，最大 200'),
 });
 
 const writeFileSchema = z.object({
@@ -29,20 +85,48 @@ const readFileTool = tool({
     },
   });
 
-const writeFileTool = tool({
+const searchFilesTool = tool({
+    description: '按文件名或路径片段搜索项目内文件；不知道精确路径时先用它找文件，再用 read_file 读取内容',
+    inputSchema: searchFilesSchema,
+    needsApproval: async () => evaluateToolPolicy({ toolName: 'search_files' }).requiresApproval,
+    execute: async (params: z.infer<typeof searchFilesSchema>) => {
+      return searchFiles(params);
+    },
+  });
+
+function createWriteFileTool(agentId = 'default') {
+  return tool({
     description: '写入内容到指定文件',
     inputSchema: writeFileSchema,
     needsApproval: async (params: z.infer<typeof writeFileSchema>) => {
       return evaluateToolPolicy({
         toolName: 'write_file',
         operation: 'write',
-        allowlisted: isInputPathAllowlisted(params.path),
+        allowlisted: isInputPathAllowlisted(params.path, agentId),
+        agentId,
       }).requiresApproval;
     },
-    execute: async (params: z.infer<typeof writeFileSchema>) => {
-      return writeFile(params.path, params.content, params.mode);
+    execute: async (params: z.infer<typeof writeFileSchema>, options) => {
+      const approvedPath = getApprovedWritePaths(options.experimental_context)
+        .find((path) => path === params.path);
+      return writeFile(params.path, params.content, params.mode, agentId, { approvedPath });
     },
   });
+}
+
+const writeFileTool = createWriteFileTool();
+
+function withConfiguredApproval(toolName: string, baseTool: Tool, agentId: string): Tool {
+  if (!writeToolNames.has(toolName) || toolName === 'write_file') return baseTool;
+  return {
+    ...baseTool,
+    needsApproval: async () => evaluateToolPolicy({
+      toolName,
+      operation: 'write',
+      agentId,
+    }).requiresApproval,
+  };
+}
 
 /**
  * 工具注册分两层：
@@ -51,6 +135,12 @@ const writeFileTool = tool({
  *
  * 记忆工具必须用 buildAgentTools(context) 创建，因为它们写事件时需要 taskId/conversationId。
  */
+registerTool({
+  name: 'search_files',
+  tool: searchFilesTool,
+  toolset: 'file',
+  category: 'read',
+});
 registerTool({
   name: 'read_file',
   tool: readFileTool,
@@ -173,6 +263,12 @@ registerTool({
   category: 'write',
 });
 registerTool({
+  name: 'agent_delegate',
+  tool: agentTools.agent_delegate,
+  toolset: 'agent_config',
+  category: 'write',
+});
+registerTool({
   name: 'agent_config_get',
   tool: agentConfigTools.agent_config_get,
   toolset: 'agent_config',
@@ -207,40 +303,19 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
   const agentId = context.agentId ?? 'default';
   const enabledToolsets = new Set(defaultAgentConfigService.getAgentConfig(agentId, context).tools.enabledToolsets);
   const allTools = {
+    search_files: searchFilesTool,
     read_file: readFileTool,
-    write_file: writeFileTool,
+    write_file: createWriteFileTool(agentId),
     ...createMemoryTools(context),
     ...createHumanMemoryTools(context),
     ...createSkillTools(context),
     ...createAgentTools(context),
     ...createAgentConfigTools(context),
   };
-  const toolsetByName = new Map([
-    ['read_file', 'file'],
-    ['write_file', 'file'],
-    ['memory_search', 'memory'],
-    ['memory_get', 'memory'],
-    ['memory_update', 'memory'],
-    ['memory_forget', 'memory'],
-    ['memory_recall', 'memory'],
-    ['memory_evidence', 'memory'],
-    ['memory_remember', 'memory'],
-    ['memory_plan', 'memory'],
-    ['memory_reflect', 'memory'],
-    ['skill_list', 'skill'],
-    ['skill_view', 'skill'],
-    ['skill_create', 'skill'],
-    ['skill_enable', 'skill'],
-    ['skill_disable', 'skill'],
-    ['agent_list', 'agent_config'],
-    ['agent_get', 'agent_config'],
-    ['agent_create', 'agent_config'],
-    ['agent_config_get', 'agent_config'],
-    ['agent_config_patch', 'agent_config'],
-    ['agent_config_reset', 'agent_config'],
-  ]);
 
   return Object.fromEntries(
-    Object.entries(allTools).filter(([toolName]) => enabledToolsets.has(toolsetByName.get(toolName) ?? 'core')),
+    Object.entries(allTools)
+      .filter(([toolName]) => enabledToolsets.has(toolsetByName.get(toolName) ?? 'core'))
+      .map(([toolName, builtTool]) => [toolName, withConfiguredApproval(toolName, builtTool, agentId)]),
   );
 }

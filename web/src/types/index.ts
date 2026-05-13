@@ -102,3 +102,69 @@ export interface FeishuOnboardingState {
   error?: string;
   binding?: FeishuBindingSummary;
 }
+
+export type ToolRiskLevel = "low" | "medium" | "high";
+export type ToolApprovalStatus = "pending" | "approved" | "denied" | "expired";
+
+export interface ToolApprovalSummary {
+  id: string;
+  agentId: string;
+  sessionId: string | null;
+  taskId: string | null;
+  channel: string | null;
+  conversationId: string | null;
+  externalConversationId: string | null;
+  externalUserId: string | null;
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  riskLevel: ToolRiskLevel;
+  reason: string;
+  status: ToolApprovalStatus;
+  rememberChoice: boolean;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
+export interface ToolPolicySummary {
+  enabledToolsets: string[];
+  requiresApproval: string[];
+  allowedPaths: string[];
+}
+
+export interface RegisteredToolSummary {
+  name: string;
+  toolset: string;
+  category: "read" | "write" | "memory_read" | "memory_write";
+  defaultEnabled?: boolean;
+  requiresApproval: boolean;
+}
+
+export interface ToolsetSummary {
+  name: string;
+  description: string;
+  tools: string[];
+  registeredTools: RegisteredToolSummary[];
+}
+
+export type DelegationStatus = "queued" | "completed" | "failed" | "canceled";
+
+export interface DelegationSummary {
+  id: string;
+  parentSessionId: string | null;
+  parentAgentId: string;
+  parentTaskId: string;
+  parentConversationId: string | null;
+  callbackTaskId: string | null;
+  childAgentId: string;
+  childTaskId: string;
+  sourceChannel: string;
+  sourceUserId: string;
+  sourceMetadata: Record<string, unknown>;
+  instruction: string;
+  status: DelegationStatus;
+  result: string | null;
+  error: string | null;
+  createdAt: number;
+  completedAt: number | null;
+}

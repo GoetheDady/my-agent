@@ -10,9 +10,10 @@ import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionPath } from "../lib/sessionRoute";
 import { useAgentStore } from "../store/agentStore";
 import { parseDbContent, useChatStore } from "../store/chatStore";
+import { useRealtimeStore } from "../store/realtimeStore";
 import { useRuntimeStore } from "../store/runtimeStore";
 import { useSessionStore } from "../store/sessionStore";
-import type { Session } from "../types";
+import type { Session, ToolApprovalSummary } from "../types";
 
 type RawSessionMessage = { id: string; role: "user" | "assistant"; content: string };
 type SessionMessagesResponse =
@@ -21,6 +22,9 @@ type SessionMessagesResponse =
 
 export default function ChatPage() {
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
+  const [approvals, setApprovals] = useState<Record<string, ToolApprovalSummary>>({});
+  const [approvalLoading, setApprovalLoading] = useState<Record<string, boolean>>({});
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, string | null>>({});
   const navigate = useNavigate();
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
   const { thinkingEnabled, setSessionId } = useChatStore();
@@ -34,7 +38,7 @@ export default function ChatPage() {
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const fetchRuntimeSnapshot = useRuntimeStore((s) => s.fetchRuntimeSnapshot);
-  const workerPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRealtimeEvent = useRealtimeStore((s) => s.lastEvent);
   const isLoadingRef = useRef(false);
 
   const chatTransport = useMemo(() => new DefaultChatTransport({
@@ -71,12 +75,7 @@ export default function ChatPage() {
     transport: chatTransport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: () => {
-      const currentSessionId = useChatStore.getState().sessionId;
-      if (currentSessionId) {
-        startWorkerMessagePolling(currentSessionId);
-      }
-
-      setTimeout(() => fetchSessions(), 2000);
+      void fetchSessions();
     },
     onError: (error) => {
       console.error("Chat error:", error);
@@ -96,13 +95,6 @@ export default function ChatPage() {
   useEffect(() => {
     void fetchRuntimeSnapshot(selectedAgentId);
   }, [fetchRuntimeSnapshot, selectedAgentId]);
-
-  const stopWorkerMessagePolling = useCallback(() => {
-    if (workerPollTimerRef.current) {
-      clearTimeout(workerPollTimerRef.current);
-      workerPollTimerRef.current = null;
-    }
-  }, []);
 
   const loadSession = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
@@ -134,38 +126,6 @@ export default function ChatPage() {
     }));
   }, []);
 
-  const startWorkerMessagePolling = useCallback((sessionId: string) => {
-    stopWorkerMessagePolling();
-    let attempts = 0;
-    const maxAttempts = 75;
-
-    const poll = async () => {
-      attempts += 1;
-      const activeSessionId = useChatStore.getState().sessionId;
-      if (activeSessionId !== sessionId || isLoadingRef.current) {
-        stopWorkerMessagePolling();
-        return;
-      }
-
-      const uiMessages = await fetchSessionUiMessages(sessionId);
-      if (uiMessages) {
-        setMessages(uiMessages as Parameters<typeof setMessages>[0]);
-        if (hasCompletedMemoryWorkerPart(uiMessages) || attempts >= maxAttempts) {
-          stopWorkerMessagePolling();
-          return;
-        }
-      }
-
-      if (attempts >= maxAttempts) {
-        stopWorkerMessagePolling();
-        return;
-      }
-      workerPollTimerRef.current = setTimeout(poll, 1000);
-    };
-
-    workerPollTimerRef.current = setTimeout(poll, 700);
-  }, [fetchSessionUiMessages, setMessages, stopWorkerMessagePolling]);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -191,12 +151,27 @@ export default function ChatPage() {
 
     return () => {
       cancelled = true;
-      stopWorkerMessagePolling();
     };
-  }, [loadSession, navigate, routeSessionId, setActiveSessionId, setMessages, stopWorkerMessagePolling]);
+  }, [loadSession, navigate, routeSessionId, setActiveSessionId, setMessages]);
+
+  useEffect(() => {
+    if (!lastRealtimeEvent) return;
+    const currentSessionId = useChatStore.getState().sessionId;
+    if (!currentSessionId) return;
+    if (
+      (lastRealtimeEvent.type === "message.created" || lastRealtimeEvent.type === "message.updated") &&
+      lastRealtimeEvent.sessionId === currentSessionId &&
+      !isLoadingRef.current
+    ) {
+      void fetchSessionUiMessages(currentSessionId).then((uiMessages) => {
+        if (!uiMessages) return;
+        if (useChatStore.getState().sessionId !== currentSessionId) return;
+        setMessages(uiMessages as Parameters<typeof setMessages>[0]);
+      });
+    }
+  }, [fetchSessionUiMessages, lastRealtimeEvent, setMessages]);
 
   const handleSend = useCallback(async (text: string) => {
-    stopWorkerMessagePolling();
     const currentSessionId = await sessionResolver.ensureSessionId();
     const boundSession = useSessionStore.getState().sessions.find((session) => session.id === currentSessionId);
     const boundAgentId = boundSession?.agent_id ?? useAgentStore.getState().selectedAgentId;
@@ -210,7 +185,7 @@ export default function ChatPage() {
         },
       },
     );
-  }, [sendMessage, sessionResolver, stopWorkerMessagePolling, thinkingEnabled]);
+  }, [sendMessage, sessionResolver, thinkingEnabled]);
 
   const handleLoadSession = useCallback(async (id: string) => {
     const loaded = await loadSession(id);
@@ -218,17 +193,15 @@ export default function ChatPage() {
   }, [loadSession, navigateToSession]);
 
   const handleNewSession = useCallback(() => {
-    stopWorkerMessagePolling();
     setMessages([]);
     useChatStore.getState().clearSession();
     navigateToNewSession();
-  }, [navigateToNewSession, setMessages, stopWorkerMessagePolling]);
+  }, [navigateToNewSession, setMessages]);
 
   const handleAgentChange = useCallback((agentId: string) => {
     setSelectedAgentId(agentId);
     void fetchRuntimeSnapshot(agentId);
     if (useChatStore.getState().sessionId) {
-      stopWorkerMessagePolling();
       setMessages([]);
       useChatStore.getState().clearSession();
       setActiveSessionId(null);
@@ -240,37 +213,98 @@ export default function ChatPage() {
     setActiveSessionId,
     setMessages,
     setSelectedAgentId,
-    stopWorkerMessagePolling,
   ]);
 
+  const registerApproval = useCallback(async (input: {
+    toolCallId: string;
+    toolName: string;
+    args: Record<string, unknown>;
+  }) => {
+    if (!input.toolCallId || approvals[input.toolCallId] || approvalLoading[input.toolCallId]) return;
+    const sessionId = useChatStore.getState().sessionId;
+    const boundSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId);
+    const agentId = boundSession?.agent_id ?? useAgentStore.getState().selectedAgentId;
+    setApprovalLoading((current) => ({ ...current, [input.toolCallId]: true }));
+    setApprovalErrors((current) => ({ ...current, [input.toolCallId]: null }));
+    try {
+      const res = await fetch("/api/tools/approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agentId,
+          sessionId,
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          args: input.args,
+        }),
+      });
+      const data = await res.json() as { approval?: ToolApprovalSummary; error?: string };
+      if (!res.ok || !data.approval) {
+        throw new Error(data.error ?? "创建工具审批失败");
+      }
+      const approval = data.approval;
+      setApprovals((current) => ({ ...current, [input.toolCallId]: approval }));
+    } catch (error) {
+      setApprovalErrors((current) => ({
+        ...current,
+        [input.toolCallId]: error instanceof Error ? error.message : "创建工具审批失败",
+      }));
+    } finally {
+      setApprovalLoading((current) => ({ ...current, [input.toolCallId]: false }));
+    }
+  }, [approvalLoading, approvals]);
+
   const handleApprove = useCallback(async (toolCallId: string, rememberChoice: boolean) => {
+    const approval = approvals[toolCallId];
+    if (approval) {
+      try {
+        const res = await fetch(`/api/tools/approvals/${encodeURIComponent(approval.id)}/approve`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ rememberChoice }),
+        });
+        const data = await res.json() as { approval?: ToolApprovalSummary; error?: string };
+        if (!res.ok || !data.approval) throw new Error(data.error ?? "批准工具审批失败");
+        const updatedApproval = data.approval;
+        setApprovals((current) => ({ ...current, [toolCallId]: updatedApproval }));
+      } catch (error) {
+        setApprovalErrors((current) => ({
+          ...current,
+          [toolCallId]: error instanceof Error ? error.message : "批准工具审批失败",
+        }));
+        return;
+      }
+    }
     addToolApprovalResponse({
       id: toolCallId,
       approved: true,
     });
+  }, [addToolApprovalResponse, approvals]);
 
-    if (rememberChoice && useChatStore.getState().sessionId) {
+  const handleDeny = useCallback(async (toolCallId: string) => {
+    const approval = approvals[toolCallId];
+    if (approval) {
       try {
-        await fetch("/api/tools/whitelist", {
+        const res = await fetch(`/api/tools/approvals/${encodeURIComponent(approval.id)}/deny`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            toolCallId,
-            sessionId: useChatStore.getState().sessionId,
-          }),
         });
+        const data = await res.json() as { approval?: ToolApprovalSummary; error?: string };
+        if (!res.ok || !data.approval) throw new Error(data.error ?? "拒绝工具审批失败");
+        const updatedApproval = data.approval;
+        setApprovals((current) => ({ ...current, [toolCallId]: updatedApproval }));
       } catch (error) {
-        console.error("Failed to update whitelist:", error);
+        setApprovalErrors((current) => ({
+          ...current,
+          [toolCallId]: error instanceof Error ? error.message : "拒绝工具审批失败",
+        }));
+        return;
       }
     }
-  }, [addToolApprovalResponse]);
-
-  const handleDeny = useCallback((toolCallId: string) => {
     addToolApprovalResponse({
       id: toolCallId,
       approved: false,
     });
-  }, [addToolApprovalResponse]);
+  }, [addToolApprovalResponse, approvals]);
 
   return (
     <main className="flex min-h-0 flex-1 bg-[var(--color-bg)]">
@@ -321,7 +355,15 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        <MessageList messages={messages} handleApprove={handleApprove} handleDeny={handleDeny} />
+        <MessageList
+          messages={messages}
+          handleApprove={handleApprove}
+          handleDeny={handleDeny}
+          approvals={approvals}
+          approvalLoading={approvalLoading}
+          approvalErrors={approvalErrors}
+          registerApproval={registerApproval}
+        />
         <ChatInput
           isLoading={isLoading}
           onSend={handleSend}
@@ -352,16 +394,4 @@ function normalizeSessionMessages(
     };
   }
   return data;
-}
-
-function hasCompletedMemoryWorkerPart(messages: Array<{ role: string; parts: Array<{ type: string; state?: string }> }>): boolean {
-  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  if (!latestAssistant) return false;
-
-  const workerParts = latestAssistant.parts.filter((part) =>
-    part.type === "tool-memory_extract" || part.type === "tool-memory_reconsolidate"
-  );
-  if (workerParts.length === 0) return false;
-
-  return workerParts.every((part) => part.state === "output-available" || part.state === "output-error");
 }

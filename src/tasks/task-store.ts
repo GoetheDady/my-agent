@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
+import { defaultRealtimeService } from "../realtime/service";
 import type { TaskRecord, TaskStatus } from "./task-types";
 
 export interface CreateTaskInput {
@@ -67,6 +68,7 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
       task.completed_at,
     );
 
+  broadcastTaskUpdated(task);
   return task;
 }
 
@@ -126,6 +128,51 @@ export function listTasks(
 }
 
 /**
+ * 计算某个 queued task 在同 Agent 队列中的位置。
+ *
+ * 返回值只计算同一 Agent、同一组渠道、仍处于 queued 的任务；前端或渠道提示
+ * 可以用它告诉用户“前面还有几条任务”。返回 0 表示当前任务已是下一条。
+ *
+ * @param agentId Agent 标识。
+ * @param taskId 目标任务 id。
+ * @param sourceChannels 可选渠道过滤。
+ * @param database 可选数据库连接。
+ * @returns 找不到 queued task 时返回 `null`，否则返回前方任务数量。
+ */
+export function getQueuedTaskPosition(
+  agentId: string,
+  taskId: string,
+  sourceChannels: string[] = [],
+  database: Database = getDb(),
+): number | null {
+  const task = getTask(taskId, database);
+  if (!task || task.agent_id !== agentId || task.status !== "queued") {
+    return null;
+  }
+
+  const channelClause = sourceChannels.length > 0
+    ? ` AND source_channel IN (${sourceChannels.map(() => "?").join(", ")})`
+    : "";
+  const args = sourceChannels.length > 0
+    ? [agentId, task.priority, task.priority, task.created_at, ...sourceChannels] as [string, number, number, number, ...string[]]
+    : [agentId, task.priority, task.priority, task.created_at] as [string, number, number, number];
+  const row = database
+    .query<{ count: number }, typeof args>(
+      `SELECT COUNT(*) AS count
+       FROM tasks
+       WHERE agent_id = ?
+         AND status = 'queued'
+         AND (
+           priority > ? OR
+           (priority = ? AND created_at < ?)
+         )
+         ${channelClause}`,
+    )
+    .get(...args);
+  return row?.count ?? 0;
+}
+
+/**
  * 将任务标记为 running，并同步占用对应 Agent。
  *
  * @param taskId 任务 id。
@@ -144,6 +191,8 @@ export function markTaskRunning(taskId: string, database: Database = getDb()): v
     )
     .run(now, taskId);
   updateAgentStatus(task.agent_id, "running", taskId, database);
+  const updated = getTask(taskId, database);
+  if (updated) broadcastTaskUpdated(updated);
 }
 
 /**
@@ -199,9 +248,73 @@ export function markTaskCanceled(taskId: string, database: Database = getDb()): 
     if (agent?.current_task_id === taskId) {
       updateAgentStatus(task.agent_id, "idle", null, database);
     }
+    const updated = getTask(taskId, database);
+    if (updated) broadcastTaskUpdated(updated);
+    scheduleDelegationDrain(task.agent_id);
   });
 
   cancel();
+}
+
+/**
+ * 恢复启动前遗留的 running task。
+ *
+ * running 表示“当前进程正在执行这个任务”。如果进程重启，旧 running task
+ * 已经不可能继续执行，继续保留会让 Agent 一直处于忙碌状态。启动时把这些
+ * 任务标记为 failed，并释放对应 Agent。
+ *
+ * @param database 可选数据库连接。
+ * @returns 被恢复的任务数量。
+ */
+export function recoverRunningTasks(database: Database = getDb()): number {
+  const recover = database.transaction(() => {
+    const tasks = database
+      .query<TaskRecord, []>(
+        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
+                priority, input, result, error, created_at, started_at, completed_at
+         FROM tasks
+         WHERE status = 'running'`,
+      )
+      .all();
+    const now = Date.now();
+
+    for (const task of tasks) {
+      database
+        .query(
+          `UPDATE tasks
+           SET status = 'failed', error = ?, completed_at = ?
+           WHERE id = ?`,
+        )
+        .run("Recovered stale running task after service restart", now, task.id);
+
+      const agent = getAgent(task.agent_id, database);
+      if (agent?.current_task_id === task.id) {
+        updateAgentStatus(task.agent_id, "idle", null, database);
+      }
+      const updated = getTask(task.id, database);
+      if (updated) broadcastTaskUpdated(updated);
+      scheduleDelegationDrain(task.agent_id);
+    }
+
+    const stuckAgents = database
+      .query<{ id: string }, []>(
+        `SELECT id
+         FROM agents
+         WHERE status = 'running'
+           AND (
+             current_task_id IS NULL OR
+             current_task_id NOT IN (SELECT id FROM tasks WHERE status = 'running')
+           )`,
+      )
+      .all();
+    for (const agent of stuckAgents) {
+      updateAgentStatus(agent.id, "idle", null, database);
+    }
+
+    return tasks.length;
+  });
+
+  return recover();
 }
 
 function completeTask(
@@ -229,6 +342,9 @@ function completeTask(
     if (agent?.current_task_id === taskId) {
       updateAgentStatus(task.agent_id, "idle", null, database);
     }
+    const updated = getTask(taskId, database);
+    if (updated) broadcastTaskUpdated(updated);
+    scheduleDelegationDrain(task.agent_id);
   });
 
   complete();
@@ -240,4 +356,20 @@ function requireTask(taskId: string, database: Database): TaskRecord {
     throw new Error(`Task not found: ${taskId}`);
   }
   return task;
+}
+
+function broadcastTaskUpdated(task: TaskRecord): void {
+  defaultRealtimeService.broadcast({
+    type: "runtime.task.updated",
+    agentId: task.agent_id,
+    taskId: task.id,
+    payload: { task },
+    createdAt: Date.now(),
+  });
+}
+
+function scheduleDelegationDrain(agentId: string): void {
+  void import("../delegations/service")
+    .then(({ defaultDelegationService }) => defaultDelegationService.drainAgent(agentId))
+    .catch(() => undefined);
 }

@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { defaultAgentService, type AgentService } from "../agents/service";
 import { dispatchFeishuMessage, type ExternalChannelRunner } from "../channels/feishu-dispatch";
+import { handleFeishuCardAction } from "../channels/feishu-approval";
 import { defaultFeishuBindingService, type FeishuBindingService } from "../channels/feishu-binding-service";
 import { parseFeishuEvent } from "../channels/feishu-events";
 import { defaultFeishuOnboardingService, type FeishuOnboardingService } from "../channels/feishu-onboarding-service";
@@ -265,8 +266,13 @@ export function createChannelRoutes(
       return c.json({ code: 0, msg: "ignored" });
     }
 
-    const received = dispatchFeishuMessage(parsed.message, { database, channelService, externalChannelRunner });
-    return c.json({ code: 0, msg: "ok", taskId: received.task.id });
+    if (parsed.kind === "card_action") {
+      const card = await handleFeishuCardAction(parsed.action, { database, channelService });
+      return c.json(card);
+    }
+
+    const received = await dispatchFeishuMessage(parsed.message, { database, channelService, externalChannelRunner });
+    return c.json({ code: 0, msg: "ok", taskId: received?.task.id ?? null });
   });
 
   return app;

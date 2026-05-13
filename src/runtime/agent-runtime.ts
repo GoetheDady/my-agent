@@ -26,6 +26,8 @@ const MODEL_RUN_TIMEOUT_MS = 45_000;
 export interface AgentRunInput {
   task: TaskRecord;
   messages: ModelMessage[];
+  sessionId?: string | null;
+  sourceMetadata?: Record<string, unknown>;
   thinkingEnabled?: boolean;
   abortSignal?: AbortSignal;
   streamTextRunner?: StreamTextRunner;
@@ -67,7 +69,12 @@ export async function toModelMessages(uiMessages: Array<{
 }>): Promise<ModelMessage[]> {
   return convertToModelMessages(
     uiMessages.map((message) => {
-      if (message.parts) return message;
+      if (message.parts) {
+        return {
+          ...message,
+          parts: filterModelVisibleParts(message.parts),
+        };
+      }
       if (typeof message.content === "string") {
         return { role: message.role, parts: [{ type: "text", text: message.content }] };
       }
@@ -84,6 +91,18 @@ export async function toModelMessages(uiMessages: Array<{
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any,
   );
+}
+
+function filterModelVisibleParts(parts: unknown): unknown[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.filter((part) => {
+    if (!part || typeof part !== "object" || Array.isArray(part)) return true;
+    const type = (part as { type?: unknown }).type;
+    if (type === "tool-memory_extract" || type === "tool-memory_reconsolidate" || type === "tool-profile_sync") {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -156,6 +175,10 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       agentId: input.task.agent_id,
       taskId: input.task.id,
       conversationId: input.task.conversation_id,
+      sessionId: input.sessionId,
+      sourceChannel: input.task.source_channel,
+      sourceUserId: input.task.source_user_id,
+      sourceMetadata: input.sourceMetadata,
       database,
     });
     const result = runner({

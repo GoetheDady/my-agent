@@ -1,5 +1,5 @@
 import { getTool, type RegisteredTool } from "./registry";
-import { defaultAgentConfigService } from "../agents/config-service";
+import { defaultAgentConfigService, type AgentConfigService } from "../agents/config-service";
 
 export interface ToolPolicyInput {
   toolName: string;
@@ -7,6 +7,7 @@ export interface ToolPolicyInput {
   allowlisted?: boolean;
   tool?: RegisteredTool | null;
   agentId?: string;
+  agentConfigService?: AgentConfigService;
 }
 
 export interface ToolPolicyDecision {
@@ -37,7 +38,8 @@ export function evaluateToolPolicy(input: ToolPolicyInput): ToolPolicyDecision {
     };
   }
 
-  const agentConfig = defaultAgentConfigService.getAgentConfig(input.agentId ?? "default");
+  const agentConfigService = input.agentConfigService ?? defaultAgentConfigService;
+  const agentConfig = agentConfigService.getAgentConfig(input.agentId ?? "default");
   if (!agentConfig.tools.enabledToolsets.includes(registeredTool.toolset)) {
     return {
       allowed: false,
@@ -65,15 +67,22 @@ export function evaluateToolPolicy(input: ToolPolicyInput): ToolPolicyDecision {
 
   const allowlisted = input.allowlisted === true;
   const configuredApproval = agentConfig.tools.requiresApproval.includes(input.toolName);
-  // 未列入 allowlist 的普通写操作仍可执行，但前端必须先展示审批卡。
-  const reason = configuredApproval
-    ? "write_requires_configured_approval"
-    : allowlisted
-      ? "write_allowlisted"
-      : "write_requires_approval";
+  // 路径白名单是用户“记住此选择”的结果，应优先于默认审批规则。
+  // 这样 write_file 对同一路径再次执行时可以直接运行，但未入白名单路径仍会触发审批。
+  if (allowlisted) {
+    return {
+      allowed: true,
+      requiresApproval: false,
+      reason: "write_allowlisted",
+    };
+  }
+
+  // 普通写工具是否审批由当前 Agent 的 requiresApproval 配置决定。
+  // Tools 页面修改该配置后，下一次 buildAgentTools 会立即按新策略挂载审批钩子。
+  const reason = configuredApproval ? "write_requires_configured_approval" : "write_allowed_by_agent_policy";
   return {
     allowed: true,
-    requiresApproval: configuredApproval || !allowlisted,
+    requiresApproval: configuredApproval,
     reason,
   };
 }

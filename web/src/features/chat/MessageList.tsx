@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import MessageBubble from "./MessageBubble";
+import type { ToolApprovalSummary } from "../../types";
 
 interface MessageListProps {
   messages: Array<{
@@ -7,11 +8,23 @@ interface MessageListProps {
     role: string;
     parts: Array<{ type: string; text?: string; reasoning?: string; toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string } }>;
   }>;
-  handleApprove?: (toolCallId: string, rememberChoice: boolean) => void;
-  handleDeny?: (toolCallId: string) => void;
+  handleApprove?: (toolCallId: string, rememberChoice: boolean) => Promise<void> | void;
+  handleDeny?: (toolCallId: string) => Promise<void> | void;
+  approvals?: Record<string, ToolApprovalSummary>;
+  approvalLoading?: Record<string, boolean>;
+  approvalErrors?: Record<string, string | null>;
+  registerApproval?: (input: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
 }
 
-export default function MessageList({ messages, handleApprove, handleDeny }: MessageListProps) {
+export default function MessageList({
+  messages,
+  handleApprove,
+  handleDeny,
+  approvals,
+  approvalLoading,
+  approvalErrors,
+  registerApproval,
+}: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
@@ -45,6 +58,10 @@ export default function MessageList({ messages, handleApprove, handleDeny }: Mes
             message={msg}
             handleApprove={handleApprove}
             handleDeny={handleDeny}
+            approvals={approvals}
+            approvalLoading={approvalLoading}
+            approvalErrors={approvalErrors}
+            registerApproval={registerApproval}
           />
         ))}
       </div>

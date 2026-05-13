@@ -1,7 +1,7 @@
-import { resolve, relative, dirname } from 'node:path';
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, lstatSync } from 'node:fs';
+import { resolve, relative, dirname, basename } from 'node:path';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { defaultAgentConfigService } from '../agents/config-service';
-import { getProjectRoot, loadConfig } from '../core/config';
+import { getProjectRoot } from '../core/config';
 
 // ============================================================
 // 类型定义
@@ -16,6 +16,35 @@ export interface ToolResult {
     suggestion?: string;
   };
 }
+
+export interface SearchFilesResult {
+  success: boolean;
+  data?: {
+    query: string;
+    root: string;
+    matches: Array<{
+      path: string;
+      name: string;
+      size: number;
+      modifiedAt: number;
+    }>;
+    truncated: boolean;
+  };
+  error?: ToolResult["error"];
+}
+
+const DEFAULT_SEARCH_IGNORES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  ".turbo",
+  ".cache",
+  "coverage",
+  "web/dist",
+  "data/lancedb",
+]);
 
 // ============================================================
 // 路径规范化
@@ -72,8 +101,8 @@ export function normalizePath(inputPath: string): string {
  * @param absolutePath 已规范化的绝对路径。
  * @returns 路径在白名单内时返回 `true`。
  */
-export function isPathInWhitelist(absolutePath: string): boolean {
-  const config = loadConfig();
+export function isPathInWhitelist(absolutePath: string, agentId = 'default'): boolean {
+  const config = defaultAgentConfigService.getAgentConfig(agentId);
   const allowedPaths = config.tools.allowedPaths.map(p => resolve(getProjectRoot(), p));
 
   return allowedPaths.some(allowedPath => {
@@ -94,9 +123,9 @@ export function isPathInWhitelist(absolutePath: string): boolean {
  * @param inputPath 用户或模型传入的路径。
  * @returns 路径规范化成功且位于白名单内时返回 `true`。
  */
-export function isInputPathAllowlisted(inputPath: string): boolean {
+export function isInputPathAllowlisted(inputPath: string, agentId = 'default'): boolean {
   try {
-    return isPathInWhitelist(normalizePath(inputPath));
+    return isPathInWhitelist(normalizePath(inputPath), agentId);
   } catch {
     return false;
   }
@@ -132,17 +161,6 @@ export function readFile(path: string): ToolResult {
   try {
     const absolutePath = normalizePath(path);
 
-    if (!isPathInWhitelist(absolutePath)) {
-      return {
-        success: false,
-        error: {
-          type: 'path_not_allowed',
-          message: `Path "${path}" is not in the allowed paths whitelist`,
-          suggestion: 'Ask the user to add this path to the whitelist',
-        },
-      };
-    }
-
     if (!existsSync(absolutePath)) {
       return {
         success: false,
@@ -170,6 +188,97 @@ export function readFile(path: string): ToolResult {
 }
 
 /**
+ * 按文件名或相对路径片段搜索项目内文件。
+ *
+ * 这是 read_file 的前置发现工具：Agent 不知道精确路径时先用它找文件，
+ * 再用 read_file 读取具体内容。
+ */
+export function searchFiles(input: {
+  query: string;
+  root?: string;
+  limit?: number;
+}): SearchFilesResult {
+  try {
+    const query = input.query.trim().toLowerCase();
+    if (!query) {
+      return {
+        success: false,
+        error: {
+          type: "invalid_operation",
+          message: "query 不能为空",
+        },
+      };
+    }
+
+    const projectRoot = getProjectRoot();
+    const root = input.root?.trim() ? normalizePath(input.root) : projectRoot;
+    const relativeRoot = relative(projectRoot, root) || ".";
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+    const matches: NonNullable<SearchFilesResult["data"]>["matches"] = [];
+    let truncated = false;
+
+    const visit = (dir: string) => {
+      if (matches.length >= limit) {
+        truncated = true;
+        return;
+      }
+
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const absolutePath = resolve(dir, entry.name);
+        const relativePath = relative(projectRoot, absolutePath);
+        if (shouldIgnoreSearchPath(relativePath, entry.name)) continue;
+
+        if (entry.isDirectory()) {
+          visit(absolutePath);
+          if (truncated) return;
+          continue;
+        }
+
+        if (!entry.isFile()) continue;
+        if (!relativePath.toLowerCase().includes(query) && !entry.name.toLowerCase().includes(query)) continue;
+
+        const stats = statSync(absolutePath);
+        matches.push({
+          path: relativePath,
+          name: basename(relativePath),
+          size: stats.size,
+          modifiedAt: stats.mtimeMs,
+        });
+        if (matches.length >= limit) {
+          truncated = true;
+          return;
+        }
+      }
+    };
+
+    visit(root);
+
+    return {
+      success: true,
+      data: {
+        query: input.query,
+        root: relativeRoot,
+        matches,
+        truncated,
+      },
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        type: "unknown",
+        message: (err as Error).message,
+      },
+    };
+  }
+}
+
+function shouldIgnoreSearchPath(relativePath: string, name: string): boolean {
+  if (DEFAULT_SEARCH_IGNORES.has(name) || DEFAULT_SEARCH_IGNORES.has(relativePath)) return true;
+  return relativePath.split(/[\\/]/).some((part) => DEFAULT_SEARCH_IGNORES.has(part));
+}
+
+/**
  * 写入文件
  *
  * @param path 相对于项目根目录的路径
@@ -183,7 +292,9 @@ export function readFile(path: string): ToolResult {
 export function writeFile(
   path: string,
   content: string,
-  mode: 'overwrite' | 'append' | 'create' = 'overwrite'
+  mode: 'overwrite' | 'append' | 'create' = 'overwrite',
+  agentId = 'default',
+  options: { approvedPath?: string } = {},
 ): ToolResult {
   try {
     const absolutePath = normalizePath(path);
@@ -199,7 +310,8 @@ export function writeFile(
       };
     }
 
-    if (!isPathInWhitelist(absolutePath)) {
+    const approvedPath = options.approvedPath ? normalizePath(options.approvedPath) : null;
+    if (!isPathInWhitelist(absolutePath, agentId) && absolutePath !== approvedPath) {
       return {
         success: false,
         error: {

@@ -4,6 +4,7 @@ import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import { dispatchFeishuMessage, type ExternalChannelRunner } from "./feishu-dispatch";
 import { parseFeishuEvent } from "./feishu-events";
+import { handleFeishuCardAction } from "./feishu-approval";
 import { defaultFeishuBindingService, type FeishuBinding, type FeishuBindingService } from "./feishu-binding-service";
 import { defaultChannelService, type ChannelService } from "./service";
 
@@ -90,11 +91,40 @@ export class FeishuWebSocketService {
           }, database);
           return;
         }
-        dispatchFeishuMessage(parsed.message, {
+        await dispatchFeishuMessage(parsed.message, {
           database,
           channelService: this.channelService,
           externalChannelRunner: this.options.externalChannelRunner,
         });
+      },
+      "card.action.trigger": async (data: unknown) => {
+        const parsed = parseFeishuEvent({ ...(data as Record<string, unknown>), app_id: binding.appId, event_type: "card.action.trigger" }, this.bindingService);
+        if (parsed.kind !== "card_action") {
+          appendEvent({
+            agent_id: binding.agentId,
+            type: "channel.inbound.ignored",
+            payload: { channel: "feishu", transport: "websocket", reason: parsed.kind === "ignored" ? parsed.reason : parsed.kind },
+          }, database);
+          return;
+        }
+        try {
+          return await handleFeishuCardAction(parsed.action, {
+            database,
+            channelService: this.channelService,
+          });
+        } catch (error) {
+          appendEvent({
+            agent_id: binding.agentId,
+            type: "tool.approval.failed",
+            payload: {
+              channel: "feishu",
+              transport: "websocket",
+              appId: binding.appId,
+              approvalId: parsed.action.approvalId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }, database);
+        }
       },
     });
 

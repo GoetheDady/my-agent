@@ -10,6 +10,7 @@
  */
 
 import { ensureDefaultAgent } from "../agents/agent-registry";
+import { recoverRunningTasks } from "../tasks/task-store";
 import { getDb } from "./database";
 
 /** 当前运行环境类型 */
@@ -77,4 +78,8 @@ export function initializeRuntime(): void {
   // 目前 MVP 只有 default agent；未来多 Agent 也应从这里集中初始化。
   const db = getDb();
   ensureDefaultAgent(db);
+  const recoveredCount = recoverRunningTasks(db);
+  if (recoveredCount > 0) {
+    console.warn(`[runtime] 已恢复 ${recoveredCount} 个重启前遗留的 running task`);
+  }
 }

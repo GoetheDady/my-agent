@@ -22,6 +22,10 @@ export interface MemoryToolContext {
   agentId?: string;
   taskId?: string | null;
   conversationId?: string | null;
+  sessionId?: string | null;
+  sourceChannel?: string | null;
+  sourceUserId?: string | null;
+  sourceMetadata?: Record<string, unknown>;
   database?: Database;
   store?: MemoryStorePort;
   profileSync?: ProfileSyncPort;

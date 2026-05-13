@@ -75,6 +75,8 @@ app.post("/", async (c) => {
     run = runAgentTask({
       task,
       messages: modelMessages,
+      sessionId: capturedSessionId,
+      sourceMetadata: { sessionId: capturedSessionId },
       thinkingEnabled,
       abortSignal: c.req.raw.signal,
     });

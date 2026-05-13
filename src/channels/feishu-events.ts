@@ -12,9 +12,22 @@ export interface FeishuInboundMessage {
   mentionsBot: boolean;
 }
 
+export interface FeishuCardAction {
+  binding: FeishuBinding;
+  appId: string;
+  chatId: string;
+  messageId: string;
+  operatorId: string;
+  approvalId: string;
+  decision: "approve" | "deny";
+  rememberChoice: boolean;
+  rawEventType: string;
+}
+
 export type FeishuEventParseResult =
   | { kind: "challenge"; challenge: string }
   | { kind: "message"; message: FeishuInboundMessage }
+  | { kind: "card_action"; action: FeishuCardAction }
   | { kind: "ignored"; reason: string; appId?: string };
 
 function readPath(value: unknown, path: string[]): unknown {
@@ -40,6 +53,21 @@ function parseContentText(content: string): string {
   }
 }
 
+function parseActionValue(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function resolveBinding(payload: unknown, bindingService: FeishuBindingService): FeishuBinding | null {
   const appId = asString(readPath(payload, ["header", "app_id"])) || asString(readPath(payload, ["app_id"]));
   if (appId) return bindingService.getEnabledBinding(appId);
@@ -56,8 +84,8 @@ function validateToken(payload: unknown, binding: FeishuBinding): boolean {
 /**
  * 解析飞书事件回调。
  *
- * MVP 只支持未加密的 URL 验证和文本消息。图片、文件、卡片回调会被明确忽略，
- * 避免误把不完整内容交给 Agent。
+ * MVP 支持未加密的 URL 验证、文本消息和交互卡片按钮回调。
+ * 图片、文件等其它事件会被明确忽略，避免误把不完整内容交给 Agent。
  */
 export function parseFeishuEvent(payload: unknown, bindingService: FeishuBindingService): FeishuEventParseResult {
   if (!payload || typeof payload !== "object") {
@@ -76,6 +104,45 @@ export function parseFeishuEvent(payload: unknown, bindingService: FeishuBinding
   if (!validateToken(payload, binding)) return { kind: "ignored", reason: "invalid_verification_token", appId };
 
   const eventType = asString(readPath(payload, ["header", "event_type"])) || asString(readPath(payload, ["event_type"]));
+  if (eventType === "card.action.trigger") {
+    const eventRoot = readPath(payload, ["event"]) ? ["event"] : [];
+    const value = parseActionValue(readPath(payload, [...eventRoot, "action", "value"]));
+    const decision = asString(value.decision);
+    const approvalId = asString(value.approvalId);
+    const chatId =
+      asString(readPath(payload, [...eventRoot, "context", "open_chat_id"])) ||
+      asString(readPath(payload, [...eventRoot, "open_chat_id"]));
+    const messageId =
+      asString(readPath(payload, [...eventRoot, "context", "open_message_id"])) ||
+      asString(readPath(payload, [...eventRoot, "open_message_id"]));
+    const operatorId =
+      asString(readPath(payload, [...eventRoot, "operator", "open_id"])) ||
+      asString(readPath(payload, [...eventRoot, "operator", "union_id"])) ||
+      asString(readPath(payload, [...eventRoot, "operator", "user_id"]));
+
+    if (!approvalId || (decision !== "approve" && decision !== "deny")) {
+      return { kind: "ignored", reason: "invalid_card_action_value", appId };
+    }
+    if (!chatId || !messageId || !operatorId) {
+      return { kind: "ignored", reason: "missing_card_action_context", appId };
+    }
+
+    return {
+      kind: "card_action",
+      action: {
+        binding,
+        appId: binding.appId,
+        chatId,
+        messageId,
+        operatorId,
+        approvalId,
+        decision,
+        rememberChoice: value.rememberChoice === true,
+        rawEventType: eventType,
+      },
+    };
+  }
+
   if (eventType !== "im.message.receive_v1") {
     return { kind: "ignored", reason: `unsupported_event:${eventType || "unknown"}`, appId };
   }
@@ -92,8 +159,8 @@ export function parseFeishuEvent(payload: unknown, bindingService: FeishuBinding
   const chatId = asString(readPath(payload, [...eventRoot, "message", "chat_id"]));
   const messageId = asString(readPath(payload, [...eventRoot, "message", "message_id"]));
   const senderId =
-    asString(readPath(payload, [...eventRoot, "sender", "sender_id", "union_id"])) ||
     asString(readPath(payload, [...eventRoot, "sender", "sender_id", "open_id"])) ||
+    asString(readPath(payload, [...eventRoot, "sender", "sender_id", "union_id"])) ||
     asString(readPath(payload, [...eventRoot, "sender", "sender_id", "user_id"])) ||
     "default";
   if (!chatId || !messageId) return { kind: "ignored", reason: "missing_chat_or_message_id", appId };

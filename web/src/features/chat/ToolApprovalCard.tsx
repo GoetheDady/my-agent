@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, ShieldQuestion, X } from 'lucide-react';
+import type { ToolApprovalSummary, ToolRiskLevel } from '../../types';
 
 interface ToolApprovalCardProps {
   toolName: string;
   args: Record<string, unknown>;
   toolCallId: string;
-  onApprove: (rememberChoice: boolean) => void;
-  onDeny: () => void;
+  approval?: ToolApprovalSummary;
+  loading?: boolean;
+  error?: string | null;
+  onRegister: () => void;
+  onApprove: (rememberChoice: boolean) => Promise<void> | void;
+  onDeny: () => Promise<void> | void;
 }
 
 function getOperationDescription(toolName: string, args: Record<string, unknown>): string {
@@ -25,7 +30,7 @@ function getOperationDescription(toolName: string, args: Record<string, unknown>
   return `执行 ${toolName}`;
 }
 
-function getRiskLevel(toolName: string, args: Record<string, unknown>): 'low' | 'medium' | 'high' {
+function getRiskLevel(toolName: string, args: Record<string, unknown>): ToolRiskLevel {
   if (toolName === 'read_file') return 'low';
   if (toolName === 'write_file') {
     return args.mode === 'overwrite' ? 'high' : 'medium';
@@ -36,23 +41,50 @@ function getRiskLevel(toolName: string, args: Record<string, unknown>): 'low' | 
 export function ToolApprovalCard({
   toolName,
   args,
+  toolCallId,
+  approval,
+  loading,
+  error,
+  onRegister,
   onApprove,
   onDeny,
 }: ToolApprovalCardProps) {
   const [rememberChoice, setRememberChoice] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const registeredToolCallIdRef = useRef<string | null>(null);
 
   const description = getOperationDescription(toolName, args);
-  const riskLevel = getRiskLevel(toolName, args);
+  const riskLevel = approval?.riskLevel ?? getRiskLevel(toolName, args);
+  const canRemember = toolName === 'write_file' && typeof args.path === 'string';
+  const pendingApproval = approval?.status === 'pending';
+  const actionDisabled = processing || loading || !approval || !pendingApproval;
 
-  const handleApprove = () => {
+  useEffect(() => {
+    if (registeredToolCallIdRef.current !== toolCallId) {
+      registeredToolCallIdRef.current = null;
+    }
+    if (!approval && !loading && registeredToolCallIdRef.current !== toolCallId) {
+      registeredToolCallIdRef.current = toolCallId;
+      onRegister();
+    }
+  }, [approval, loading, onRegister, toolCallId]);
+
+  const handleApprove = async () => {
     setProcessing(true);
-    onApprove(rememberChoice);
+    try {
+      await onApprove(rememberChoice && canRemember);
+    } finally {
+      setProcessing(false);
+    }
   };
 
-  const handleDeny = () => {
+  const handleDeny = async () => {
     setProcessing(true);
-    onDeny();
+    try {
+      await onDeny();
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const toneClass = riskLevel === 'high'
@@ -69,11 +101,23 @@ export function ToolApprovalCard({
         </span>
         <div>
           <div className="text-sm font-semibold text-[var(--color-text)]">{toolName}</div>
-          <div className="text-xs text-[var(--color-text-muted)]">需要授权后继续执行</div>
+          <div className="text-xs text-[var(--color-text-muted)]">
+            {loading ? '正在登记审批记录' : approval ? `审批状态：${approval.status}` : '需要授权后继续执行'}
+          </div>
         </div>
       </div>
 
       <div className="mb-3 text-sm text-[var(--color-text)]">{description}</div>
+      {approval?.reason && (
+        <div className="mb-3 rounded-lg bg-white/70 px-3 py-2 text-xs text-[var(--color-text-muted)]">
+          策略原因：{approval.reason}
+        </div>
+      )}
+      {error && (
+        <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
+          {error}
+        </div>
+      )}
 
       <div className="mb-3 rounded-lg border border-white/70 bg-white/80 p-2 font-mono text-xs text-[var(--color-text-muted)]">
         {Object.entries(args).map(([key, value]) => (
@@ -97,16 +141,16 @@ export function ToolApprovalCard({
             type="checkbox"
             checked={rememberChoice}
             onChange={(e) => setRememberChoice(e.target.checked)}
-            disabled={processing}
+            disabled={actionDisabled || !canRemember}
             className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-accent)]"
           />
-          <span>记住此选择（添加到白名单）</span>
+          <span>{canRemember ? '记住此路径（加入当前 Agent 白名单）' : '此工具暂不支持记住选择'}</span>
         </label>
 
         <div className="flex gap-2 justify-end">
           <button
             onClick={handleDeny}
-            disabled={processing}
+            disabled={actionDisabled}
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
             <X size={14} />
@@ -114,7 +158,7 @@ export function ToolApprovalCard({
           </button>
           <button
             onClick={handleApprove}
-            disabled={processing}
+            disabled={actionDisabled}
             className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-accent-strong)] disabled:opacity-50"
           >
             <Check size={14} />

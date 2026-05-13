@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { getDb } from "../core/database";
+import { defaultRealtimeService } from "../realtime/service";
 
 export interface Session {
   id: string;
@@ -50,7 +51,15 @@ export function createSession(
     "INSERT INTO sessions (id, agent_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     [id, agentId, title ?? "新对话", now, now],
   );
-  return { id, agent_id: agentId, title: title ?? "新对话", created_at: now, updated_at: now };
+  const session = { id, agent_id: agentId, title: title ?? "新对话", created_at: now, updated_at: now };
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId,
+    sessionId: id,
+    payload: { session },
+    createdAt: now,
+  });
+  return session;
 }
 
 /**
@@ -83,6 +92,14 @@ export function getSession(id: string, database: Database = getDb()): Session | 
 export function updateSessionTitle(id: string, title: string, database: Database = getDb()): void {
   const now = Date.now();
   database.run("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?", [title, now, id]);
+  const session = getSession(id, database);
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId: session?.agent_id,
+    sessionId: id,
+    payload: { sessionId: id, title },
+    createdAt: now,
+  });
 }
 
 /**
@@ -91,7 +108,15 @@ export function updateSessionTitle(id: string, title: string, database: Database
  * @param id session id。
  */
 export function deleteSession(id: string, database: Database = getDb()): void {
+  const session = getSession(id, database);
   database.run("DELETE FROM sessions WHERE id = ?", [id]);
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId: session?.agent_id,
+    sessionId: id,
+    payload: { sessionId: id, deleted: true },
+    createdAt: Date.now(),
+  });
 }
 
 /**
@@ -116,7 +141,23 @@ export function appendMessage(
     [id, sessionId, role, content, now],
   );
   database.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, sessionId]);
-  return { id, session_id: sessionId, role, content, created_at: now };
+  const message = { id, session_id: sessionId, role, content, created_at: now };
+  const session = getSession(sessionId, database);
+  defaultRealtimeService.broadcast({
+    type: "message.created",
+    agentId: session?.agent_id,
+    sessionId,
+    payload: { message },
+    createdAt: now,
+  });
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId: session?.agent_id,
+    sessionId,
+    payload: { sessionId },
+    createdAt: now,
+  });
+  return message;
 }
 
 /**
@@ -216,6 +257,24 @@ function updateAssistantParts(
 
   database.run("UPDATE messages SET content = ? WHERE id = ?", [nextContent, messageId]);
   database.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, message.session_id]);
+  const session = getSession(message.session_id, database);
+  defaultRealtimeService.broadcast({
+    type: "message.updated",
+    agentId: session?.agent_id,
+    sessionId: message.session_id,
+    payload: {
+      messageId,
+      content: nextContent,
+    },
+    createdAt: now,
+  });
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId: session?.agent_id,
+    sessionId: message.session_id,
+    payload: { sessionId: message.session_id },
+    createdAt: now,
+  });
 }
 
 function parseAssistantParts(content: string): Array<Record<string, unknown>> {

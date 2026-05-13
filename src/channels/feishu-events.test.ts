@@ -94,4 +94,41 @@ describe("Feishu event parser", () => {
       },
     });
   });
+
+  test("parses card action callback", () => {
+    const parsed = parseFeishuEvent({
+      header: {
+        app_id: "cli_test",
+        token: "token",
+        event_type: "card.action.trigger",
+      },
+      event: {
+        operator: { open_id: "ou_user" },
+        context: {
+          open_chat_id: "oc_chat",
+          open_message_id: "om_card",
+        },
+        action: {
+          value: {
+            approvalId: "approval-db-id",
+            decision: "approve",
+            rememberChoice: true,
+          },
+        },
+      },
+    }, createBindingService());
+
+    expect(parsed).toMatchObject({
+      kind: "card_action",
+      action: {
+        appId: "cli_test",
+        chatId: "oc_chat",
+        messageId: "om_card",
+        operatorId: "ou_user",
+        approvalId: "approval-db-id",
+        decision: "approve",
+        rememberChoice: true,
+      },
+    });
+  });
 });
