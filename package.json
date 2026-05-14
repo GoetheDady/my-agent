@@ -5,6 +5,10 @@
   "scripts": {
     "dev": "bun run --watch src/main.ts",
     "start": "bun run src/main.ts",
+    "gateway": "bun run src/scripts/gateway.ts",
+    "gateway:start": "bun run gateway start",
+    "gateway:stop": "bun run gateway stop",
+    "gateway:status": "bun run gateway status",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "lint": "eslint src/",

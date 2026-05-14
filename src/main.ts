@@ -98,7 +98,7 @@ app.onError((err, c) => {
   return c.json({ error: err instanceof Error ? err.message : "内部错误" }, 500);
 });
 
-const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const PORT = parseInt(process.env.PORT ?? "3100", 10);
 
 Bun.serve<RealtimeSocketData>({
   port: PORT,

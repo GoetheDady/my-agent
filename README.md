@@ -30,6 +30,18 @@ cd web && bun install
 bun run dev
 ```
 
+Gateway 常驻运行控制：
+
+```bash
+bun run gateway start      # 后台启动 src/main.ts，并记录 PID
+bun run gateway status     # 查看进程、端口、健康检查和日志路径
+bun run gateway logs       # 查看最近 100 行日志
+bun run gateway restart    # 停止后重新启动
+bun run gateway stop       # 按 PID 停止后台服务
+```
+
+这里的 **Gateway** 是本地运行控制命令，不是单独的新业务服务。它仍然启动现有 `src/main.ts`，只是额外管理 `.runtime/my-agent.pid`、`.runtime/my-agent.log` 和健康检查。**PID** 是操作系统给进程分配的编号，用来精准判断和停止当前服务进程。
+
 前端开发模式：
 
 ```bash
@@ -63,7 +75,7 @@ cd web && bun run build
 
 - `DEEPSEEK_API_KEY`：DeepSeek 模型调用密钥，后端启动必须有。
 - `ZHIPU_API_KEY`：智谱 `embedding-3` 调用密钥，用于记忆向量化。
-- `PORT`：后端端口，默认 `3000`。
+- `PORT`：后端端口，默认 `3100`。
 - `MY_AGENT_DATA_DIR`：运行时数据目录，默认是项目根目录下的 `data/`。
 - `DREAM_SCHEDULER_ENABLED`：是否启用 Dream Worker 自动调度，设置为 `false` 可关闭。
 
@@ -306,6 +318,6 @@ cd ..
 bun run start
 ```
 
-如果前端开发模式 API 请求失败，先启动后端，再启动前端。Vite 开发服务器会把 `/api` 代理到 `http://localhost:3000`。
+如果前端开发模式 API 请求失败，先启动后端，再启动前端。Vite 开发服务器会把 `/api` 代理到 `http://localhost:3100`。
 
 如果记忆搜索不可用，检查 `ZHIPU_API_KEY` 和 LanceDB native binding。`native binding` 指依赖包中与本机系统绑定的二进制组件。

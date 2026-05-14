@@ -18,7 +18,7 @@ bun run check        # lint + typecheck
 
 # 前端
 cd web
-bun run dev          # Vite 开发服务器（代理 /api 到 :3000）
+bun run dev          # Vite 开发服务器（代理 /api 到 :3100）
 bun run build        # 构建到 web/dist
 ```
 

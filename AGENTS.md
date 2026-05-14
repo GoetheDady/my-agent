@@ -93,7 +93,7 @@ bun run typecheck    # tsc --noEmit
 bun run check        # lint + typecheck
 
 cd web
-bun run dev          # Vite dev server (proxies /api to :3000)
+bun run dev          # Vite dev server (proxies /api to :3100)
 bun run build        # tsc -b && vite build → web/dist
 ```
 
@@ -123,7 +123,7 @@ bun run build        # tsc -b && vite build → web/dist
 4. **Config priority**: env vars > config.json > defaults. `config.json` values with `$VAR` syntax are resolved from env.
 5. **`bunfig.toml` sets npm registry to npmmirror.com** — packages resolve from Chinese mirror.
 6. **Web build required for production**: Backend serves `web/dist`. Must run `cd web && bun run build` before `bun run start`.
-7. **Vite dev proxy**: `web/vite.config.ts` proxies `/api` to `http://localhost:3000`. Start backend first, then frontend.
+7. **Vite dev proxy**: `web/vite.config.ts` proxies `/api` to `http://localhost:3100`. Start backend first, then frontend.
 8. **ESLint ignores `web/`** — frontend has its own tsc check in build step (`web/tsconfig.json`).
 9. **Runtime data lives under `data/` by default** — `agent.json`, `SKILL.md`, SQLite, LanceDB, and profile files are generated there. Do not commit generated runtime data.
 
