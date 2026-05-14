@@ -14,4 +14,9 @@ export interface TaskRecord {
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
+  attempt_count: number;
+  max_attempts: number;
+  lease_expires_at: number | null;
+  idempotency_key: string | null;
+  canceled_at: number | null;
 }

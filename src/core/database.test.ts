@@ -102,6 +102,11 @@ describe("runtime database schema", () => {
         ["created_at", "INTEGER", 1, null, 0],
         ["started_at", "INTEGER", 0, null, 0],
         ["completed_at", "INTEGER", 0, null, 0],
+        ["attempt_count", "INTEGER", 1, "0", 0],
+        ["max_attempts", "INTEGER", 1, "3", 0],
+        ["lease_expires_at", "INTEGER", 0, null, 0],
+        ["idempotency_key", "TEXT", 0, null, 0],
+        ["canceled_at", "INTEGER", 0, null, 0],
       ]);
 
       expect(readTableColumns(db, "events")).toEqual([
@@ -283,6 +288,7 @@ describe("runtime database schema", () => {
         "priority",
         "created_at",
       ]);
+      expect(readIndexColumns(db, "idx_tasks_idempotency_key")).toEqual(["idempotency_key"]);
       expect(readIndexColumns(db, "idx_events_agent_created")).toEqual(["agent_id", "created_at"]);
       expect(readIndexColumns(db, "idx_events_task_created")).toEqual(["task_id", "created_at"]);
       expect(readIndexColumns(db, "idx_sessions_agent_updated")).toEqual(["agent_id", "updated_at"]);
@@ -323,6 +329,46 @@ describe("runtime database schema", () => {
         "created_at",
       ]);
       expect(readIndexColumns(db, "idx_memory_decisions_dream_run")).toEqual(["dream_run_id"]);
+    });
+  });
+
+  test("tasks idempotency key is unique only when present", () => {
+    withSchemaDb((db) => {
+      const now = Date.now();
+      db
+        .query(
+          `INSERT INTO agents (id, name, status, current_task_id, workspace_path, created_at, updated_at)
+           VALUES ('default', 'Default', 'idle', NULL, '', ?, ?)`,
+        )
+        .run(now, now);
+
+      db
+        .query(
+          `INSERT INTO tasks (id, agent_id, source_channel, input, status, created_at, idempotency_key)
+           VALUES (?, 'default', 'web', 'hello', 'queued', ?, ?)`,
+        )
+        .run("with-key", now, "message-1");
+      expect(() =>
+        db
+          .query(
+            `INSERT INTO tasks (id, agent_id, source_channel, input, status, created_at, idempotency_key)
+             VALUES (?, 'default', 'web', 'duplicate', 'queued', ?, ?)`,
+          )
+          .run("duplicate-key", now, "message-1"),
+      ).toThrow();
+
+      db
+        .query(
+          `INSERT INTO tasks (id, agent_id, source_channel, input, status, created_at)
+           VALUES (?, 'default', 'web', 'null one', 'queued', ?)`,
+        )
+        .run("null-one", now);
+      db
+        .query(
+          `INSERT INTO tasks (id, agent_id, source_channel, input, status, created_at)
+           VALUES (?, 'default', 'web', 'null two', 'queued', ?)`,
+        )
+        .run("null-two", now);
     });
   });
 

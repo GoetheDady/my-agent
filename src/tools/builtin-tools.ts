@@ -57,6 +57,8 @@ const toolsetByName = new Map<string, string>([
   ['skill_create', 'skill'],
   ['skill_enable', 'skill'],
   ['skill_disable', 'skill'],
+  ['skill_install', 'skill'],
+  ['skill_update', 'skill'],
   ['agent_list', 'agent_config'],
   ['agent_get', 'agent_config'],
   ['agent_create', 'agent_config'],
@@ -77,6 +79,8 @@ const writeToolNames = new Set([
   'skill_create',
   'skill_enable',
   'skill_disable',
+  'skill_install',
+  'skill_update',
   'agent_create',
   'agent_delegate',
   'agent_config_patch',
@@ -309,6 +313,18 @@ registerTool({
 registerTool({
   name: 'skill_disable',
   tool: skillTools.skill_disable,
+  toolset: 'skill',
+  category: 'write',
+});
+registerTool({
+  name: 'skill_install',
+  tool: skillTools.skill_install,
+  toolset: 'skill',
+  category: 'write',
+});
+registerTool({
+  name: 'skill_update',
+  tool: skillTools.skill_update,
   toolset: 'skill',
   category: 'write',
 });

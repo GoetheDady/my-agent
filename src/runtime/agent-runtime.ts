@@ -15,7 +15,13 @@ import { buildAgentTools, tools } from "../tools/service";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { upsertEpisodeForTask } from "../memory/episode-store";
-import { getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
+import {
+  getTask,
+  markTaskCompleted,
+  markTaskFailed,
+  renewTaskLease,
+  TASK_LEASE_RENEW_INTERVAL_MS,
+} from "../tasks/task-store";
 import { claimTask } from "../tasks/task-queue";
 import type { TaskRecord } from "../tasks/task-types";
 
@@ -119,6 +125,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
   const database = input.database ?? getDb();
   let eventTimestamp = Date.now();
   let settled = false;
+  let stopLeaseHeartbeat: (() => void) | null = null;
   const runAbortSignal = createRunAbortSignal(input.abortSignal, MODEL_RUN_TIMEOUT_MS);
   const nextEventTimestamp = (): number => {
     eventTimestamp += 1;
@@ -129,6 +136,8 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
     if (settled) return;
     settled = true;
     runAbortSignal.cleanup();
+    stopLeaseHeartbeat?.();
+    stopLeaseHeartbeat = null;
     const latest = getTask(input.task.id, database);
     if (!latest || latest.status !== "running") return;
 
@@ -152,6 +161,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
    * 5. 完成后生成/更新 episode，供之后的情景记忆和 Dream Worker 使用。
    */
   ensureTaskCanRun(input.task, database);
+  stopLeaseHeartbeat = startTaskLeaseHeartbeat(input.task.id, database);
   appendEvent({
     agent_id: input.task.agent_id,
     task_id: input.task.id,
@@ -210,6 +220,8 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
         if (settled) return;
         settled = true;
         runAbortSignal.cleanup();
+        stopLeaseHeartbeat?.();
+        stopLeaseHeartbeat = null;
         appendEvent({
           agent_id: input.task.agent_id,
           task_id: input.task.id,
@@ -255,6 +267,14 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
   }
 }
 
+function startTaskLeaseHeartbeat(taskId: string, database: Database): () => void {
+  const interval = setInterval(() => {
+    renewTaskLease(taskId, database);
+  }, TASK_LEASE_RENEW_INTERVAL_MS);
+  (interval as { unref?: () => void }).unref?.();
+  return () => clearInterval(interval);
+}
+
 function ensureTaskCanRun(task: TaskRecord, database: Database): void {
   const stored = getTask(task.id, database);
   if (!stored) {
@@ -287,6 +307,7 @@ function createRunAbortSignal(
     reason = `Model run timed out after ${timeoutMs}ms`;
     controller.abort();
   }, timeoutMs);
+  (timeout as { unref?: () => void }).unref?.();
 
   const abortFromClient = () => {
     reason = "Client aborted stream";

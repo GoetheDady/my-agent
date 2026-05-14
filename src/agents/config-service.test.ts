@@ -114,6 +114,61 @@ describe("AgentConfigService", () => {
 
       expect(config.skills.items["web-debug"].status).toBe("disabled");
       expect(config.skills.items["web-debug"].allowedTools).toEqual(["write_file"]);
+      expect(config.skills.items["web-debug"].origin.type).toBe("agent_created");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test("migrates legacy skill source and patches builtin overrides", () => {
+    const rootDir = createTempRoot();
+    try {
+      const configPath = join(rootDir, "agents", "default", "agent.json");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({
+        version: 1,
+        agentId: "default",
+        name: "Default Agent",
+        description: "默认个人 Agent",
+        model: { provider: "deepseek", model: "deepseek-v4-flash" },
+        tools: { enabledToolsets: ["skill"], requiresApproval: [], allowedPaths: [] },
+        memory: { enabled: true, autoExtract: true, dreamEnabled: true },
+        skills: {
+          enabled: true,
+          indexEnabled: true,
+          items: {
+            legacy: {
+              name: "Legacy",
+              description: "旧 skill",
+              category: "general",
+              allowedTools: [],
+              source: "old-registry",
+              status: "enabled",
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          },
+        },
+        channels: { feishu: { enabled: true, bindings: {} } },
+        createdAt: 1,
+        updatedAt: 1,
+      }, null, 2));
+
+      const service = new AgentConfigService({ rootDir });
+      const config = service.patchAgentConfig("default", {
+        skills: {
+          builtinOverrides: {
+            "builtin-debug": { status: "disabled" },
+          },
+        },
+      });
+
+      expect(config.skills.items.legacy.source).toBe("old-registry");
+      expect(config.skills.items.legacy.origin).toMatchObject({
+        type: "agent_created",
+        legacySource: "old-registry",
+      });
+      expect(config.skills.builtinOverrides["builtin-debug"].status).toBe("disabled");
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }

@@ -5,6 +5,7 @@ import { getConfig, getRuntimeDataDir } from "../core/config";
 import { appendEvent } from "../events/event-log";
 import type {
   AgentConfig,
+  AgentConfigBuiltinSkillOverride,
   AgentConfigContext,
   AgentFeishuBindingConfig,
   AgentConfigPatch,
@@ -13,6 +14,7 @@ import type {
   AgentConfigSkillStatus,
   PublicAgentConfig,
 } from "./config-types";
+import type { SkillOrigin } from "../skills/skill-types";
 
 const DEFAULT_AGENT_ID = "default";
 const AGENT_CONFIG_FILENAME = "agent.json";
@@ -83,7 +85,16 @@ function createDefaultConfig(agentId: string): AgentConfig {
     },
     tools: {
       enabledToolsets: ["memory", "file", "runtime", "core", "skill", "agent_config"],
-      requiresApproval: ["write_file", "skill_create", "skill_disable", "agent_create", "agent_config_patch", "agent_config_reset"],
+      requiresApproval: [
+        "write_file",
+        "skill_create",
+        "skill_disable",
+        "skill_install",
+        "skill_update",
+        "agent_create",
+        "agent_config_patch",
+        "agent_config_reset",
+      ],
       allowedPaths: [],
     },
     memory: {
@@ -95,6 +106,7 @@ function createDefaultConfig(agentId: string): AgentConfig {
       enabled: true,
       indexEnabled: true,
       items: {},
+      builtinOverrides: {},
     },
     channels: {
       feishu: {
@@ -111,15 +123,74 @@ function normalizeSkillEntry(skillId: string, value: unknown): AgentConfigSkill 
   if (!isRecord(value)) return null;
   const timestamp = now();
   const status: AgentConfigSkillStatus = value.status === "disabled" ? "disabled" : "enabled";
+  const source = String(value.source ?? "agent-created");
   return {
     name: String(value.name ?? skillId),
     description: String(value.description ?? ""),
     category: String(value.category ?? "general"),
     allowedTools: asStringArray(value.allowedTools),
-    source: String(value.source ?? "agent-created"),
+    source,
+    origin: normalizeSkillOrigin(skillId, value.origin, source, timestamp),
     status,
     createdAt: Number(value.createdAt ?? timestamp),
     updatedAt: Number(value.updatedAt ?? timestamp),
+  };
+}
+
+function normalizeSkillOrigin(
+  skillId: string,
+  origin: unknown,
+  source: string,
+  timestamp: number,
+): SkillOrigin {
+  if (isRecord(origin)) {
+    if (origin.type === "remote_installed") {
+      const url = String(origin.url ?? "").trim();
+      const repo = String(origin.repo ?? skillId).trim();
+      return {
+        type: "remote_installed",
+        source: "github",
+        provider: "github",
+        url,
+        repo,
+        branch: String(origin.branch ?? "main").trim() || "main",
+        subdir: String(origin.subdir ?? "").trim(),
+        commit: String(origin.commit ?? "").trim(),
+        installedAt: Number(origin.installedAt ?? timestamp),
+        updatedAt: Number(origin.updatedAt ?? timestamp),
+        ...(typeof origin.legacySource === "string" ? { legacySource: origin.legacySource } : {}),
+      };
+    }
+    if (origin.type === "builtin") {
+      return {
+        type: "builtin",
+        source: "builtin",
+        ...(typeof origin.builtinPath === "string" ? { builtinPath: origin.builtinPath } : {}),
+      };
+    }
+    if (origin.type === "agent_created") {
+      return {
+        type: "agent_created",
+        source: "agent-created",
+        createdAt: Number(origin.createdAt ?? timestamp),
+        ...(typeof origin.legacySource === "string" ? { legacySource: origin.legacySource } : {}),
+      };
+    }
+  }
+
+  return {
+    type: "agent_created",
+    source: "agent-created",
+    createdAt: timestamp,
+    ...(source !== "agent-created" ? { legacySource: source } : {}),
+  };
+}
+
+function normalizeBuiltinOverride(value: unknown): AgentConfigBuiltinSkillOverride | null {
+  if (!isRecord(value)) return null;
+  return {
+    status: value.status === "disabled" ? "disabled" : "enabled",
+    updatedAt: Number(value.updatedAt ?? now()),
   };
 }
 
@@ -166,6 +237,13 @@ function normalizeConfig(agentId: string, raw: unknown): AgentConfig {
     const normalized = normalizeSkillEntry(normalizedSkillId, value);
     if (normalized) skillItems[normalizedSkillId] = normalized;
   }
+  const builtinOverridesRaw = isRecord(skillsRaw.builtinOverrides) ? skillsRaw.builtinOverrides : {};
+  const builtinOverrides: Record<string, AgentConfigBuiltinSkillOverride> = {};
+  for (const [skillId, value] of Object.entries(builtinOverridesRaw)) {
+    const normalizedSkillId = safeAgentSegment(skillId);
+    const normalized = normalizeBuiltinOverride(value);
+    if (normalized) builtinOverrides[normalizedSkillId] = normalized;
+  }
 
   const modelRaw = isRecord(raw.model) ? raw.model : {};
   const toolsRaw = isRecord(raw.tools) ? raw.tools : {};
@@ -206,6 +284,7 @@ function normalizeConfig(agentId: string, raw: unknown): AgentConfig {
       enabled: asBoolean(skillsRaw.enabled, defaults.skills.enabled),
       indexEnabled: asBoolean(skillsRaw.indexEnabled, defaults.skills.indexEnabled),
       items: skillItems,
+      builtinOverrides,
     },
     channels: {
       feishu: {
@@ -227,6 +306,13 @@ function validateConfig(config: AgentConfig): void {
     if (!skill.name.trim()) throw new Error(`skill ${skillId} name 不能为空`);
     if (skill.status !== "enabled" && skill.status !== "disabled") {
       throw new Error(`skill ${skillId} status 非法`);
+    }
+    if (!skill.origin?.type) throw new Error(`skill ${skillId} origin 不能为空`);
+    if (skill.origin.type === "builtin") throw new Error(`skill ${skillId} 不能作为私有 skill 保存 builtin origin`);
+  }
+  for (const [skillId, override] of Object.entries(config.skills.builtinOverrides)) {
+    if (override.status !== "enabled" && override.status !== "disabled") {
+      throw new Error(`builtin skill ${skillId} status 非法`);
     }
   }
   for (const [appId, binding] of Object.entries(config.channels.feishu.bindings)) {
@@ -282,6 +368,19 @@ function mergePatch(current: AgentConfig, patch: AgentConfigPatch): AgentConfig 
     for (const rawSkillId of asStringArray(patch.skills.removeSkillIds)) {
       delete next.skills.items[safeAgentSegment(rawSkillId)];
     }
+    if (patch.skills.builtinOverrides) {
+      for (const [rawSkillId, overridePatch] of Object.entries(patch.skills.builtinOverrides)) {
+        const skillId = safeAgentSegment(rawSkillId);
+        if (overridePatch === null) {
+          delete next.skills.builtinOverrides[skillId];
+          continue;
+        }
+        next.skills.builtinOverrides[skillId] = {
+          status: overridePatch.status === "disabled" ? "disabled" : "enabled",
+          updatedAt: now(),
+        };
+      }
+    }
     if (patch.skills.items) {
       for (const [rawSkillId, rawSkillPatch] of Object.entries(patch.skills.items)) {
         const skillId = safeAgentSegment(rawSkillId);
@@ -297,6 +396,9 @@ function mergePatch(current: AgentConfig, patch: AgentConfigPatch): AgentConfig 
           category: rawSkillPatch.category?.trim() ?? existing?.category ?? "general",
           allowedTools: rawSkillPatch.allowedTools ? asStringArray(rawSkillPatch.allowedTools) : existing?.allowedTools ?? [],
           source: rawSkillPatch.source?.trim() ?? existing?.source ?? "agent-created",
+          origin: rawSkillPatch.origin
+            ? normalizeSkillOrigin(skillId, rawSkillPatch.origin, rawSkillPatch.source ?? existing?.source ?? "agent-created", timestamp)
+            : existing?.origin ?? normalizeSkillOrigin(skillId, null, rawSkillPatch.source ?? existing?.source ?? "agent-created", timestamp),
           status: rawSkillPatch.status === "disabled" ? "disabled" : rawSkillPatch.status === "enabled" ? "enabled" : existing?.status ?? "enabled",
           createdAt: existing?.createdAt ?? rawSkillPatch.createdAt ?? timestamp,
           updatedAt: timestamp,

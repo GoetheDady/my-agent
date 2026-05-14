@@ -7,7 +7,14 @@ import { getDb } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
-import { getQueuedTaskPosition, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
+import {
+  getQueuedTaskPosition,
+  getTask,
+  markTaskCompleted,
+  markTaskFailed,
+  renewTaskLease,
+  TASK_LEASE_RENEW_INTERVAL_MS,
+} from "../tasks/task-store";
 import { claimNextTaskForChannels, claimTask } from "../tasks/task-queue";
 import type { TaskRecord } from "../tasks/task-types";
 import { buildAgentTools } from "../tools/service";
@@ -255,6 +262,7 @@ async function runClaimedExternalChannelTask(input: {
     database: input.database,
   });
 
+  const stopLeaseHeartbeat = startTaskLeaseHeartbeat(task.id, input.database);
   try {
     const messages: ModelMessage[] = [
       { role: "user", content: [{ type: "text", text: input.userText }] },
@@ -374,6 +382,7 @@ async function runClaimedExternalChannelTask(input: {
       database: input.database,
     });
   } finally {
+    stopLeaseHeartbeat();
     if (!input.skipDrain) {
       await drainExternalChannelQueue(task.agent_id, {
         database: input.database,
@@ -383,6 +392,14 @@ async function runClaimedExternalChannelTask(input: {
       });
     }
   }
+}
+
+function startTaskLeaseHeartbeat(taskId: string, database: Database): () => void {
+  const interval = setInterval(() => {
+    renewTaskLease(taskId, database);
+  }, TASK_LEASE_RENEW_INTERVAL_MS);
+  (interval as { unref?: () => void }).unref?.();
+  return () => clearInterval(interval);
 }
 
 /**
@@ -509,14 +526,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
     throw new Error(`Approval taskId not found: ${input.approvalId}`);
   }
 
-  const task = database
-    .query<TaskRecord, [string]>(
-      `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-              priority, input, result, error, created_at, started_at, completed_at
-       FROM tasks
-       WHERE id = ?`,
-    )
-    .get(approval.taskId);
+  const task = getTask(approval.taskId, database);
   if (!task) {
     throw new Error(`Task not found: ${approval.taskId}`);
   }

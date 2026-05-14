@@ -76,9 +76,19 @@ export function initializeDatabaseSchema(database: Database): void {
       created_at INTEGER NOT NULL,
       started_at INTEGER,
       completed_at INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      lease_expires_at INTEGER,
+      idempotency_key TEXT,
+      canceled_at INTEGER,
       FOREIGN KEY (agent_id) REFERENCES agents(id)
     )
   `);
+  ensureColumn(database, "tasks", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "tasks", "max_attempts", "INTEGER NOT NULL DEFAULT 3");
+  ensureColumn(database, "tasks", "lease_expires_at", "INTEGER");
+  ensureColumn(database, "tasks", "idempotency_key", "TEXT");
+  ensureColumn(database, "tasks", "canceled_at", "INTEGER");
 
   database.run(`
     CREATE TABLE IF NOT EXISTS events (
@@ -309,6 +319,11 @@ export function initializeDatabaseSchema(database: Database): void {
 
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_tasks_agent_status ON tasks(agent_id, status, priority, created_at)`,
+  );
+  database.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
+     ON tasks(idempotency_key)
+     WHERE idempotency_key IS NOT NULL`,
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_delegations_parent_agent ON delegations(parent_agent_id, status, created_at)`,

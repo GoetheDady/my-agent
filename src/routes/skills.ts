@@ -46,16 +46,43 @@ export function createSkillsRoutes(service: SkillService = defaultSkillService, 
     if (!body.skillId || !body.name || !body.description || !body.content) {
       return c.json({ error: "缺少 skillId / name / description / content" }, 400);
     }
-    const skill = service.createSkill({
-      skillId: body.skillId,
-      name: body.name,
-      description: body.description,
-      content: body.content,
-      category: body.category,
-      allowedTools: body.allowedTools,
-      status: "enabled",
-    }, { agentId: body.agentId ?? "default", database });
-    return c.json({ skill }, 201);
+    try {
+      const skill = service.createSkill({
+        skillId: body.skillId,
+        name: body.name,
+        description: body.description,
+        content: body.content,
+        category: body.category,
+        allowedTools: body.allowedTools,
+        status: "enabled",
+      }, { agentId: body.agentId ?? "default", database });
+      return c.json({ skill }, 201);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.post("/install", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as {
+      agentId?: string;
+      url?: string;
+      skillId?: string;
+      branch?: string;
+      subdir?: string;
+      status?: "enabled" | "disabled";
+    };
+    if (!body.url) return c.json({ error: "缺少 url" }, 400);
+    try {
+      return c.json(await service.installSkill({
+        url: body.url,
+        skillId: body.skillId,
+        branch: body.branch,
+        subdir: body.subdir,
+        status: body.status,
+      }, { agentId: body.agentId ?? "default", database }), 201);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
   });
 
   app.post("/:skillId", async (c) => {
@@ -68,16 +95,32 @@ export function createSkillsRoutes(service: SkillService = defaultSkillService, 
       allowedTools?: string[];
       status?: "enabled" | "disabled";
     };
-    const skill = service.createSkill({
-      skillId: c.req.param("skillId"),
-      name: body.name ?? c.req.param("skillId"),
-      description: body.description ?? "",
-      content: body.content ?? "",
-      category: body.category,
-      allowedTools: body.allowedTools,
-      status: body.status,
-    }, { agentId: body.agentId ?? "default", database });
-    return c.json({ skill });
+    try {
+      const skill = service.createSkill({
+        skillId: c.req.param("skillId"),
+        name: body.name ?? c.req.param("skillId"),
+        description: body.description ?? "",
+        content: body.content ?? "",
+        category: body.category,
+        allowedTools: body.allowedTools,
+        status: body.status,
+      }, { agentId: body.agentId ?? "default", database });
+      return c.json({ skill });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.post("/:skillId/update", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { agentId?: string };
+    try {
+      return c.json(await service.updateSkill(c.req.param("skillId"), {
+        agentId: body.agentId ?? "default",
+        database,
+      }));
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
   });
 
   app.post("/:skillId/enable", async (c) => {

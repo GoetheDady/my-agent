@@ -2,8 +2,8 @@ import type { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import { getAgent } from "../agents/agent-registry";
 import { getDb } from "../core/database";
-import { listAgentEvents } from "../events/event-log";
-import { getTask, listTasks, markTaskCanceled } from "../tasks/task-store";
+import { listAgentEvents, listTaskEvents } from "../events/event-log";
+import { getTask, listTasks, markTaskCanceled, retryTask } from "../tasks/task-store";
 import type { TaskStatus } from "../tasks/task-types";
 
 /**
@@ -30,7 +30,7 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
 
   app.get("/agents/:id", (c) => {
     const agent = getAgent(c.req.param("id"), database);
-    if (!agent) return c.json({ error: "Agent not found" }, 404);
+    if (!agent) return c.json({ error: "Agent 不存在。" }, 404);
     return c.json(agent);
   });
 
@@ -40,6 +40,19 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
       .queries("status")
       ?.flatMap((value) => value.split(",").filter(Boolean)) as TaskStatus[] | undefined;
     return c.json({ tasks: listTasks(agentId, statuses, database) });
+  });
+
+  app.get("/tasks/:id", (c) => {
+    const task = getTask(c.req.param("id"), database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    return c.json({ task });
+  });
+
+  app.get("/tasks/:id/events", (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    return c.json({ events: listTaskEvents(taskId, database) });
   });
 
   app.get("/events", (c) => {
@@ -56,15 +69,42 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     });
   });
 
+  app.post("/tasks/:id/retry", async (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+
+    const body = await readJsonBody(c.req.raw);
+    try {
+      return c.json({
+        task: retryTask(taskId, { force: body.force === true }, database),
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
   app.post("/tasks/:id/cancel", (c) => {
     const taskId = c.req.param("id");
     const task = getTask(taskId, database);
-    if (!task) return c.json({ error: "Task not found" }, 404);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
 
     // cancel 是控制台操作：释放 task/agent 状态，但不会删除已经保存的事件。
-    markTaskCanceled(taskId, database);
-    return c.json({ task: getTask(taskId, database) });
+    try {
+      markTaskCanceled(taskId, database);
+      return c.json({ task: getTask(taskId, database) });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
   });
 
   return app;
+}
+
+async function readJsonBody(request: Request): Promise<{ force?: boolean }> {
+  try {
+    return await request.json() as { force?: boolean };
+  } catch {
+    return {};
+  }
 }

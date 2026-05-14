@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
 import { defaultRealtimeService } from "../realtime/service";
-import { getTask } from "./task-store";
+import { getTask, TASK_LEASE_MS, TASK_SELECT_COLUMNS } from "./task-store";
 import type { TaskRecord } from "./task-types";
 
 /**
@@ -34,8 +34,7 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
 
     const nextTask = database
       .query<TaskRecord, [string]>(
-        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-                priority, input, result, error, created_at, started_at, completed_at
+        `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ? AND status = 'queued'
          ORDER BY priority DESC, created_at ASC
@@ -85,8 +84,7 @@ export function claimNextTaskForChannels(
     const placeholders = sourceChannels.map(() => "?").join(", ");
     const nextTask = database
       .query<TaskRecord, [string, ...string[]]>(
-        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-                priority, input, result, error, created_at, started_at, completed_at
+        `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ? AND status = 'queued' AND source_channel IN (${placeholders})
          ORDER BY priority DESC, created_at ASC
@@ -142,13 +140,22 @@ export function claimTask(taskId: string, database: Database = getDb()): TaskRec
 
 function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
   // task.status 和 agent.status 必须一起更新，二者共同表达“Agent 当前被哪个任务占用”。
+  const now = Date.now();
+  const leaseExpiresAt = now + TASK_LEASE_MS;
   database
     .query(
       `UPDATE tasks
-       SET status = 'running', started_at = ?, error = NULL
+       SET status = 'running',
+           started_at = ?,
+           error = NULL,
+           result = NULL,
+           completed_at = NULL,
+           canceled_at = NULL,
+           lease_expires_at = ?,
+           attempt_count = attempt_count + 1
        WHERE id = ?`,
     )
-    .run(Date.now(), task.id);
+    .run(now, leaseExpiresAt, task.id);
   updateAgentStatus(task.agent_id, "running", task.id, database);
 
   const claimed = getTask(task.id, database);

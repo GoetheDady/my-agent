@@ -4,7 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent, updateAgentStatus } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent } from "../events/event-log";
-import { createTask, getTask } from "../tasks/task-store";
+import { claimTask } from "../tasks/task-queue";
+import { createTask, getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
 import { createRuntimeRoutes } from "./runtime";
 
 function withRuntimeApp<T>(run: (app: Hono, db: Database) => T | Promise<T>): Promise<T> {
@@ -46,6 +47,21 @@ describe("runtime routes", () => {
     });
   });
 
+  test("GET /runtime/tasks/:id returns one task", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+
+      const res = await app.request("/runtime/tasks/task-1");
+      const body = await res.json() as { task: { id: string; status: string } };
+
+      expect(res.status).toBe(200);
+      expect(body.task).toMatchObject({
+        id: "task-1",
+        status: "queued",
+      });
+    });
+  });
+
   test("GET /runtime/events returns agent events", async () => {
     await withRuntimeApp(async (app, db) => {
       appendEvent({ id: "event-1", type: "user.message", payload: { text: "hello" } }, db);
@@ -55,6 +71,50 @@ describe("runtime routes", () => {
 
       expect(res.status).toBe(200);
       expect(body.events.map((event) => event.id)).toEqual(["event-1"]);
+    });
+  });
+
+  test("GET /runtime/tasks/:id/events returns task timeline", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+      appendEvent({ id: "event-1", task_id: "task-1", type: "task.started" }, db);
+
+      const res = await app.request("/runtime/tasks/task-1/events");
+      const body = await res.json() as { events: Array<{ id: string }> };
+
+      expect(res.status).toBe(200);
+      expect(body.events.map((event) => event.id)).toEqual(["event-1"]);
+    });
+  });
+
+  test("POST /runtime/tasks/:id/retry retries failed task", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+      claimTask("task-1", db);
+      markTaskFailed("task-1", "boom", db);
+
+      const res = await app.request("/runtime/tasks/task-1/retry", { method: "POST" });
+      const body = await res.json() as { task: { id: string; status: string } };
+
+      expect(res.status).toBe(200);
+      expect(body.task).toMatchObject({
+        id: "task-1",
+        status: "queued",
+      });
+    });
+  });
+
+  test("POST /runtime/tasks/:id/retry returns 409 for completed task", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+      claimTask("task-1", db);
+      markTaskCompleted("task-1", "done", db);
+
+      const res = await app.request("/runtime/tasks/task-1/retry", { method: "POST" });
+      const body = await res.json() as { error: string };
+
+      expect(res.status).toBe(409);
+      expect(body.error).toBe("任务已完成，不能重试。");
     });
   });
 
@@ -88,6 +148,20 @@ describe("runtime routes", () => {
         status: "idle",
         current_task_id: null,
       });
+    });
+  });
+
+  test("POST /runtime/tasks/:id/cancel returns 409 for completed task", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+      claimTask("task-1", db);
+      markTaskCompleted("task-1", "done", db);
+
+      const res = await app.request("/runtime/tasks/task-1/cancel", { method: "POST" });
+      const body = await res.json() as { error: string };
+
+      expect(res.status).toBe(409);
+      expect(body.error).toBe("任务已完成，不能取消。");
     });
   });
 });

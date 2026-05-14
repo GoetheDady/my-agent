@@ -46,6 +46,10 @@ const agentConfigPatchSchema = z.object({
       enableSkillIds: z.array(z.string()).optional(),
       disableSkillIds: z.array(z.string()).optional(),
       removeSkillIds: z.array(z.string()).optional(),
+      builtinOverrides: z.record(z.string(), z.object({
+        status: z.enum(["enabled", "disabled"]).optional(),
+        updatedAt: z.number().optional(),
+      }).nullable()).optional(),
       items: z.record(z.string(), z.object({
         name: z.string().optional(),
         description: z.string().optional(),
@@ -54,6 +58,7 @@ const agentConfigPatchSchema = z.object({
         addAllowedTools: z.array(z.string()).optional(),
         removeAllowedTools: z.array(z.string()).optional(),
         source: z.string().optional(),
+        origin: z.any().optional(),
         status: z.enum(["enabled", "disabled"]).optional(),
         createdAt: z.number().optional(),
         updatedAt: z.number().optional(),
@@ -104,7 +109,7 @@ export function createAgentConfigTools(context: AgentConfigToolContext = {}) {
       description: [
         "局部更新当前 Agent 的配置。只能修改允许的配置字段，不能直接写 agent.json 文件。",
         "数组字段支持精细操作：tools.addEnabledToolsets/removeEnabledToolsets、tools.addRequiresApproval/removeRequiresApproval、tools.addAllowedPaths/removeAllowedPaths。",
-        "skill 支持 skills.enableSkillIds/disableSkillIds/removeSkillIds，以及 skills.items[skillId].addAllowedTools/removeAllowedTools。",
+        "skill 支持 skills.enableSkillIds/disableSkillIds/removeSkillIds、skills.builtinOverrides，以及 skills.items[skillId].addAllowedTools/removeAllowedTools。",
         "飞书绑定写入 channels.feishu.bindings[appId]，读取时 appSecret 会脱敏；删除用 channels.feishu.removeBindingAppIds。",
       ].join(" "),
       inputSchema: agentConfigPatchSchema,

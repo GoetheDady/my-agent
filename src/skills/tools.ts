@@ -29,6 +29,14 @@ const skillCreateSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
 });
 
+const skillInstallSchema = z.object({
+  url: z.string().min(1),
+  skillId: z.string().optional(),
+  branch: z.string().optional(),
+  subdir: z.string().optional(),
+  status: z.enum(["enabled", "disabled"]).optional(),
+});
+
 const skillToggleSchema = z.object({
   skillId: z.string().min(1),
 });
@@ -94,6 +102,28 @@ export function createSkillTools(context: SkillToolContext = {}) {
         return result.skill
           ? { success: true, ...result }
           : { success: false, ...result, error: "skill_not_found" };
+      },
+    }),
+    skill_install: tool({
+      description: "从 GitHub 仓库安装远程 skill。默认安装为 disabled，启用前需要用户确认。",
+      inputSchema: skillInstallSchema,
+      execute: async (input: z.infer<typeof skillInstallSchema>) => {
+        const result = await service.installSkill({
+          url: input.url,
+          skillId: input.skillId,
+          branch: input.branch,
+          subdir: input.subdir,
+          status: input.status,
+        }, agentContext);
+        return { success: true, ...result };
+      },
+    }),
+    skill_update: tool({
+      description: "按已保存的远程地址更新当前 Agent 的远程安装 skill。",
+      inputSchema: skillToggleSchema,
+      execute: async (input: z.infer<typeof skillToggleSchema>) => {
+        const result = await service.updateSkill(input.skillId, agentContext);
+        return { success: true, ...result };
       },
     }),
   };

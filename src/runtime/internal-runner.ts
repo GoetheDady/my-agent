@@ -8,7 +8,13 @@ import { appendEvent } from "../events/event-log";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import { claimTask } from "../tasks/task-queue";
-import { getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
+import {
+  getTask,
+  markTaskCompleted,
+  markTaskFailed,
+  renewTaskLease,
+  TASK_LEASE_RENEW_INTERVAL_MS,
+} from "../tasks/task-store";
 import type { TaskRecord } from "../tasks/task-types";
 import { buildAgentTools } from "../tools/service";
 import { AgentBusyError } from "./agent-runtime";
@@ -87,6 +93,7 @@ function getModel(agentId: string) {
 export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Promise<InternalAgentTaskResult> {
   const database = input.database ?? getDb();
   const claimed = ensureClaimed(input.task, database);
+  const stopLeaseHeartbeat = startTaskLeaseHeartbeat(claimed.id, database);
   appendEvent({
     agent_id: claimed.agent_id,
     task_id: claimed.id,
@@ -146,7 +153,17 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
       payload: { error: message },
     }, database);
     throw error;
+  } finally {
+    stopLeaseHeartbeat();
   }
+}
+
+function startTaskLeaseHeartbeat(taskId: string, database: Database): () => void {
+  const interval = setInterval(() => {
+    renewTaskLease(taskId, database);
+  }, TASK_LEASE_RENEW_INTERVAL_MS);
+  (interval as { unref?: () => void }).unref?.();
+  return () => clearInterval(interval);
 }
 
 function ensureClaimed(task: TaskRecord, database: Database): TaskRecord {

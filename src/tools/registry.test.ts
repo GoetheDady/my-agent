@@ -113,6 +113,8 @@ describe("tool registry", () => {
     await withTemporaryAgentConfig(async () => {
       let tools = buildAgentTools({ agentId: "default" });
       await expect(resolveNeedsApproval(tools.skill_create.needsApproval)).resolves.toBe(true);
+      await expect(resolveNeedsApproval(tools.skill_install.needsApproval)).resolves.toBe(true);
+      await expect(resolveNeedsApproval(tools.skill_update.needsApproval)).resolves.toBe(true);
 
       defaultAgentConfigService.patchAgentConfig("default", {
         tools: { removeRequiresApproval: ["skill_create"] },

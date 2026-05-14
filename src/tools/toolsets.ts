@@ -39,13 +39,15 @@ export const TOOLSETS: ToolsetDefinition[] = [
   },
   {
     name: "skill",
-    description: "Agent 本地 skill 索引、读取、创建和启停工具。",
+    description: "Agent skill 索引、读取、创建、远程安装、更新和启停工具。",
     tools: [
       "skill_list",
       "skill_view",
       "skill_create",
       "skill_enable",
       "skill_disable",
+      "skill_install",
+      "skill_update",
     ],
   },
   {

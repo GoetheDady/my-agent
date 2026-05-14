@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import type { SkillOrigin } from "../skills/skill-types";
 
 export type AgentConfigSkillStatus = "enabled" | "disabled";
 
@@ -8,8 +9,14 @@ export interface AgentConfigSkill {
   category: string;
   allowedTools: string[];
   source: string;
+  origin: SkillOrigin;
   status: AgentConfigSkillStatus;
   createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentConfigBuiltinSkillOverride {
+  status: AgentConfigSkillStatus;
   updatedAt: number;
 }
 
@@ -34,6 +41,7 @@ export interface AgentSkillConfig {
   enabled: boolean;
   indexEnabled: boolean;
   items: Record<string, AgentConfigSkill>;
+  builtinOverrides: Record<string, AgentConfigBuiltinSkillOverride>;
 }
 
 export interface AgentFeishuBindingConfig {
@@ -105,6 +113,7 @@ export interface AgentConfigPatch {
     enableSkillIds?: string[];
     disableSkillIds?: string[];
     removeSkillIds?: string[];
+    builtinOverrides?: Record<string, Partial<AgentConfigBuiltinSkillOverride> | null>;
     items?: Record<string, (Partial<AgentConfigSkill> & {
       addAllowedTools?: string[];
       removeAllowedTools?: string[];

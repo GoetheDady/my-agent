@@ -7,10 +7,14 @@ import {
   createTask,
   getTask,
   listTasks,
+  markTaskCanceled,
   markTaskCompleted,
   markTaskFailed,
   recoverRunningTasks,
+  renewTaskLease,
+  retryTask,
 } from "./task-store";
+import { listTaskEvents } from "../events/event-log";
 
 function withTaskDb<T>(run: (db: Database) => T): T {
   const db = new Database(":memory:");
@@ -51,7 +55,32 @@ describe("task queue", () => {
         source_user_id: "user-1",
         input: "hello",
         status: "queued",
+        attempt_count: 0,
+        max_attempts: 3,
+        lease_expires_at: null,
+        idempotency_key: null,
+        canceled_at: null,
       });
+    });
+  });
+
+  test("createTask returns existing task for duplicate idempotency key", () => {
+    withTaskDb((db) => {
+      const first = createTask({
+        id: "first",
+        source_channel: "feishu",
+        input: "hello",
+        idempotency_key: "feishu:message-1",
+      }, db);
+      const second = createTask({
+        id: "second",
+        source_channel: "feishu",
+        input: "duplicate",
+        idempotency_key: "feishu:message-1",
+      }, db);
+
+      expect(second.id).toBe(first.id);
+      expect(listTasks("default", undefined, db).map((task) => task.id)).toEqual(["first"]);
     });
   });
 
@@ -86,6 +115,8 @@ describe("task queue", () => {
 
       expect(claimed?.id).toBe("high-old");
       expect(claimed?.status).toBe("running");
+      expect(claimed?.attempt_count).toBe(1);
+      expect(claimed?.lease_expires_at).toBeGreaterThan(Date.now());
       expect(getAgent("default", db)).toMatchObject({
         status: "running",
         current_task_id: "high-old",
@@ -142,6 +173,7 @@ describe("task queue", () => {
       expect(getTask("first", db)).toMatchObject({
         status: "completed",
         result: "done",
+        lease_expires_at: null,
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -161,6 +193,7 @@ describe("task queue", () => {
       expect(getTask("first", db)).toMatchObject({
         status: "failed",
         error: "boom",
+        lease_expires_at: null,
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -179,21 +212,149 @@ describe("task queue", () => {
     });
   });
 
-  test("recoverRunningTasks fails stale running task and releases agent", () => {
+  test("markTaskCanceled clears lease and releases running agent", () => {
     withTaskDb((db) => {
-      createTask({ id: "stale", source_channel: "feishu", input: "stale" }, db);
+      createTask({ id: "cancel-me", source_channel: "web", input: "cancel" }, db);
       claimNextTask("default", db);
+
+      markTaskCanceled("cancel-me", db);
+
+      expect(getTask("cancel-me", db)).toMatchObject({
+        status: "canceled",
+        lease_expires_at: null,
+      });
+      expect(typeof getTask("cancel-me", db)?.canceled_at).toBe("number");
+      expect(getAgent("default", db)).toMatchObject({
+        status: "idle",
+        current_task_id: null,
+      });
+    });
+  });
+
+  test("renewTaskLease extends running task lease and writes event", () => {
+    withTaskDb((db) => {
+      createTask({ id: "running", source_channel: "web", input: "run" }, db);
+      claimNextTask("default", db);
+      db.query("UPDATE tasks SET lease_expires_at = ? WHERE id = ?").run(Date.now() - 1, "running");
+
+      const renewed = renewTaskLease("running", db);
+
+      expect(renewed?.lease_expires_at).toBeGreaterThan(Date.now());
+      expect(listTaskEvents("running", db).map((event) => event.type)).toContain("task.lease.renewed");
+    });
+  });
+
+  test("retryTask requeues failed task without increasing attempt count", () => {
+    withTaskDb((db) => {
+      createTask({ id: "retry-me", source_channel: "web", input: "retry" }, db);
+      claimNextTask("default", db);
+      markTaskFailed("retry-me", "boom", db);
+
+      const retried = retryTask("retry-me", {}, db);
+
+      expect(retried).toMatchObject({
+        status: "queued",
+        attempt_count: 1,
+        result: null,
+        error: null,
+        completed_at: null,
+        lease_expires_at: null,
+      });
+      expect(listTaskEvents("retry-me", db).map((event) => event.type)).toContain("task.retry_scheduled");
+    });
+  });
+
+  test("retryTask rejects completed task", () => {
+    withTaskDb((db) => {
+      createTask({ id: "done", source_channel: "web", input: "done" }, db);
+      claimNextTask("default", db);
+      markTaskCompleted("done", "ok", db);
+
+      expect(() => retryTask("done", {}, db)).toThrow("任务已完成，不能重试。");
+    });
+  });
+
+  test("retryTask rejects canceled task by default and allows force retry", () => {
+    withTaskDb((db) => {
+      createTask({ id: "canceled", source_channel: "web", input: "cancel" }, db);
+      markTaskCanceled("canceled", db);
+
+      expect(() => retryTask("canceled", {}, db)).toThrow("任务已取消");
+      expect(retryTask("canceled", { force: true }, db)).toMatchObject({
+        status: "queued",
+        canceled_at: null,
+      });
+    });
+  });
+
+  test("retryTask rejects max attempts unless forced", () => {
+    withTaskDb((db) => {
+      createTask({ id: "maxed", source_channel: "web", input: "max", max_attempts: 1 }, db);
+      claimNextTask("default", db);
+      markTaskFailed("maxed", "boom", db);
+
+      expect(() => retryTask("maxed", {}, db)).toThrow("任务已达到最大执行次数");
+      expect(retryTask("maxed", { force: true }, db)).toMatchObject({ status: "queued" });
+    });
+  });
+
+  test("recoverRunningTasks ignores unexpired running task", () => {
+    withTaskDb((db) => {
+      createTask({ id: "active", source_channel: "web", input: "active" }, db);
+      claimNextTask("default", db);
+
+      expect(recoverRunningTasks(db)).toBe(0);
+      expect(getTask("active", db)).toMatchObject({ status: "running" });
+      expect(getAgent("default", db)).toMatchObject({
+        status: "running",
+        current_task_id: "active",
+      });
+    });
+  });
+
+  test("recoverRunningTasks requeues expired running task and releases agent", () => {
+    withTaskDb((db) => {
+      createTask({ id: "stale", source_channel: "web", input: "stale" }, db);
+      claimNextTask("default", db);
+      db.query("UPDATE tasks SET lease_expires_at = ? WHERE id = ?").run(Date.now() - 1, "stale");
 
       expect(recoverRunningTasks(db)).toBe(1);
 
       expect(getTask("stale", db)).toMatchObject({
-        status: "failed",
-        error: "Recovered stale running task after service restart",
+        status: "queued",
+        error: null,
+        lease_expires_at: null,
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
         current_task_id: null,
       });
+      expect(listTaskEvents("stale", db).map((event) => event.type)).toEqual([
+        "task.recovered",
+        "task.retry_scheduled",
+      ]);
+    });
+  });
+
+  test("recoverRunningTasks permanently fails expired task after max attempts", () => {
+    withTaskDb((db) => {
+      createTask({ id: "max-stale", source_channel: "web", input: "stale", max_attempts: 1 }, db);
+      claimNextTask("default", db);
+      db.query("UPDATE tasks SET lease_expires_at = ? WHERE id = ?").run(Date.now() - 1, "max-stale");
+
+      expect(recoverRunningTasks(db)).toBe(1);
+
+      expect(getTask("max-stale", db)).toMatchObject({
+        status: "failed",
+        lease_expires_at: null,
+      });
+      expect(getAgent("default", db)).toMatchObject({
+        status: "idle",
+        current_task_id: null,
+      });
+      expect(listTaskEvents("max-stale", db).map((event) => event.type)).toEqual([
+        "task.failed_permanently",
+      ]);
     });
   });
 });

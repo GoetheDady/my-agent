@@ -1,14 +1,29 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { AgentConfigService, defaultAgentConfigService } from "../agents/config-service";
 import { getRuntimeDataDir } from "../core/config";
 import { appendEvent } from "../events/event-log";
 import type {
   SkillCreateInput,
+  SkillInstallInput,
+  SkillInstallResult,
   SkillListResult,
   SkillRecord,
   SkillMetadata,
+  SkillOrigin,
   SkillServiceContext,
   SkillStatus,
   SkillStatusUpdateResult,
@@ -18,6 +33,32 @@ import type {
 const DEFAULT_AGENT_ID = "default";
 const DEFAULT_SKILLS_DIR_NAME = "skills";
 const SKILL_MARKDOWN_FILENAME = "SKILL.md";
+const DEFAULT_BUILTIN_SKILLS_DIR = resolve(process.cwd(), "skills", "builtin");
+const DEFAULT_REMOTE_BRANCH = "main";
+
+interface ParsedSkillMarkdown {
+  id?: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  allowedTools: string[];
+  defaultStatus?: SkillStatus;
+  body: string;
+}
+
+export interface RemoteSkillFetchInput {
+  url: string;
+  branch: string;
+  subdir: string;
+}
+
+export interface RemoteSkillFetchResult {
+  directory: string;
+  commit: string;
+  cleanup: () => void;
+}
+
+export type RemoteSkillFetcher = (input: RemoteSkillFetchInput) => RemoteSkillFetchResult | Promise<RemoteSkillFetchResult>;
 
 function now(): number {
   return Date.now();
@@ -104,6 +145,7 @@ function toSkillRecord(agentId: string, rootDir: string, skillId: string, entry:
     agentId,
     directory,
     filePath,
+    readonly: entry.origin.type === "builtin",
     ...entry,
   };
 }
@@ -133,7 +175,18 @@ function formatSkillIndex(skills: SkillRecord[]): string {
 function emitSkillEvent(
   database: Database | undefined,
   input: SkillServiceContext,
-  type: "skill.created" | "skill.updated" | "skill.enabled" | "skill.disabled" | "skill.viewed",
+  type:
+    | "skill.created"
+    | "skill.updated"
+    | "skill.enabled"
+    | "skill.disabled"
+    | "skill.viewed"
+    | "skill.installed"
+    | "skill.install.failed"
+    | "skill.remote_updated"
+    | "skill.remote_update.skipped"
+    | "skill.remote_update.failed"
+    | "skill.builtin.viewed",
   payload: Record<string, unknown>,
 ): void {
   appendEvent({
@@ -145,13 +198,177 @@ function emitSkillEvent(
   }, database);
 }
 
+function stripQuotes(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
+  const result: ParsedSkillMarkdown = { allowedTools: [], body: content };
+  if (!content.startsWith("---")) {
+    applyContentFallbacks(result, content);
+    return result;
+  }
+
+  const endIndex = content.indexOf("\n---", 3);
+  if (endIndex < 0) {
+    applyContentFallbacks(result, content);
+    return result;
+  }
+
+  const frontmatter = content.slice(3, endIndex).split(/\r?\n/);
+  const body = content.slice(endIndex + 4).trimStart();
+  result.body = body;
+  let currentArrayKey: string | null = null;
+  for (const rawLine of frontmatter) {
+    const line = rawLine.trimEnd();
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const arrayItem = line.match(/^\s*-\s+(.+)$/);
+    if (arrayItem && currentArrayKey === "allowedTools") {
+      result.allowedTools.push(stripQuotes(arrayItem[1]));
+      continue;
+    }
+    currentArrayKey = null;
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1];
+    const value = stripQuotes(match[2] ?? "");
+    if (value === "") {
+      if (key === "allowedTools") currentArrayKey = key;
+      continue;
+    }
+    if (key === "id") result.id = value;
+    if (key === "name") result.name = value;
+    if (key === "description") result.description = value;
+    if (key === "category") result.category = value;
+    if (key === "defaultStatus" && (value === "enabled" || value === "disabled")) result.defaultStatus = value;
+    if (key === "allowedTools") {
+      result.allowedTools = value.split(",").map((item) => stripQuotes(item)).filter(Boolean);
+    }
+  }
+  applyContentFallbacks(result, body);
+  return result;
+}
+
+function applyContentFallbacks(result: ParsedSkillMarkdown, content: string): void {
+  if (!result.name) {
+    const heading = content.match(/^#\s+(.+)$/m);
+    if (heading) result.name = heading[1].trim();
+  }
+  if (!result.description) {
+    const paragraph = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("---"));
+    if (paragraph) result.description = paragraph;
+  }
+}
+
+function githubRepoFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "github.com") return null;
+    const parts = parsed.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+    return `${parts[0]}/${parts[1]}`;
+  } catch {
+    return null;
+  }
+}
+
+function assertGithubUrl(url: string): string {
+  const repo = githubRepoFromUrl(url);
+  if (!repo) throw new Error("v1 只支持 https://github.com/<owner>/<repo> 格式的 GitHub 仓库地址。");
+  return repo;
+}
+
+function defaultRemoteSkillFetcher(input: RemoteSkillFetchInput): RemoteSkillFetchResult {
+  const repo = assertGithubUrl(input.url);
+  const tempRoot = mkdtempSync(join(tmpdir(), "my-agent-skill-remote-"));
+  const repoDir = join(tempRoot, "repo");
+  try {
+    execFileSync("git", ["clone", "--depth", "1", "--branch", input.branch, input.url, repoDir], {
+      stdio: "pipe",
+    });
+    const commit = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: "pipe",
+    }).trim();
+    const sourceDir = resolve(repoDir, input.subdir || ".");
+    const relativeSource = relative(repoDir, sourceDir);
+    if (relativeSource.startsWith("..") || isAbsolute(relativeSource)) {
+      throw new Error("远程 skill subdir 不能指向仓库外部。");
+    }
+    if (!existsSync(sourceDir)) {
+      throw new Error(`远程 skill 目录不存在: ${input.subdir || repo}`);
+    }
+    return {
+      directory: sourceDir,
+      commit,
+      cleanup: () => rmSync(tempRoot, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    rmSync(tempRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function copyDirectoryExcludingGit(sourceDir: string, targetDir: string): void {
+  ensureDirectory(targetDir);
+  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
+    if (entry.name === ".git") continue;
+    const sourcePath = join(sourceDir, entry.name);
+    const targetPath = join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectoryExcludingGit(sourcePath, targetPath);
+      continue;
+    }
+    if (entry.isFile()) {
+      copyFileSync(sourcePath, targetPath);
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+  }
+}
+
+function replaceDirectoryAtomically(sourceDir: string, targetDir: string): void {
+  const parentDir = dirname(targetDir);
+  ensureDirectory(parentDir);
+  const tempTarget = `${targetDir}.next-${Date.now()}`;
+  const backupTarget = `${targetDir}.bak-${Date.now()}`;
+  copyDirectoryExcludingGit(sourceDir, tempTarget);
+  try {
+    if (existsSync(targetDir)) renameSync(targetDir, backupTarget);
+    renameSync(tempTarget, targetDir);
+    rmSync(backupTarget, { recursive: true, force: true });
+  } catch (error) {
+    rmSync(tempTarget, { recursive: true, force: true });
+    if (!existsSync(targetDir) && existsSync(backupTarget)) renameSync(backupTarget, targetDir);
+    throw error;
+  }
+}
+
 export class SkillService {
   private readonly rootDir: string;
+  private readonly builtinRootDir: string;
   private readonly agentConfigService: AgentConfigService;
+  private readonly remoteSkillFetcher: RemoteSkillFetcher;
 
-  constructor(options: { rootDir?: string; agentConfigService?: AgentConfigService } = {}) {
+  constructor(options: {
+    rootDir?: string;
+    builtinRootDir?: string;
+    agentConfigService?: AgentConfigService;
+    remoteSkillFetcher?: RemoteSkillFetcher;
+  } = {}) {
     this.rootDir = options.rootDir ?? getRuntimeDataDir();
+    this.builtinRootDir = options.builtinRootDir ?? DEFAULT_BUILTIN_SKILLS_DIR;
     this.agentConfigService = options.agentConfigService ?? new AgentConfigService({ rootDir: this.rootDir });
+    this.remoteSkillFetcher = options.remoteSkillFetcher ?? defaultRemoteSkillFetcher;
   }
 
   private getAgentId(input: SkillServiceContext = {}): string {
@@ -162,17 +379,85 @@ export class SkillService {
     return this.agentConfigService.getAgentConfig(agentId, context).skills.items;
   }
 
-  private getEntry(agentId: string, skillId: string, context: SkillServiceContext = {}): SkillRecord | null {
+  private getPrivateEntry(agentId: string, skillId: string, context: SkillServiceContext = {}): SkillRecord | null {
     const entry = this.getSkillItems(agentId, context)[skillId];
     if (!entry) return null;
     return toSkillRecord(agentId, this.rootDir, skillId, entry);
+  }
+
+  private getBuiltinEntry(agentId: string, skillId: string, context: SkillServiceContext = {}): SkillRecord | null {
+    const builtins = this.listBuiltinSkills(agentId, context);
+    return builtins.find((skill) => skill.id === skillId) ?? null;
+  }
+
+  private getEntry(agentId: string, skillId: string, context: SkillServiceContext = {}): SkillRecord | null {
+    return this.getBuiltinEntry(agentId, skillId, context) ?? this.getPrivateEntry(agentId, skillId, context);
+  }
+
+  private hasBuiltinSkill(skillId: string): boolean {
+    return this.scanBuiltinSkills().some((skill) => skill.id === safeSkillSegment(skillId));
+  }
+
+  private scanBuiltinSkills(): SkillRecord[] {
+    if (!existsSync(this.builtinRootDir)) return [];
+    return readdirSync(this.builtinRootDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => this.readBuiltinSkill(entry.name))
+      .filter((skill): skill is SkillRecord => Boolean(skill));
+  }
+
+  private readBuiltinSkill(directoryName: string): SkillRecord | null {
+    const directory = resolve(this.builtinRootDir, directoryName);
+    const filePath = resolve(directory, SKILL_MARKDOWN_FILENAME);
+    if (!existsSync(filePath)) return null;
+    const content = readFileSync(filePath, "utf8");
+    const parsed = parseSkillMarkdown(content);
+    const skillId = safeSkillSegment(parsed.id ?? directoryName);
+    const createdAt = now();
+    const metadata: SkillMetadata = {
+      name: parsed.name ?? skillId,
+      description: parsed.description ?? "",
+      category: parsed.category ?? "builtin",
+      allowedTools: parsed.allowedTools,
+      source: "builtin",
+      origin: {
+        type: "builtin",
+        source: "builtin",
+        builtinPath: filePath,
+      },
+      status: parsed.defaultStatus ?? "enabled",
+      createdAt,
+      updatedAt: createdAt,
+    };
+    return {
+      id: skillId,
+      agentId: "*",
+      directory,
+      filePath,
+      readonly: true,
+      ...metadata,
+    };
+  }
+
+  private listBuiltinSkills(agentId: string, context: SkillServiceContext = {}): SkillRecord[] {
+    const config = this.agentConfigService.getAgentConfig(agentId, context);
+    return this.scanBuiltinSkills().map((skill) => ({
+      ...skill,
+      agentId,
+      status: config.skills.builtinOverrides[skill.id]?.status ?? skill.status,
+    }));
   }
 
   listSkills(agentIdOrContext: string | SkillServiceContext = DEFAULT_AGENT_ID, status: "enabled" | "disabled" | "all" = "all"): SkillListResult {
     const input = typeof agentIdOrContext === "string" ? { agentId: agentIdOrContext } : agentIdOrContext;
     const agentId = this.getAgentId(input);
     const config = this.agentConfigService.getAgentConfig(agentId, input);
-    const records = Object.entries(config.skills.items).map(([skillId, entry]) => toSkillRecord(agentId, this.rootDir, skillId, entry));
+    const builtinSkills = this.listBuiltinSkills(agentId, input);
+    const builtinIds = new Set(builtinSkills.map((skill) => skill.id));
+    const privateSkills = Object.entries(config.skills.items)
+      .filter(([skillId]) => !builtinIds.has(skillId))
+      .map(([skillId, entry]) => toSkillRecord(agentId, this.rootDir, skillId, entry));
+    const records = [...builtinSkills, ...privateSkills];
     const filtered = status === "all"
       ? records
       : records.filter((skill) => skill.status === status);
@@ -225,11 +510,12 @@ export class SkillService {
     }
 
     const content = readFileSync(targetFilePath, "utf8");
-    emitSkillEvent(context.database, { ...context, agentId }, "skill.viewed", {
+    emitSkillEvent(context.database, { ...context, agentId }, skill.origin.type === "builtin" ? "skill.builtin.viewed" : "skill.viewed", {
       skillId: skill.id,
       skillName: skill.name,
       filePath: targetFilePath,
       status: skill.status,
+      origin: skill.origin,
     });
 
     return { agentId, skill, content, filePath: targetFilePath };
@@ -238,15 +524,23 @@ export class SkillService {
   createSkill(input: SkillCreateInput, context: SkillServiceContext = {}): SkillRecord {
     const agentId = this.getAgentId(context);
     const skillId = safeSkillSegment(input.skillId);
+    if (this.hasBuiltinSkill(skillId)) {
+      throw new Error("不能覆盖系统内置 skill。");
+    }
     const nowTs = now();
-    const existing = this.getEntry(agentId, skillId, context);
+    const existing = this.getPrivateEntry(agentId, skillId, context);
     const status: SkillStatus = input.status ?? existing?.status ?? "enabled";
     const record: SkillMetadata = {
       name: input.name.trim(),
       description: input.description.trim(),
       category: (input.category ?? existing?.category ?? "general").trim() || "general",
       allowedTools: (input.allowedTools ?? existing?.allowedTools ?? []).map((toolName) => toolName.trim()).filter(Boolean),
-      source: input.source ?? existing?.source ?? "agent-created",
+      source: "agent-created",
+      origin: {
+        type: "agent_created",
+        source: "agent-created",
+        createdAt: existing?.origin.type === "agent_created" ? existing.origin.createdAt : nowTs,
+      },
       status,
       createdAt: existing?.createdAt ?? nowTs,
       updatedAt: nowTs,
@@ -281,6 +575,7 @@ export class SkillService {
       category: record.category,
       allowedTools: record.allowedTools,
       source: record.source,
+      origin: record.origin,
     });
 
     return toSkillRecord(agentId, this.rootDir, skillId, record);
@@ -292,6 +587,23 @@ export class SkillService {
     const record = this.getEntry(agentId, normalizedSkillId, context);
     if (!record) {
       return { agentId, skill: null, changed: false };
+    }
+    if (record.origin.type === "builtin") {
+      this.agentConfigService.patchAgentConfig(agentId, {
+        skills: {
+          builtinOverrides: {
+            [normalizedSkillId]: { status: "enabled" },
+          },
+        },
+      }, context);
+      const next = this.getBuiltinEntry(agentId, normalizedSkillId, context) ?? { ...record, status: "enabled" };
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.enabled", {
+        skillId: normalizedSkillId,
+        name: next.name,
+        category: next.category,
+        origin: next.origin,
+      });
+      return { agentId, skill: next, changed: record.status !== "enabled" };
     }
     this.agentConfigService.patchAgentConfig(agentId, {
       skills: {
@@ -313,6 +625,7 @@ export class SkillService {
       skillId: normalizedSkillId,
       name: next.name,
       category: next.category,
+      origin: next.origin,
     });
     return { agentId, skill: next, changed: true };
   }
@@ -323,6 +636,23 @@ export class SkillService {
     const record = this.getEntry(agentId, normalizedSkillId, context);
     if (!record) {
       return { agentId, skill: null, changed: false };
+    }
+    if (record.origin.type === "builtin") {
+      this.agentConfigService.patchAgentConfig(agentId, {
+        skills: {
+          builtinOverrides: {
+            [normalizedSkillId]: { status: "disabled" },
+          },
+        },
+      }, context);
+      const next = this.getBuiltinEntry(agentId, normalizedSkillId, context) ?? { ...record, status: "disabled" };
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.disabled", {
+        skillId: normalizedSkillId,
+        name: next.name,
+        category: next.category,
+        origin: next.origin,
+      });
+      return { agentId, skill: next, changed: record.status !== "disabled" };
     }
     this.agentConfigService.patchAgentConfig(agentId, {
       skills: {
@@ -344,8 +674,159 @@ export class SkillService {
       skillId: normalizedSkillId,
       name: next.name,
       category: next.category,
+      origin: next.origin,
     });
     return { agentId, skill: next, changed: true };
+  }
+
+  async installSkill(input: SkillInstallInput, context: SkillServiceContext = {}): Promise<SkillInstallResult> {
+    const agentId = this.getAgentId(context);
+    const branch = input.branch?.trim() || DEFAULT_REMOTE_BRANCH;
+    const subdir = input.subdir?.trim() ?? "";
+    const repo = assertGithubUrl(input.url);
+    let fetched: RemoteSkillFetchResult | null = null;
+    try {
+      fetched = await this.remoteSkillFetcher({ url: input.url, branch, subdir });
+      const skillFile = resolve(fetched.directory, SKILL_MARKDOWN_FILENAME);
+      if (!existsSync(skillFile)) throw new Error("远程目录中缺少 SKILL.md。");
+      const content = readFileSync(skillFile, "utf8");
+      const parsed = parseSkillMarkdown(content);
+      const skillId = safeSkillSegment(input.skillId ?? parsed.id ?? basename(repo));
+      if (this.hasBuiltinSkill(skillId)) throw new Error("不能覆盖系统内置 skill。");
+      if (this.getPrivateEntry(agentId, skillId, context)) throw new Error("skill 已存在，不能重复安装。");
+
+      const nowTs = now();
+      const targetDir = skillDirectoryFor(agentId, skillId, this.rootDir);
+      copyDirectoryExcludingGit(fetched.directory, targetDir);
+      const origin: SkillOrigin = {
+        type: "remote_installed",
+        source: "github",
+        provider: "github",
+        url: input.url,
+        repo,
+        branch,
+        subdir,
+        commit: fetched.commit,
+        installedAt: nowTs,
+        updatedAt: nowTs,
+      };
+      const record = this.buildRemoteSkillMetadata(skillId, parsed, origin, input.status ?? "disabled", nowTs, nowTs);
+      this.agentConfigService.patchAgentConfig(agentId, {
+        skills: {
+          items: {
+            [skillId]: record,
+          },
+        },
+      }, context);
+      const skill = toSkillRecord(agentId, this.rootDir, skillId, record);
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.installed", {
+        skillId,
+        name: skill.name,
+        status: skill.status,
+        origin,
+      });
+      return { skill, changed: true, previousCommit: null };
+    } catch (error) {
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.install.failed", {
+        url: input.url,
+        branch,
+        subdir,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      fetched?.cleanup();
+    }
+  }
+
+  async updateSkill(skillId: string, context: SkillServiceContext = {}): Promise<SkillInstallResult> {
+    const agentId = this.getAgentId(context);
+    const normalizedSkillId = safeSkillSegment(skillId);
+    const existing = this.getPrivateEntry(agentId, normalizedSkillId, context);
+    if (!existing) throw new Error("skill 不存在。");
+    if (existing.origin.type !== "remote_installed") {
+      throw new Error("只有远程安装的 skill 可以更新。");
+    }
+
+    let fetched: RemoteSkillFetchResult | null = null;
+    try {
+      fetched = await this.remoteSkillFetcher({
+        url: existing.origin.url,
+        branch: existing.origin.branch,
+        subdir: existing.origin.subdir,
+      });
+      if (fetched.commit === existing.origin.commit) {
+        emitSkillEvent(context.database, { ...context, agentId }, "skill.remote_update.skipped", {
+          skillId: existing.id,
+          commit: existing.origin.commit,
+          origin: existing.origin,
+        });
+        return { skill: existing, changed: false, previousCommit: existing.origin.commit };
+      }
+
+      const skillFile = resolve(fetched.directory, SKILL_MARKDOWN_FILENAME);
+      if (!existsSync(skillFile)) throw new Error("远程目录中缺少 SKILL.md。");
+      const parsed = parseSkillMarkdown(readFileSync(skillFile, "utf8"));
+      const updatedAt = now();
+      const origin: SkillOrigin = {
+        ...existing.origin,
+        commit: fetched.commit,
+        updatedAt,
+      };
+      const record = this.buildRemoteSkillMetadata(
+        existing.id,
+        parsed,
+        origin,
+        existing.status,
+        existing.createdAt,
+        updatedAt,
+      );
+      replaceDirectoryAtomically(fetched.directory, existing.directory);
+      this.agentConfigService.patchAgentConfig(agentId, {
+        skills: {
+          items: {
+            [existing.id]: record,
+          },
+        },
+      }, context);
+      const skill = toSkillRecord(agentId, this.rootDir, existing.id, record);
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.remote_updated", {
+        skillId: skill.id,
+        previousCommit: existing.origin.commit,
+        commit: fetched.commit,
+        origin,
+      });
+      return { skill, changed: true, previousCommit: existing.origin.commit };
+    } catch (error) {
+      emitSkillEvent(context.database, { ...context, agentId }, "skill.remote_update.failed", {
+        skillId: normalizedSkillId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      fetched?.cleanup();
+    }
+  }
+
+  private buildRemoteSkillMetadata(
+    skillId: string,
+    parsed: ParsedSkillMarkdown,
+    origin: SkillOrigin,
+    status: SkillStatus,
+    createdAt: number,
+    updatedAt: number,
+  ): SkillMetadata {
+    return {
+      name: (parsed.name ?? skillId).trim(),
+      description: (parsed.description ?? "").trim(),
+      category: (parsed.category ?? "remote").trim() || "remote",
+      allowedTools: parsed.allowedTools.map((toolName) => toolName.trim()).filter(Boolean),
+      source: "remote-installed",
+      origin,
+      status,
+      createdAt,
+      updatedAt,
+    };
   }
 
   private resolveSkillFilePath(skillDir: string, inputPath: string): string {

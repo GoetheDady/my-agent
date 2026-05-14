@@ -1,8 +1,19 @@
 import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
+import { appendEvent } from "../events/event-log";
 import { defaultRealtimeService } from "../realtime/service";
 import type { TaskRecord, TaskStatus } from "./task-types";
+
+export const DEFAULT_TASK_MAX_ATTEMPTS = 3;
+export const TASK_LEASE_MS = 60_000;
+export const TASK_LEASE_RENEW_INTERVAL_MS = 20_000;
+
+export const TASK_SELECT_COLUMNS = `
+  id, agent_id, conversation_id, source_channel, source_user_id, status,
+  priority, input, result, error, created_at, started_at, completed_at,
+  attempt_count, max_attempts, lease_expires_at, idempotency_key, canceled_at
+`;
 
 export interface CreateTaskInput {
   id?: string;
@@ -13,6 +24,12 @@ export interface CreateTaskInput {
   input: string;
   priority?: number;
   created_at?: number;
+  idempotency_key?: string | null;
+  max_attempts?: number;
+}
+
+export interface RetryTaskOptions {
+  force?: boolean;
 }
 
 /**
@@ -28,6 +45,8 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
   // Task 是 Agent 的最小执行单元。不同渠道（Web、未来微信/飞书）都会先落成 task，
   // 再由队列按 agent_id 串行派发，避免一个 Agent 同时干多件事。
   const now = input.created_at ?? Date.now();
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotency_key);
+  const maxAttempts = normalizeMaxAttempts(input.max_attempts);
   const task: TaskRecord = {
     id: input.id ?? crypto.randomUUID(),
     agent_id: input.agent_id ?? "default",
@@ -42,34 +61,54 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
     created_at: now,
     started_at: null,
     completed_at: null,
+    attempt_count: 0,
+    max_attempts: maxAttempts,
+    lease_expires_at: null,
+    idempotency_key: idempotencyKey,
+    canceled_at: null,
   };
 
-  database
-    .query(
-      `INSERT INTO tasks (
-         id, agent_id, conversation_id, source_channel, source_user_id, status,
-         priority, input, result, error, created_at, started_at, completed_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      task.id,
-      task.agent_id,
-      task.conversation_id,
-      task.source_channel,
-      task.source_user_id,
-      task.status,
-      task.priority,
-      task.input,
-      task.result,
-      task.error,
-      task.created_at,
-      task.started_at,
-      task.completed_at,
-    );
+  const create = database.transaction(() => {
+    if (idempotencyKey) {
+      const existing = getTaskByIdempotencyKey(idempotencyKey, database);
+      if (existing) return existing;
+    }
 
-  broadcastTaskUpdated(task);
-  return task;
+    database
+      .query(
+        `INSERT INTO tasks (
+           id, agent_id, conversation_id, source_channel, source_user_id, status,
+           priority, input, result, error, created_at, started_at, completed_at,
+           attempt_count, max_attempts, lease_expires_at, idempotency_key, canceled_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        task.id,
+        task.agent_id,
+        task.conversation_id,
+        task.source_channel,
+        task.source_user_id,
+        task.status,
+        task.priority,
+        task.input,
+        task.result,
+        task.error,
+        task.created_at,
+        task.started_at,
+        task.completed_at,
+        task.attempt_count,
+        task.max_attempts,
+        task.lease_expires_at,
+        task.idempotency_key,
+        task.canceled_at,
+      );
+    return task;
+  });
+
+  const stored = create();
+  if (stored.id === task.id) broadcastTaskUpdated(stored);
+  return stored;
 }
 
 /**
@@ -82,12 +121,24 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
 export function getTask(taskId: string, database: Database = getDb()): TaskRecord | null {
   return database
     .query<TaskRecord, [string]>(
-      `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-              priority, input, result, error, created_at, started_at, completed_at
+      `SELECT ${TASK_SELECT_COLUMNS}
        FROM tasks
        WHERE id = ?`,
     )
     .get(taskId) ?? null;
+}
+
+export function getTaskByIdempotencyKey(
+  idempotencyKey: string,
+  database: Database = getDb(),
+): TaskRecord | null {
+  return database
+    .query<TaskRecord, [string]>(
+      `SELECT ${TASK_SELECT_COLUMNS}
+       FROM tasks
+       WHERE idempotency_key = ?`,
+    )
+    .get(idempotencyKey) ?? null;
 }
 
 /**
@@ -106,8 +157,7 @@ export function listTasks(
   if (!statuses || statuses.length === 0) {
     return database
       .query<TaskRecord, [string]>(
-        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-                priority, input, result, error, created_at, started_at, completed_at
+        `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ?
          ORDER BY priority DESC, created_at ASC`,
@@ -118,8 +168,7 @@ export function listTasks(
   const placeholders = statuses.map(() => "?").join(", ");
   return database
     .query<TaskRecord, [string, ...TaskStatus[]]>(
-      `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-              priority, input, result, error, created_at, started_at, completed_at
+      `SELECT ${TASK_SELECT_COLUMNS}
        FROM tasks
        WHERE agent_id = ? AND status IN (${placeholders})
        ORDER BY priority DESC, created_at ASC`,
@@ -182,14 +231,22 @@ export function markTaskRunning(taskId: string, database: Database = getDb()): v
   // 任务进入 running 时同步更新 Agent 状态，Runtime 面板才能显示“当前正在执行哪个任务”。
   const task = requireTask(taskId, database);
   const now = Date.now();
+  const leaseExpiresAt = now + TASK_LEASE_MS;
 
   database
     .query(
       `UPDATE tasks
-       SET status = 'running', started_at = ?, error = NULL
+       SET status = 'running',
+           started_at = ?,
+           error = NULL,
+           result = NULL,
+           completed_at = NULL,
+           canceled_at = NULL,
+           lease_expires_at = ?,
+           attempt_count = attempt_count + 1
        WHERE id = ?`,
     )
-    .run(now, taskId);
+    .run(now, leaseExpiresAt, taskId);
   updateAgentStatus(task.agent_id, "running", taskId, database);
   const updated = getTask(taskId, database);
   if (updated) broadcastTaskUpdated(updated);
@@ -236,13 +293,30 @@ export function markTaskCanceled(taskId: string, database: Database = getDb()): 
     const task = requireTask(taskId, database);
     const now = Date.now();
 
+    if (task.status === "completed") {
+      throw new Error("任务已完成，不能取消。");
+    }
+    if (task.status === "failed") {
+      throw new Error("任务已失败，不能取消。");
+    }
+    if (task.status === "canceled") {
+      const agent = getAgent(task.agent_id, database);
+      if (agent?.current_task_id === taskId) {
+        updateAgentStatus(task.agent_id, "idle", null, database);
+      }
+      return;
+    }
+
     database
       .query(
         `UPDATE tasks
-         SET status = 'canceled', completed_at = ?
+         SET status = 'canceled',
+             completed_at = ?,
+             canceled_at = ?,
+             lease_expires_at = NULL
          WHERE id = ?`,
       )
-      .run(now, taskId);
+      .run(now, now, taskId);
 
     const agent = getAgent(task.agent_id, database);
     if (agent?.current_task_id === taskId) {
@@ -250,7 +324,7 @@ export function markTaskCanceled(taskId: string, database: Database = getDb()): 
     }
     const updated = getTask(taskId, database);
     if (updated) broadcastTaskUpdated(updated);
-    scheduleDelegationDrain(task.agent_id);
+    scheduleQueueDrain(task);
   });
 
   cancel();
@@ -259,33 +333,92 @@ export function markTaskCanceled(taskId: string, database: Database = getDb()): 
 /**
  * 恢复启动前遗留的 running task。
  *
- * running 表示“当前进程正在执行这个任务”。如果进程重启，旧 running task
- * 已经不可能继续执行，继续保留会让 Agent 一直处于忙碌状态。启动时把这些
- * 任务标记为 failed，并释放对应 Agent。
+ * running task 只有在租约过期后才会被判定为卡住。未超过最大执行次数时
+ * 重新回到 queued；达到最大次数时标记为 failed。
  *
  * @param database 可选数据库连接。
  * @returns 被恢复的任务数量。
  */
 export function recoverRunningTasks(database: Database = getDb()): number {
   const recover = database.transaction(() => {
-    const tasks = database
-      .query<TaskRecord, []>(
-        `SELECT id, agent_id, conversation_id, source_channel, source_user_id, status,
-                priority, input, result, error, created_at, started_at, completed_at
-         FROM tasks
-         WHERE status = 'running'`,
-      )
-      .all();
     const now = Date.now();
+    const tasks = database
+      .query<TaskRecord, [number]>(
+        `SELECT ${TASK_SELECT_COLUMNS}
+         FROM tasks
+         WHERE status = 'running'
+           AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+      )
+      .all(now);
 
     for (const task of tasks) {
-      database
-        .query(
-          `UPDATE tasks
-           SET status = 'failed', error = ?, completed_at = ?
-           WHERE id = ?`,
-        )
-        .run("Recovered stale running task after service restart", now, task.id);
+      if (task.attempt_count < task.max_attempts) {
+        database
+          .query(
+            `UPDATE tasks
+             SET status = 'queued',
+                 result = NULL,
+                 error = NULL,
+                 completed_at = NULL,
+                 canceled_at = NULL,
+                 lease_expires_at = NULL
+             WHERE id = ?`,
+          )
+          .run(task.id);
+
+        appendEvent({
+          agent_id: task.agent_id,
+          task_id: task.id,
+          conversation_id: task.conversation_id,
+          type: "task.recovered",
+          payload: {
+            reason: "lease_expired",
+            attemptCount: task.attempt_count,
+            maxAttempts: task.max_attempts,
+            leaseExpiresAt: task.lease_expires_at,
+          },
+          created_at: now,
+        }, database);
+        appendEvent({
+          agent_id: task.agent_id,
+          task_id: task.id,
+          conversation_id: task.conversation_id,
+          type: "task.retry_scheduled",
+          payload: {
+            reason: "recovered_from_expired_lease",
+            attemptCount: task.attempt_count,
+            maxAttempts: task.max_attempts,
+          },
+          created_at: now + 1,
+        }, database);
+      } else {
+        const error = "任务租约已过期，并且已达到最大执行次数。";
+        database
+          .query(
+            `UPDATE tasks
+             SET status = 'failed',
+                 error = ?,
+                 completed_at = ?,
+                 lease_expires_at = NULL
+             WHERE id = ?`,
+          )
+          .run(error, now, task.id);
+
+        appendEvent({
+          agent_id: task.agent_id,
+          task_id: task.id,
+          conversation_id: task.conversation_id,
+          type: "task.failed_permanently",
+          payload: {
+            reason: "lease_expired_max_attempts_reached",
+            error,
+            attemptCount: task.attempt_count,
+            maxAttempts: task.max_attempts,
+            leaseExpiresAt: task.lease_expires_at,
+          },
+          created_at: now,
+        }, database);
+      }
 
       const agent = getAgent(task.agent_id, database);
       if (agent?.current_task_id === task.id) {
@@ -293,7 +426,7 @@ export function recoverRunningTasks(database: Database = getDb()): number {
       }
       const updated = getTask(task.id, database);
       if (updated) broadcastTaskUpdated(updated);
-      scheduleDelegationDrain(task.agent_id);
+      if (updated?.status === "queued") scheduleQueueDrain(updated);
     }
 
     const stuckAgents = database
@@ -317,6 +450,110 @@ export function recoverRunningTasks(database: Database = getDb()): number {
   return recover();
 }
 
+/**
+ * 延长 running task 的租约。
+ *
+ * 租约表示“当前执行进程仍然活着”的时间窗口。执行器定期续约，服务重启后
+ * recoverRunningTasks 只会恢复租约过期的 task。
+ */
+export function renewTaskLease(taskId: string, database: Database = getDb()): TaskRecord | null {
+  const now = Date.now();
+  const leaseExpiresAt = now + TASK_LEASE_MS;
+  const result = database
+    .query(
+      `UPDATE tasks
+       SET lease_expires_at = ?
+       WHERE id = ? AND status = 'running'`,
+    )
+    .run(leaseExpiresAt, taskId);
+  if (result.changes === 0) return null;
+
+  const task = getTask(taskId, database);
+  if (!task) return null;
+  broadcastTaskUpdated(task);
+  appendEvent({
+    agent_id: task.agent_id,
+    task_id: task.id,
+    conversation_id: task.conversation_id,
+    type: "task.lease.renewed",
+    payload: { leaseExpiresAt },
+    created_at: now,
+  }, database);
+  return task;
+}
+
+/**
+ * 把失败或租约过期的任务重新放回队列。
+ *
+ * retry 复用原 taskId，保留原始事件链和 conversation 关系；attempt_count
+ * 只在下一次真正领取执行时递增。
+ */
+export function retryTask(
+  taskId: string,
+  options: RetryTaskOptions = {},
+  database: Database = getDb(),
+): TaskRecord {
+  const retry = database.transaction(() => {
+    const task = requireTask(taskId, database);
+    const now = Date.now();
+    const force = options.force === true;
+
+    if (task.status === "completed") {
+      throw new Error("任务已完成，不能重试。");
+    }
+    if (task.status === "queued") {
+      throw new Error("任务仍在队列中，无需重试。");
+    }
+    if (task.status === "canceled" && !force) {
+      throw new Error("任务已取消，默认不能重试；确认需要时请使用 force。");
+    }
+    if (task.status === "running" && !isTaskLeaseExpired(task, now)) {
+      throw new Error("任务仍在运行且租约未过期，不能重试。");
+    }
+    if (task.attempt_count >= task.max_attempts && !force) {
+      throw new Error("任务已达到最大执行次数，不能继续重试。");
+    }
+
+    database
+      .query(
+        `UPDATE tasks
+         SET status = 'queued',
+             result = NULL,
+             error = NULL,
+             completed_at = NULL,
+             canceled_at = NULL,
+             lease_expires_at = NULL
+         WHERE id = ?`,
+      )
+      .run(task.id);
+
+    const agent = getAgent(task.agent_id, database);
+    if (agent?.current_task_id === task.id) {
+      updateAgentStatus(task.agent_id, "idle", null, database);
+    }
+
+    const updated = requireTask(task.id, database);
+    appendEvent({
+      agent_id: updated.agent_id,
+      task_id: updated.id,
+      conversation_id: updated.conversation_id,
+      type: "task.retry_scheduled",
+      payload: {
+        previousStatus: task.status,
+        forced: force,
+        attemptCount: task.attempt_count,
+        maxAttempts: task.max_attempts,
+      },
+      created_at: now,
+    }, database);
+    broadcastTaskUpdated(updated);
+    scheduleQueueDrain(updated);
+    return updated;
+  });
+
+  return retry();
+}
+
 function completeTask(
   taskId: string,
   status: Extract<TaskStatus, "completed" | "failed">,
@@ -329,11 +566,17 @@ function completeTask(
   const complete = database.transaction(() => {
     const task = requireTask(taskId, database);
     const now = Date.now();
+    if (task.status === "canceled") return;
 
     database
       .query(
         `UPDATE tasks
-         SET status = ?, result = ?, error = ?, completed_at = ?
+         SET status = ?,
+             result = ?,
+             error = ?,
+             completed_at = ?,
+             lease_expires_at = NULL,
+             canceled_at = NULL
          WHERE id = ?`,
       )
       .run(status, result, error, now, taskId);
@@ -344,7 +587,7 @@ function completeTask(
     }
     const updated = getTask(taskId, database);
     if (updated) broadcastTaskUpdated(updated);
-    scheduleDelegationDrain(task.agent_id);
+    scheduleQueueDrain(task);
   });
 
   complete();
@@ -358,6 +601,22 @@ function requireTask(taskId: string, database: Database): TaskRecord {
   return task;
 }
 
+function normalizeIdempotencyKey(idempotencyKey: string | null | undefined): string | null {
+  const normalized = idempotencyKey?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeMaxAttempts(maxAttempts: number | undefined): number {
+  if (maxAttempts === undefined || !Number.isFinite(maxAttempts)) {
+    return DEFAULT_TASK_MAX_ATTEMPTS;
+  }
+  return Math.max(1, Math.floor(maxAttempts));
+}
+
+function isTaskLeaseExpired(task: TaskRecord, now: number): boolean {
+  return task.lease_expires_at === null || task.lease_expires_at <= now;
+}
+
 function broadcastTaskUpdated(task: TaskRecord): void {
   defaultRealtimeService.broadcast({
     type: "runtime.task.updated",
@@ -368,8 +627,17 @@ function broadcastTaskUpdated(task: TaskRecord): void {
   });
 }
 
-function scheduleDelegationDrain(agentId: string): void {
-  void import("../delegations/service")
-    .then(({ defaultDelegationService }) => defaultDelegationService.drainAgent(agentId))
-    .catch(() => undefined);
+function scheduleQueueDrain(task: TaskRecord): void {
+  if (task.source_channel === "delegation" || task.source_channel === "delegation_callback") {
+    void import("../delegations/service")
+      .then(({ defaultDelegationService }) => defaultDelegationService.drainAgent(task.agent_id))
+      .catch(() => undefined);
+    return;
+  }
+
+  if (task.source_channel === "feishu") {
+    void import("../channels/external-runner")
+      .then(({ drainExternalChannelQueue }) => drainExternalChannelQueue(task.agent_id))
+      .catch(() => undefined);
+  }
 }

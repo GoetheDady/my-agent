@@ -1,4 +1,31 @@
 export type SkillStatus = "enabled" | "disabled";
+export type SkillOriginType = "builtin" | "agent_created" | "remote_installed";
+
+export type SkillOrigin =
+  | {
+    type: "builtin";
+    source: "builtin";
+    builtinPath?: string;
+  }
+  | {
+    type: "agent_created";
+    source: "agent-created";
+    legacySource?: string;
+    createdAt?: number;
+  }
+  | {
+    type: "remote_installed";
+    source: "github";
+    provider: "github";
+    url: string;
+    repo: string;
+    branch: string;
+    subdir: string;
+    commit: string;
+    installedAt: number;
+    updatedAt: number;
+    legacySource?: string;
+  };
 
 export interface SkillMetadata {
   name: string;
@@ -6,6 +33,7 @@ export interface SkillMetadata {
   category: string;
   allowedTools: string[];
   source: string;
+  origin: SkillOrigin;
   status: SkillStatus;
   createdAt: number;
   updatedAt: number;
@@ -16,6 +44,7 @@ export interface SkillRecord extends SkillMetadata {
   agentId: string;
   directory: string;
   filePath: string;
+  readonly: boolean;
 }
 
 export interface SkillIndexItem {
@@ -48,8 +77,21 @@ export interface SkillCreateInput {
   content: string;
   category?: string;
   allowedTools?: string[];
-  source?: string;
   status?: SkillStatus;
+}
+
+export interface SkillInstallInput {
+  url: string;
+  skillId?: string;
+  branch?: string;
+  subdir?: string;
+  status?: SkillStatus;
+}
+
+export interface SkillInstallResult {
+  skill: SkillRecord;
+  changed: boolean;
+  previousCommit?: string | null;
 }
 
 export interface SkillStatusUpdateResult {
