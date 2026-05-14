@@ -60,6 +60,7 @@ export interface AppConfig {
 // ============================================================
 
 const DEFAULT_MODEL = "deepseek-v4-flash";
+export const DEFAULT_RUNTIME_DATA_DIR_NAME = ".my-agent";
 
 // ============================================================
 // 配置加载
@@ -86,14 +87,26 @@ export function getProjectRoot(): string {
  * 获取运行时数据根目录。
  *
  * 运行时数据是用户使用项目后产生的本地状态，例如数据库、向量库和 profile 文件。
- * 默认放在项目根目录的 `data/` 下，便于把源码和用户数据隔离；部署给别人使用时，
+ * 默认放在项目根目录的 `.my-agent/` 下，便于把源码和用户数据隔离；部署给别人使用时，
  * 可以通过 `MY_AGENT_DATA_DIR` 改到任意持久化目录。
  *
  * @param root 项目根目录，测试或配置加载时可显式传入。
  * @returns 运行时数据目录的绝对路径。
  */
 export function getRuntimeDataDir(root = getProjectRoot()): string {
-  return resolve(process.env.MY_AGENT_DATA_DIR ?? resolve(root, "data"));
+  return resolve(process.env.MY_AGENT_DATA_DIR ?? resolve(root, DEFAULT_RUNTIME_DATA_DIR_NAME));
+}
+
+/**
+ * 获取运行时临时目录。
+ *
+ * 临时目录也放在运行时根目录下，避免远程 skill clone 等副作用散落到系统临时目录。
+ *
+ * @param root 项目根目录，测试或配置加载时可显式传入。
+ * @returns 运行时临时目录的绝对路径。
+ */
+export function getRuntimeTempDir(root = getProjectRoot()): string {
+  return resolve(getRuntimeDataDir(root), "tmp");
 }
 
 /**

@@ -81,6 +81,14 @@ const defaultStore: MemoryServiceStore = {
   setMemoryStatus,
 };
 
+function appendMemoryServiceEvent(
+  database: Database | undefined,
+  event: Parameters<typeof appendEvent>[0],
+): void {
+  if (!database) return;
+  appendEvent(event, database);
+}
+
 /**
  * 当前进程内的记忆服务层。
  *
@@ -170,7 +178,7 @@ export class MemoryService {
   }, context: MemoryServiceContext = {}): Promise<MemoryServiceResult> {
     const store = this.getStore(context);
     const memory = await store.updateMemory(input.memoryId, input.content);
-    appendEvent({
+    appendMemoryServiceEvent(context.database, {
       ...contextIds(context),
       type: "memory.update",
       payload: {
@@ -178,28 +186,28 @@ export class MemoryService {
         reason: input.reason ?? "",
         evidenceEventIds: input.evidenceEventIds ?? [],
       },
-    }, context.database);
+    });
     if (memory) await this.syncProfileIfNeeded(memory, input, context, "updated");
     return { action: "updated", memory };
   }
 
   async forget(input: { memoryId: string; reason?: string }, context: MemoryServiceContext = {}): Promise<MemoryServiceResult> {
     const memory = await this.getStore(context).setMemoryStatus(input.memoryId, "inactive");
-    appendEvent({
+    appendMemoryServiceEvent(context.database, {
       ...contextIds(context),
       type: "memory.update",
       payload: { memoryId: input.memoryId, action: "forget", reason: input.reason ?? "" },
-    }, context.database);
+    });
     return { action: "forgotten", memory };
   }
 
   async completePlan(input: { memoryId: string; reason?: string }, context: MemoryServiceContext = {}): Promise<MemoryServiceResult> {
     const memory = await this.getStore(context).setMemoryStatus(input.memoryId, "completed");
-    appendEvent({
+    appendMemoryServiceEvent(context.database, {
       ...contextIds(context),
       type: "memory.update",
       payload: { memoryId: input.memoryId, action: "complete", reason: input.reason ?? "" },
-    }, context.database);
+    });
     return { action: "completed", memory };
   }
 
@@ -282,7 +290,7 @@ export class MemoryService {
     context: MemoryServiceContext,
     duplicateOfMemoryId?: string,
   ): Promise<void> {
-    appendEvent({
+    appendMemoryServiceEvent(context.database, {
       ...contextIds(context),
       type: "memory.remember",
       payload: {
@@ -293,7 +301,7 @@ export class MemoryService {
         reason: input.reason ?? "",
         evidenceEventIds: input.evidenceEventIds ?? [],
       },
-    }, context.database);
+    });
   }
 
   private async syncProfileIfNeeded(
@@ -316,7 +324,7 @@ export class MemoryService {
         sourceEventIds: input.evidenceEventIds ?? [],
       });
     } catch (error) {
-      appendEvent({
+      appendMemoryServiceEvent(context.database, {
         ...contextIds(context),
         type: "profile.sync.failed",
         payload: {
@@ -324,7 +332,7 @@ export class MemoryService {
           memoryIds: [memory.id],
           error: error instanceof Error ? error.message : String(error),
         },
-      }, context.database);
+      });
     }
   }
 }

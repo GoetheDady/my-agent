@@ -18,7 +18,7 @@ export interface ProfileSyncInput {
   conversationId?: string | null;
   database?: Database;
   /**
-   * 运行时数据根目录。默认使用 data/，profile 文件位于对应 Agent 目录下。
+   * 运行时数据根目录。默认使用 .my-agent/，profile 文件位于对应 Agent 目录下。
    *
    * 这里保留 rootDir 作为兼容字段，是为了现有测试和调用点能逐步迁移；
    * 新代码应优先传 profileRootDir。
@@ -40,6 +40,14 @@ export interface ProfileSyncResult {
 }
 
 export type ProfileSyncPort = (input: ProfileSyncInput) => Promise<ProfileSyncResult>;
+
+function appendProfileSyncEvent(
+  database: Database | undefined,
+  event: Parameters<typeof appendEvent>[0],
+): void {
+  if (!database) return;
+  appendEvent(event, database);
+}
 
 /**
  * 空 profile 同步器。
@@ -69,7 +77,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
   const taskId = input.taskId ?? null;
   const conversationId = input.conversationId ?? null;
 
-  appendEvent({
+  appendProfileSyncEvent(input.database, {
     agent_id: agentId,
     task_id: taskId,
     conversation_id: conversationId,
@@ -78,13 +86,13 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
       source: input.source,
       memoryIds: input.memories.map((memory) => memory.id),
     },
-  }, input.database);
+  });
 
   try {
     const classified = classifyProfileUpdates(input.memories);
     if (classified.userUpdates.length === 0 && classified.soulUpdates.length === 0) {
       const skippedReason = classified.skippedReason ?? "没有适合沉淀到 user.md 或 soul.md 的稳定认知";
-      appendEvent({
+      appendProfileSyncEvent(input.database, {
         agent_id: agentId,
         task_id: taskId,
         conversation_id: conversationId,
@@ -94,7 +102,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
           reason: skippedReason,
           memoryIds: input.memories.map((memory) => memory.id),
         },
-      }, input.database);
+      });
       return { status: "skipped", applied: [], skippedReason };
     }
 
@@ -110,7 +118,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
 
     if (applied.length === 0) {
       const skippedReason = "profile 文件已有等价内容，无需更新";
-      appendEvent({
+      appendProfileSyncEvent(input.database, {
         agent_id: agentId,
         task_id: taskId,
         conversation_id: conversationId,
@@ -120,11 +128,11 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
           reason: skippedReason,
           memoryIds: input.memories.map((memory) => memory.id),
         },
-      }, input.database);
+      });
       return { status: "skipped", applied: [], skippedReason };
     }
 
-    appendEvent({
+    appendProfileSyncEvent(input.database, {
       agent_id: agentId,
       task_id: taskId,
       conversation_id: conversationId,
@@ -140,12 +148,12 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
         reason: input.reason ?? "",
         sourceEventIds: input.sourceEventIds ?? [],
       },
-    }, input.database);
+    });
 
     return { status: "completed", applied };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    appendEvent({
+    appendProfileSyncEvent(input.database, {
       agent_id: agentId,
       task_id: taskId,
       conversation_id: conversationId,
@@ -155,7 +163,7 @@ export async function syncProfileFromMemories(input: ProfileSyncInput): Promise<
         memoryIds: input.memories.map((memory) => memory.id),
         error: message,
       },
-    }, input.database);
+    });
     return { status: "failed", applied: [], error: message };
   }
 }

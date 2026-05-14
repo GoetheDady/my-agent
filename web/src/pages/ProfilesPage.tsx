@@ -13,7 +13,7 @@ export default function ProfilesPage() {
             <InfoCard
               title="定位"
               description="这是从长期记忆沉淀出的高优先级用户画像，不保存完整聊天历史。"
-              meta="data/agents/default/user.md"
+              meta=".my-agent/agents/default/user.md"
             />
             <InfoCard
               title="写入来源"
@@ -34,7 +34,7 @@ export default function ProfilesPage() {
             <InfoCard
               title="定位"
               description="这是 Agent 的稳定自我规则，用于 prompt context；过去经历和证据仍必须通过记忆工具查询。"
-              meta="data/agents/default/soul.md"
+              meta=".my-agent/agents/default/soul.md"
             />
             <InfoCard
               title="适合写入"

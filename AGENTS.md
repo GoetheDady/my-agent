@@ -1,10 +1,30 @@
 # AGENTS.md
 
-Compact instruction file for AI agents working in this repository. See also `CLAUDE.md` for the full project overview.
+Compact instruction file for AI agents working in this repository.
 
-## Corrections to CLAUDE.md
+## 新对话快速上下文
 
-**记忆提取流程 (Memory Extraction Flow) is WRONG in CLAUDE.md.** The old flow was frontend-triggered (frontend calls `/api/memory/extract` after each message). The actual flow is now:
+如果需要快速理解项目，先读 `docs/agent-quick-context.md`。完整项目说明见 `docs/project-overview.md`。本文件是 AI coding agent 的优先工作指令。
+
+项目初心：
+
+- `my-agent` 最早是一个个人 Agent 项目，不是一个通用多 Agent 平台。
+- 记忆系统刻意类比人类记忆：长期记忆、稳定自我认知、用户理解、任务经历，以及后续整理。
+- 多 Agent 能力是后来加入的，主要服务于角色分工和上下文边界。
+- 单个 Agent 应该像人一样工作：同一时间只处理一个 Task；需要并行推进时，用多个 Agent 分工。
+- 后端 Runtime 是项目核心形态。Web 是工程控制台，不是架构中心。
+
+重要术语：
+
+- **Agent**：智能体。这里指拥有配置、记忆、Skill、工具策略和运行状态的执行主体。
+- **Runtime**：运行时。这里指调度任务、调用模型和工具、写事件、恢复卡住任务的后端系统。
+- **Task**：任务。最小执行单元，Web 消息、渠道消息、委派请求都应该变成 Task。
+- **Event**：事件。运行时审计记录，用于观察、恢复和调试。
+- **Agent-scoped**：按 Agent 隔离。数据属于某个 Agent，例如 `.my-agent/agents/<agentId>/agent.json`、`soul.md`、`user.md`、skills 和渠道绑定。
+
+## 当前关键更正
+
+**记忆提取流程 (Memory Extraction Flow) 以后端触发为准。** 旧流程是 frontend-triggered，也就是前端在每条消息后调用 `/api/memory/extract`。当前实际流程是：
 
 1. Backend `src/routes/chat.ts` emits `assistant.message.persisted` lifecycle hook after saving the assistant message.
 2. `src/memory/lifecycle-hooks.ts` listens for this hook and enqueues `MemoryExtractionWorker`.
@@ -12,7 +32,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 4. Frontend `pages/ChatPage.tsx` polls for new tool parts via `startWorkerMessagePolling` (no longer calls `triggerMemoryExtract`).
 5. `chatStore` no longer has `memoryStatusMap` or `triggerMemoryExtract` — these were removed.
 
-## Architecture: What CLAUDE.md Doesn't Cover
+## 当前架构补充
 
 ### Lifecycle Hooks (`src/lifecycle/hooks.ts`)
 - Publish/subscribe system: `registerLifecycleHook(type, handler)` / `emitLifecycleHook(event)`.
@@ -23,12 +43,12 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 ### Agent System (`src/agents/`, `src/runtime/`)
 - `ensureDefaultAgent()` still creates the fallback `default` Agent on startup.
 - `AgentService` can create/list/read/update additional Agents without schema changes.
-- Each Agent has independent `data/agents/<agentId>/agent.json`, `data/agents/<agentId>/skills/`, `data/agents/<agentId>/soul.md`, and `data/agents/<agentId>/user.md`.
-- `user.md` is now agent-scoped and lives next to `soul.md`; do not add new writers under `data/profiles/`.
+- Each Agent has independent `.my-agent/agents/<agentId>/agent.json`, `.my-agent/agents/<agentId>/skills/`, `.my-agent/agents/<agentId>/soul.md`, and `.my-agent/agents/<agentId>/user.md`.
+- `user.md` is now agent-scoped and lives next to `soul.md`; do not add new writers under `.my-agent/profiles/`.
 - Agent states: `idle` | `running` | `paused` | `error`.
 - `src/runtime/agent-runtime.ts` `runAgentTask()` orchestrates: mark task running → build system prompt → build tools → `streamText` → mark complete/fail.
 - Has 45s model timeout + abort signal handling. Uses `failTaskOnce` guard to prevent double-completion.
-- `AgentConfigService` owns `data/agents/<agentId>/agent.json`: agent name, description, model, tool policy, memory switches, skill metadata, and agent-scoped channel bindings.
+- `AgentConfigService` owns `.my-agent/agents/<agentId>/agent.json`: agent name, description, model, tool policy, memory switches, skill metadata, and agent-scoped channel bindings.
 - Runtime reads the latest Agent config before each run. Do not add new direct writers for `agent.json`.
 - `temperature` is intentionally not part of MVP config.
 - `agent_config_patch` supports precise add/remove operations for tool arrays and skill metadata; prefer those over replacing whole arrays when possible.
@@ -49,7 +69,7 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - `ChannelService` owns incoming channel messages: identity mapping, conversation mapping, task creation, and user/task events.
 - Adapters only handle channel-specific delivery or protocol details; they must not create tasks directly.
 - Web sessions remain frontend display state. Runtime context uses `conversations`, `tasks`, and `events`.
-- Feishu uses a WebSocket long connection MVP. Its app binding lives in the target Agent's `agent.json` under `channels.feishu.bindings`; do not add new writers for `data/channels/feishu-bindings.json`.
+- Feishu uses a WebSocket long connection MVP. Its app binding lives in the target Agent's `agent.json` under `channels.feishu.bindings`; do not add new writers for `.my-agent/channels/feishu-bindings.json`.
 - Feishu scan-to-create onboarding lives in `FeishuOnboardingService`: it generates a QR URL, polls Feishu's registration endpoint, writes the resulting binding through `FeishuBindingService`, and never returns raw app secrets from APIs.
 - WeChat adapter is still a stub for now.
 
@@ -64,9 +84,9 @@ Compact instruction file for AI agents working in this repository. See also `CLA
 - `buildAgentTools(context: MemoryToolContext)` builds context-aware tools and passes task/agent info to memory tools.
 - Policy: read-only tools allowed by default. Write tools need approval unless a concrete path is allowlisted. Memory write tools write active memories directly (no more "candidate" pattern).
 - `ApprovalService` persists tool approvals in `tool_approvals` and emits `tool.approval.*` events. It records the audit trail only; ChatPage still calls `addToolApprovalResponse()` so the AI SDK can continue or stop the tool call.
-- Tool policy is Agent-scoped. `enabledToolsets`, `requiresApproval`, and `allowedPaths` are read from `data/agents/<agentId>/agent.json` through `AgentConfigService`.
+- Tool policy is Agent-scoped. `enabledToolsets`, `requiresApproval`, and `allowedPaths` are read from `.my-agent/agents/<agentId>/agent.json` through `AgentConfigService`.
 - `isInputPathAllowlisted` controls which file paths `write_file` can target without another approval.
-- `write_file` must not modify `data/agents/<agentId>/agent.json`; use `agent_config_patch` instead.
+- `write_file` must not modify `.my-agent/agents/<agentId>/agent.json`; use `agent_config_patch` instead.
 - Legacy `/api/tools/whitelist` must not write global `config.json`; it is only a compatibility route that creates and approves a tool approval, then updates the target Agent config.
 
 ### Memory System (`src/memory/`)
@@ -125,7 +145,7 @@ bun run build        # tsc -b && vite build → web/dist
 6. **Web build required for production**: Backend serves `web/dist`. Must run `cd web && bun run build` before `bun run start`.
 7. **Vite dev proxy**: `web/vite.config.ts` proxies `/api` to `http://localhost:3100`. Start backend first, then frontend.
 8. **ESLint ignores `web/`** — frontend has its own tsc check in build step (`web/tsconfig.json`).
-9. **Runtime data lives under `data/` by default** — `agent.json`, `SKILL.md`, SQLite, LanceDB, and profile files are generated there. Do not commit generated runtime data.
+9. **Runtime data lives under `.my-agent/` by default** — `agent.json`, `SKILL.md`, SQLite, LanceDB, and profile files are generated there. Do not commit generated runtime data.
 
 ## Code Style
 

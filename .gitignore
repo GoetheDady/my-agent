@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.my-agent/
 data
 .superpowers/
 .env

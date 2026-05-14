@@ -40,7 +40,7 @@ bun run gateway restart    # 停止后重新启动
 bun run gateway stop       # 按 PID 停止后台服务
 ```
 
-这里的 **Gateway** 是本地运行控制命令，不是单独的新业务服务。它仍然启动现有 `src/main.ts`，只是额外管理 `.runtime/my-agent.pid`、`.runtime/my-agent.log` 和健康检查。**PID** 是操作系统给进程分配的编号，用来精准判断和停止当前服务进程。
+这里的 **Gateway** 是本地运行控制命令，不是单独的新业务服务。它仍然启动现有 `src/main.ts`，只是额外管理 `.my-agent/runtime/my-agent.pid`、`.my-agent/runtime/my-agent.log` 和健康检查。**PID** 是操作系统给进程分配的编号，用来精准判断和停止当前服务进程。
 
 前端开发模式：
 
@@ -76,7 +76,7 @@ cd web && bun run build
 - `DEEPSEEK_API_KEY`：DeepSeek 模型调用密钥，后端启动必须有。
 - `ZHIPU_API_KEY`：智谱 `embedding-3` 调用密钥，用于记忆向量化。
 - `PORT`：后端端口，默认 `3100`。
-- `MY_AGENT_DATA_DIR`：运行时数据目录，默认是项目根目录下的 `data/`。
+- `MY_AGENT_DATA_DIR`：运行时数据目录，默认是项目根目录下的 `.my-agent/`。
 - `DREAM_SCHEDULER_ENABLED`：是否启用 Dream Worker 自动调度，设置为 `false` 可关闭。
 
 `config.json` 可配置模型、模型 base URL、工具默认允许路径等。`base URL` 指模型 API 的基础请求地址。密钥可以写成 `$ENV_NAME` 形式，从环境变量读取。不要提交 `.env` 或包含真实密钥的 `config.json`。
@@ -87,24 +87,63 @@ cd web && bun run build
 .
 ├── src/             # 后端 TypeScript 源码
 ├── web/             # React 工程控制台
-├── data/            # 本地运行数据，默认生成，不应提交
+├── .my-agent/       # 本地运行数据，默认生成，不应提交
 ├── docs/            # 设计、计划和验收文档
-├── AGENTS.md        # 给 AI coding agent 的工作说明，优先级高于 CLAUDE.md
-├── CLAUDE.md        # 更长的项目背景说明，其中部分旧流程已被 AGENTS.md 修正
+├── AGENTS.md        # 给 AI coding agent 的工作说明
 ├── package.json     # 后端脚本和依赖
 ├── bunfig.toml      # Bun 配置，当前设置 npm registry
 └── bun.lock         # 后端依赖锁文件
 ```
 
-运行时数据默认在 `data/` 下：
+运行时数据默认在 `.my-agent/` 下。它是用户使用系统后产生的本地状态，不是源码配置，不应该提交。
 
-- `data/agents/<agentId>/agent.json`：某个 Agent 的统一配置，包含名称、模型、工具策略、Skill 元数据和渠道绑定。
-- `data/agents/<agentId>/skills/*/SKILL.md`：Agent 本地 Skill 正文。Skill 的启停和元数据在 `agent.json` 中。
-- `data/agents/<agentId>/soul.md`：Agent 对自己的稳定认知。
-- `data/agents/<agentId>/user.md`：Agent 对用户的稳定认知。
-- SQLite 和 LanceDB 数据也在运行时数据目录中生成。
+```text
+.my-agent/
+├── agent.sqlite
+├── agent.sqlite-wal
+├── agent.sqlite-shm
+├── agents/
+│   └── <agentId>/
+│       ├── agent.json
+│       ├── soul.md
+│       ├── user.md
+│       └── skills/
+│           └── <skillId>/
+│               └── SKILL.md
+├── memories.lancedb/
+│   └── memories.lance/
+│       ├── data/
+│       ├── _deletions/
+│       ├── _transactions/
+│       └── _versions/
+├── runtime/
+│   ├── my-agent.pid
+│   ├── my-agent.gateway.json
+│   └── my-agent.log
+└── tmp/
+```
 
-不要把 `data/` 当成源码配置提交。它是用户使用系统后产生的本地状态。
+各目录和文件含义：
+
+- `.my-agent/agent.sqlite`：主 SQLite 数据库，保存 sessions、messages、agents、tasks、events、tool_approvals、conversations 等结构化数据。
+- `.my-agent/agent.sqlite-wal`：SQLite WAL 文件。WAL 是 Write-Ahead Log，意思是“预写日志”，用于提升数据库读写稳定性和并发读能力。
+- `.my-agent/agent.sqlite-shm`：SQLite 共享内存辅助文件，配合 WAL 使用。不要手动编辑。
+- `.my-agent/agents/`：Agent 私有文件根目录。每个 Agent 一个子目录。
+- `.my-agent/agents/<agentId>/agent.json`：Agent 统一配置，包含名称、模型、工具策略、Skill 元数据、内置 Skill 覆盖状态和渠道绑定。业务代码只能通过 `AgentConfigService` 或 `agent_config_patch` 修改它。
+- `.my-agent/agents/<agentId>/soul.md`：Agent 对自己的稳定认知，例如表达风格、长期行为边界和做事原则。
+- `.my-agent/agents/<agentId>/user.md`：Agent 对用户的稳定认知，例如称呼、长期项目、偏好和协作方式。
+- `.my-agent/agents/<agentId>/skills/<skillId>/SKILL.md`：Agent 自己创建或远程安装的 Skill 正文。Skill 的启用/停用和来源信息保存在 `agent.json`。
+- `.my-agent/memories.lancedb/`：LanceDB 向量数据库目录，用于保存长期记忆的 embedding 和索引。
+- `.my-agent/memories.lancedb/memories.lance/data/`：LanceDB 的表数据分片，属于数据库内部文件。
+- `.my-agent/memories.lancedb/memories.lance/_deletions/`：LanceDB 删除标记数据，属于数据库内部文件。
+- `.my-agent/memories.lancedb/memories.lance/_transactions/`：LanceDB 事务记录。事务是数据库一次完整写入操作的记录，用于保证失败时不破坏数据一致性。
+- `.my-agent/memories.lancedb/memories.lance/_versions/`：LanceDB 表版本元数据，用于记录不同版本的表状态。
+- `.my-agent/runtime/my-agent.pid`：Gateway 管理的后端进程号。PID 是操作系统进程编号，用于判断和停止当前服务。
+- `.my-agent/runtime/my-agent.gateway.json`：Gateway 最近一次启动状态，例如端口、启动时间和命令。
+- `.my-agent/runtime/my-agent.log`：Gateway 后台服务日志。`bun run gateway logs` 会读取它。
+- `.my-agent/tmp/`：运行时临时目录，例如远程 Skill 下载时会先 clone 到这里，校验成功后再复制到正式 Skill 目录。
+
+一般只建议手动查看 `soul.md`、`user.md`、`SKILL.md` 和日志文件。数据库文件、LanceDB 内部文件和 `agent.json` 应通过系统 API、Service 或工具修改。
 
 ## 后端架构
 
@@ -198,7 +237,7 @@ Web 聊天主链路：
 每个 Agent 有独立目录：
 
 ```text
-data/agents/<agentId>/
+.my-agent/agents/<agentId>/
 ├── agent.json
 ├── soul.md
 ├── user.md
@@ -225,7 +264,7 @@ data/agents/<agentId>/
 
 - 只读工具默认允许。
 - 写工具通常需要审批。
-- `write_file` 只能写允许路径，并且不能直接修改 `data/agents/<agentId>/agent.json`。
+- `write_file` 只能写允许路径，并且不能直接修改 `.my-agent/agents/<agentId>/agent.json`。
 - 工具审批写入 `tool_approvals`，同时产生 `tool.approval.*` 事件。
 - 旧 `/api/tools/whitelist` 只是兼容入口，最终仍更新目标 Agent 的 `agent.json`，不再写全局 `config.json`。
 
@@ -298,13 +337,13 @@ data/agents/<agentId>/
 
 ## 开发约定
 
-- 优先参考 `AGENTS.md`，再参考 `CLAUDE.md`。
-- 不要新增写入 `data/profiles/` 的逻辑；`user.md` 已经是 Agent 级文件，位于 `data/agents/<agentId>/user.md`。
+- 新对话或新 Agent 先读 `AGENTS.md` 和 `docs/agent-quick-context.md`。
+- 不要新增写入 `.my-agent/profiles/` 的逻辑；`user.md` 已经是 Agent 级文件，位于 `.my-agent/agents/<agentId>/user.md`。
 - 不要新增直接写 `agent.json` 的业务路径；通过 `AgentConfigService` 或 `agent_config_patch`。
 - 不要把长期记忆自动塞进 prompt；需要过去事实、证据、计划和偏好时通过记忆工具查询。
 - 同一个 Agent 同时只执行一个任务。
 - Dream Worker 的整理行为必须可审计、可解释，且不能静默硬删除用户事实。
-- 新增 runtime 数据文件时默认放在 `data/` 下，并确保不会被提交。
+- 新增 runtime 数据文件时默认放在 `.my-agent/` 下，并确保不会被提交。
 
 ## 常见问题
 

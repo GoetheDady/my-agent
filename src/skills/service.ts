@@ -10,11 +10,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { AgentConfigService, defaultAgentConfigService } from "../agents/config-service";
-import { getRuntimeDataDir } from "../core/config";
+import { getRuntimeDataDir, getRuntimeTempDir } from "../core/config";
 import { appendEvent } from "../events/event-log";
 import type {
   SkillCreateInput,
@@ -189,6 +188,7 @@ function emitSkillEvent(
     | "skill.builtin.viewed",
   payload: Record<string, unknown>,
 ): void {
+  if (!database) return;
   appendEvent({
     agent_id: input.agentId ?? DEFAULT_AGENT_ID,
     task_id: input.taskId ?? null,
@@ -287,7 +287,9 @@ function assertGithubUrl(url: string): string {
 
 function defaultRemoteSkillFetcher(input: RemoteSkillFetchInput): RemoteSkillFetchResult {
   const repo = assertGithubUrl(input.url);
-  const tempRoot = mkdtempSync(join(tmpdir(), "my-agent-skill-remote-"));
+  const runtimeTempDir = getRuntimeTempDir();
+  mkdirSync(runtimeTempDir, { recursive: true });
+  const tempRoot = mkdtempSync(join(runtimeTempDir, "skill-remote-"));
   const repoDir = join(tempRoot, "repo");
   try {
     execFileSync("git", ["clone", "--depth", "1", "--branch", input.branch, input.url, repoDir], {

@@ -1,7 +1,7 @@
 import { resolve, relative, dirname, basename } from 'node:path';
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { defaultAgentConfigService } from '../agents/config-service';
-import { getProjectRoot } from '../core/config';
+import { DEFAULT_RUNTIME_DATA_DIR_NAME, getProjectRoot } from '../core/config';
 
 // ============================================================
 // 类型定义
@@ -58,7 +58,8 @@ const DEFAULT_SEARCH_IGNORES = new Set([
   ".cache",
   "coverage",
   "web/dist",
-  "data/lancedb",
+  ".my-agent",
+  "data",
 ]);
 
 // ============================================================
@@ -158,12 +159,17 @@ export function isInputPathAllowlisted(inputPath: string, agentId = 'default'): 
  * 否则模型可以绕过 schema 校验、审计和权限策略。
  *
  * @param absolutePath 已规范化的绝对路径。
- * @returns 路径指向 `data/agents/<agentId>/agent.json` 时返回 `true`。
+ * @returns 路径指向 `.my-agent/agents/<agentId>/agent.json` 时返回 `true`。
  */
 export function isAgentConfigPath(absolutePath: string): boolean {
   const configRoot = defaultAgentConfigService.getConfigPath("default");
-  const dataAgentsRoot = resolve(configRoot, "../..");
-  const relativePath = relative(dataAgentsRoot, absolutePath);
+  const configuredAgentsRoot = resolve(configRoot, "../..");
+  const defaultAgentsRoot = resolve(getProjectRoot(), DEFAULT_RUNTIME_DATA_DIR_NAME, "agents");
+  return [configuredAgentsRoot, defaultAgentsRoot].some((agentsRoot) => isAgentConfigPathUnderRoot(agentsRoot, absolutePath));
+}
+
+function isAgentConfigPathUnderRoot(agentsRoot: string, absolutePath: string): boolean {
+  const relativePath = relative(agentsRoot, absolutePath);
   return !relativePath.startsWith("..")
     && !relativePath.startsWith("/")
     && relativePath.split(/[\\/]/).length === 2

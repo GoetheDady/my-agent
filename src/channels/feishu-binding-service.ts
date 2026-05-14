@@ -56,10 +56,10 @@ function normalizeAgentId(value?: string): string {
 /**
  * FeishuBindingService 是飞书绑定的渠道门面。
  *
- * 绑定的唯一事实来源已经收口到 `data/agents/<agentId>/agent.json`：
+ * 绑定的唯一事实来源已经收口到 `.my-agent/agents/<agentId>/agent.json`：
  * `channels.feishu.bindings` 保存该 Agent 拥有哪些飞书 App。这个类保留
  * list/get/upsert API，是为了让飞书事件解析、WebSocket 和路由不直接理解
- * agent.json 的内部结构。旧的 `data/channels/feishu-bindings.json` 只在首次
+ * agent.json 的内部结构。旧的 `.my-agent/channels/feishu-bindings.json` 只在首次
  * 读取时迁移，迁移成功后删除。
  */
 export class FeishuBindingService {

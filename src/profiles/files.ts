@@ -25,8 +25,8 @@ export interface LoadProfileContextOptions {
   /**
    * 运行时数据根目录。
    *
-   * 生产默认是 `data/`，profile 文件位于 `data/agents/<agentId>/soul.md`
-   * 和 `data/agents/<agentId>/user.md`。
+   * 生产默认是 `.my-agent/`，profile 文件位于 `.my-agent/agents/<agentId>/soul.md`
+   * 和 `.my-agent/agents/<agentId>/user.md`。
    */
   profileRootDir?: string;
   /** @deprecated 请使用 profileRootDir；保留给现有测试和调用点过渡。 */
@@ -156,7 +156,7 @@ export function applyProfileFileUpdates(options: ApplyProfileUpdatesOptions): Ap
 }
 
 function resolveProfileRootDir(options: { profileRootDir?: string; rootDir?: string } = {}): string {
-  // profile 文件属于 Agent 私有运行时数据，默认直接放在 data/agents/<agentId>/ 下。
+  // profile 文件属于 Agent 私有运行时数据，默认直接放在 .my-agent/agents/<agentId>/ 下。
   // profileRootDir/rootDir 表示运行时数据根目录，测试可传临时 data 根目录隔离写入。
   return options.profileRootDir ?? options.rootDir ?? getRuntimeDataDir();
 }

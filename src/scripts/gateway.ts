@@ -1,5 +1,6 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { getRuntimeDataDir } from "../core/config";
 
 type GatewayCommand = "start" | "stop" | "restart" | "status" | "logs" | "help";
 type GatewayState = "running" | "stopped" | "unhealthy";
@@ -69,14 +70,15 @@ export function getProjectRoot(): string {
 }
 
 export function resolveGatewayPaths(projectRoot = getProjectRoot()): GatewayPaths {
-  const runtimeDir = resolve(projectRoot, ".runtime");
+  const dataDir = getRuntimeDataDir(projectRoot);
+  const runtimeDir = resolve(dataDir, "runtime");
   return {
     projectRoot,
     runtimeDir,
     pidPath: resolve(runtimeDir, "my-agent.pid"),
     statePath: resolve(runtimeDir, "my-agent.gateway.json"),
     logPath: resolve(runtimeDir, "my-agent.log"),
-    dataDir: resolve(process.env.MY_AGENT_DATA_DIR ?? resolve(projectRoot, "data")),
+    dataDir,
   };
 }
 
@@ -411,7 +413,7 @@ function printHelp(): void {
 
 说明:
   网关是本地运行控制命令，负责管理现有 src/main.ts 服务进程。
-  进程号(PID) 是操作系统进程编号，会写入 .runtime/my-agent.pid。`);
+  进程号(PID) 是操作系统进程编号，会写入 .my-agent/runtime/my-agent.pid。`);
 }
 
 async function runLogs(paths: GatewayPaths, options: GatewayCliOptions): Promise<number> {
