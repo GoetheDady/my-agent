@@ -5,6 +5,7 @@ import { defaultChannelService, type ChannelService } from "../channels/service"
 import { getTaskChannelMetadata } from "../channels/external-runner";
 import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { runInternalAgentTask, type RunInternalAgentTaskInput } from "../runtime/internal-runner";
 import { claimNextTaskForChannels } from "../tasks/task-queue";
 import { createTask, getTask, markTaskCanceled } from "../tasks/task-store";
@@ -198,6 +199,7 @@ export class DelegationService {
     const childTask = getTask(delegation.child_task_id, this.database);
     if (childTask?.status === "queued") {
       markTaskCanceled(childTask.id, this.database);
+      finalizeEpisodeForTask(childTask.id, this.database);
     }
     const canceled = updateDelegation({
       id,

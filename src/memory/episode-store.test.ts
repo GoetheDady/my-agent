@@ -3,7 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
-import { createTask, markTaskCompleted, markTaskRunning } from "../tasks/task-store";
+import {
+  createTask,
+  markTaskCanceled,
+  markTaskCompleted,
+  markTaskFailed,
+  markTaskRunning,
+  retryTask,
+} from "../tasks/task-store";
 import {
   getEpisodeByTaskId,
   searchEpisodes,
@@ -45,9 +52,96 @@ describe("episode store", () => {
 
       expect(first).not.toBeNull();
       expect(second?.id).toBe(first?.id);
-      expect(getEpisodeByTaskId(task.id, db)?.summary).toContain("缺少 episodic memory");
+      expect(getEpisodeByTaskId(task.id, db)).toMatchObject({
+        summary: expect.stringContaining("缺少 episodic memory"),
+        outcome: expect.stringContaining("完成"),
+        task_status: "completed",
+        attempt_count: 1,
+        files_touched: ["src/memory/store.ts"],
+        key_steps: expect.arrayContaining(["调用工具：read_file"]),
+      });
       expect(searchEpisodes({ query: "记忆系统", agentId: "default" }, db)).toHaveLength(1);
       expect(listTaskEvents(task.id, db).map((event) => event.type)).toContain("episode.updated");
+    });
+  });
+
+  test("creates episodes for failed and canceled tasks with outcome fields", async () => {
+    await withEpisodeDb((db) => {
+      const failed = createTask({
+        id: "task-failed",
+        source_channel: "web",
+        input: "调用模型完成分析",
+      }, db);
+      markTaskRunning(failed.id, db);
+      markTaskFailed(failed.id, "model down", {
+        failure_type: "model_error",
+        failure_stage: "model_call",
+        retriable: true,
+      }, db);
+
+      const canceled = createTask({
+        id: "task-canceled",
+        source_channel: "web",
+        input: "稍后再做",
+      }, db);
+      markTaskCanceled(canceled.id, { failureType: "user_canceled", requestedBy: "runtime_api" }, db);
+
+      const failedEpisode = upsertEpisodeForTask(failed.id, db);
+      const canceledEpisode = upsertEpisodeForTask(canceled.id, db);
+
+      expect(failedEpisode).toMatchObject({
+        task_status: "failed",
+        failure_type: "model_error",
+        failure_stage: "model_call",
+        retriable: true,
+        problems: ["model down"],
+      });
+      expect(failedEpisode?.outcome).toContain("失败：model down");
+      expect(canceledEpisode).toMatchObject({
+        task_status: "canceled",
+        failure_type: "user_canceled",
+        failure_stage: "cancel",
+        retriable: false,
+      });
+      expect(canceledEpisode?.outcome).toContain("用户取消");
+      if (!failedEpisode || !canceledEpisode) {
+        throw new Error("episode should exist");
+      }
+      expect(searchEpisodes({ agentId: "default", taskStatus: "failed" }, db).map((episode) => episode.id)).toEqual([
+        failedEpisode.id,
+      ]);
+      expect(searchEpisodes({ agentId: "default", failureType: "user_canceled" }, db).map((episode) => episode.id)).toEqual([
+        canceledEpisode.id,
+      ]);
+    });
+  });
+
+  test("updates the same episode after retry succeeds", async () => {
+    await withEpisodeDb((db) => {
+      const task = createTask({
+        id: "task-retry",
+        source_channel: "web",
+        input: "先失败再成功",
+      }, db);
+      markTaskRunning(task.id, db);
+      markTaskFailed(task.id, "first failure", db);
+
+      const failedEpisode = upsertEpisodeForTask(task.id, db);
+      retryTask(task.id, { force: true }, db);
+      markTaskRunning(task.id, db);
+      markTaskCompleted(task.id, "retry success", db);
+      const completedEpisode = upsertEpisodeForTask(task.id, db);
+
+      expect(completedEpisode?.id).toBe(failedEpisode?.id);
+      expect(completedEpisode).toMatchObject({
+        task_status: "completed",
+        attempt_count: 2,
+        failure_type: null,
+        failure_stage: null,
+        retriable: null,
+        outcome: expect.stringContaining("retry success"),
+      });
+      expect(completedEpisode?.key_steps).toContain("任务重新排队等待重试");
     });
   });
 });

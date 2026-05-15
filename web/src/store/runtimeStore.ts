@@ -463,11 +463,12 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
   fetchRuntimeSnapshot: async (agentId = "default") => {
     set({ loading: true, error: null });
+    const encodedAgentId = encodeURIComponent(agentId);
     try {
       const [agentRes, tasksRes, eventsRes] = await Promise.all([
-        fetch(`/api/runtime/agents/${agentId}`),
-        fetch(`/api/runtime/tasks?agentId=${agentId}`),
-        fetch(`/api/runtime/events?agentId=${agentId}&limit=50`),
+        fetch(`/api/runtime/agents/${encodedAgentId}`),
+        fetch(`/api/runtime/tasks?agentId=${encodedAgentId}`),
+        fetch(`/api/runtime/events?agentId=${encodedAgentId}&limit=50`),
       ]);
 
       if (!agentRes.ok) throw new Error("获取 Agent 状态失败");

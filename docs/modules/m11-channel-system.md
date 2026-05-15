@@ -40,6 +40,7 @@ src/channels/
 - Feishu WebSocket MVP。
 - Feishu onboarding 和 binding。
 - 外部渠道队列 drain。
+- 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
 - WeChat stub。
 
 本轮 M3 改动对 Channel 的影响：
@@ -48,9 +49,16 @@ src/channels/
 - 渠道最终投递失败归入 `failure_stage='delivery'`。
 - 渠道失败会写入结构化 outcome，方便 Runtime API 解释失败。
 
+本轮 M7 改动对 Channel 的影响：
+
+- 外部渠道 runner（`external-runner.ts`）在所有终态路径接入 `finalizeEpisodeForTask()`：正常完成、失败、投递失败、任务不可执行、审批后恢复完成/失败。
+- 飞书等外部渠道任务现在和 Web / internal runner 一样，完成后会生成 episode 经历摘要，记录任务状态、失败分类、关键步骤等信息。
+- episode 生成失败时只写 `episode.failed` 审计事件，不会回滚渠道任务的终态或阻碍投递。
+
 ## 4. 后续需要补齐
 
 - Feishu message id 全面接入 `idempotency_key`。
 - 微信真实接入。
 - 附件和富文本处理。
 - 多渠道统一错误反馈。
+- 外部渠道投递重试后的 episode 更新策略：同一 task 多次投递后 episode 是否需要反映最终投递状态。

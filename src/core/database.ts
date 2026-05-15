@@ -234,11 +234,17 @@ export function initializeDatabaseSchema(database: Database): void {
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
       outcome TEXT NOT NULL DEFAULT '',
+      task_status TEXT NOT NULL DEFAULT 'completed',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      failure_type TEXT,
+      failure_stage TEXT,
+      retriable INTEGER,
       time_range_start INTEGER NOT NULL,
       time_range_end INTEGER NOT NULL,
       people TEXT NOT NULL DEFAULT '[]',
       tools_used TEXT NOT NULL DEFAULT '[]',
       files_touched TEXT NOT NULL DEFAULT '[]',
+      key_steps TEXT NOT NULL DEFAULT '[]',
       decisions TEXT NOT NULL DEFAULT '[]',
       problems TEXT NOT NULL DEFAULT '[]',
       source_event_ids TEXT NOT NULL DEFAULT '[]',
@@ -250,6 +256,12 @@ export function initializeDatabaseSchema(database: Database): void {
       FOREIGN KEY (task_id) REFERENCES tasks(id)
     )
   `);
+  ensureColumn(database, "episodes", "task_status", "TEXT NOT NULL DEFAULT 'completed'");
+  ensureColumn(database, "episodes", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "episodes", "failure_type", "TEXT");
+  ensureColumn(database, "episodes", "failure_stage", "TEXT");
+  ensureColumn(database, "episodes", "retriable", "INTEGER");
+  ensureColumn(database, "episodes", "key_steps", "TEXT NOT NULL DEFAULT '[]'");
 
   // Dream 层：每日总结、整理运行记录和整理决策，支撑自动记忆整理与撤销审计。
   database.run(`

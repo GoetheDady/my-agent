@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Database } from "bun:sqlite";
 import {
   listMemories,
   getMemory,
@@ -11,11 +12,13 @@ import { extractMemories } from "../memory/legacy/memory";
 import { dedupeActiveMemories } from "../memory/dedupe";
 import { listDailySummaries, listDreamRuns, runDreamWorker } from "../memory/dream-worker";
 import { listMemoryDecisions, undoMemoryDecision } from "../memory/decision-store";
-import { searchEpisodes } from "../memory/episode-store";
+import { getEpisode, getEpisodeByTaskId, searchEpisodes } from "../memory/episode-store";
 import { listReviewItems, updateReviewStatus } from "../memory/review-store";
 import { appendEvent } from "../events/event-log";
 import { defaultMemoryService } from "../memory/service";
+import type { TaskFailureType, TaskStatus } from "../tasks/task-types";
 
+export function createMemoryRoutes(database?: Database): Hono {
 const app = new Hono();
 
 /**
@@ -39,7 +42,28 @@ app.get("/episodes", (c) => {
   const limit = parseInt(c.req.query("limit") ?? "10", 10);
   const from = c.req.query("from") ? parseInt(c.req.query("from")!, 10) : undefined;
   const to = c.req.query("to") ? parseInt(c.req.query("to")!, 10) : undefined;
-  return c.json({ episodes: searchEpisodes({ agentId, query, from, to, limit }) });
+  const taskId = c.req.query("taskId") ?? undefined;
+  const taskStatus = c.req
+    .queries("status")
+    ?.flatMap((value) => value.split(",").filter(Boolean)) as TaskStatus[] | undefined;
+  const failureType = c.req.query("failureType") as TaskFailureType | undefined;
+  return c.json({
+    episodes: searchEpisodes({ agentId, query, from, to, limit, taskId, taskStatus, failureType }, database),
+  });
+});
+
+// GET /api/memory/episodes/by-task/:taskId
+app.get("/episodes/by-task/:taskId", (c) => {
+  const episode = getEpisodeByTaskId(c.req.param("taskId"), database);
+  if (!episode) return c.json({ error: "episode 不存在" }, 404);
+  return c.json({ episode });
+});
+
+// GET /api/memory/episodes/:id
+app.get("/episodes/:id", (c) => {
+  const episode = getEpisode(c.req.param("id"), database);
+  if (!episode) return c.json({ error: "episode 不存在" }, 404);
+  return c.json({ episode });
 });
 
 // GET /api/memory/daily-summaries
@@ -252,4 +276,7 @@ app.post("/extract", async (c) => {
   }
 });
 
-export default app;
+return app;
+}
+
+export default createMemoryRoutes();

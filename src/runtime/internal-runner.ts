@@ -5,6 +5,7 @@ import { defaultAgentConfigService } from "../agents/config-service";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import { claimTask } from "../tasks/task-queue";
@@ -149,6 +150,7 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
       type: "task.completed",
       payload: { result: text },
     }, database);
+    finalizeEpisodeForTask(claimed.id, database);
 
     const completed = getTask(claimed.id, database) ?? claimed;
     return { task: completed, text };
@@ -168,6 +170,7 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
         retriable: classification.retriable,
       },
     }, database);
+    finalizeEpisodeForTask(claimed.id, database);
     throw error;
   } finally {
     stopLeaseHeartbeat();

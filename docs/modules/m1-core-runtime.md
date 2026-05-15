@@ -45,11 +45,13 @@ src/scripts/
 - WAL 和外键约束。
 - Gateway 相关脚本。
 
-本轮 M3 改动对 Core Runtime 的影响：
+本轮 M7 改动对 Core Runtime 的影响：
 
-- `tasks` 表新增 outcome 与 progress 字段。
-- 老数据库通过 `ensureColumn()` 自动补齐新字段。
-- `src/core/database.test.ts` 已覆盖字段默认值。
+- `episodes` 表新增 task 派生字段：`task_status`、`attempt_count`、`failure_type`、`failure_stage`、`retriable`。
+- `episodes` 表新增 `key_steps`，用于保存一次经历的关键步骤。
+- 老数据库通过 `ensureColumn()` 自动补齐新字段，避免用户删库重建。
+- Runtime 启动时会扫描终态 task，并为缺失或过期的 episode 做一次确定性补齐/刷新。
+- 这些字段仍属于 Memory System 的业务语义；Core Runtime 只负责 schema 初始化和兼容迁移。
 
 ## 4. 后续需要补齐
 

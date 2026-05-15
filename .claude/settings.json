@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun run dev)",
+      "Bash(bun run start)",
+      "Bash(bun test)",
+      "Bash(bun test:*)",
+      "Bash(bun run lint)",
+      "Bash(bun run typecheck)",
+      "Bash(bun run check)",
+      "Bash(bun run gateway:*)",
+      "Bash(cd web && bun run dev)",
+      "Bash(cd web && bun run build)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log)",
+      "Bash(git branch)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(ls *)",
+      "Bash(npm list *)",
+      "Bash(bun install)",
+      "Bash(bun add *)",
+      "Bash(bun remove *)",
+      "Bash(npx ctx7@latest *)",
+      "mcp__context7__query-docs",
+      "mcp__context7__resolve-library-id",
+      "mcp__antd__antd_doc",
+      "mcp__antd__antd_info",
+      "mcp__antd__antd_list"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(rm -rf:*)"
+    ],
+    "additionalDirectories": []
+  },
+  "hooks": {
+  }
+}

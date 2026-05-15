@@ -53,6 +53,12 @@ src/runtime/internal-runner.ts
 - 模型错误、超时、客户端中断会写入结构化失败分类。
 - 客户端中断现在归为 `canceled`，并记录 `user_canceled / cancel / retriable=false`。
 
+本轮 M7 改动对 Runtime 的影响：
+
+- Episode 生成从仅覆盖 completed 任务，扩展到所有终态（completed、failed、canceled）。
+- `finalizeEpisodeForTask()` 替代原来的 `upsertEpisodeForTask()` + try-catch 模式，episode 生成失败时只写审计事件、不回滚任务终态。
+- 用户取消和任务失败均会在 runner 中触发 episode 生成，确保失败经历也被记录。
+
 ## 4. 后续需要补齐
 
 - 记录具体工具名、工具调用 id 和工具执行耗时。

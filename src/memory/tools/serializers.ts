@@ -27,11 +27,18 @@ export function toRecallEpisode(episode: EpisodeRecord) {
     title: episode.title,
     summary: episode.summary,
     outcome: episode.outcome,
+    task_status: episode.task_status,
+    attempt_count: episode.attempt_count,
+    failure_type: episode.failure_type,
+    failure_stage: episode.failure_stage,
+    retriable: episode.retriable,
     task_id: episode.task_id,
     time_range_start: episode.time_range_start,
     time_range_end: episode.time_range_end,
     tools_used: episode.tools_used,
     files_touched: episode.files_touched,
+    key_steps: episode.key_steps,
+    problems: episode.problems,
     importance: episode.importance,
   };
 }

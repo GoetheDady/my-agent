@@ -7,7 +7,7 @@
             "type": "command",
             "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/ensure_module_docs.py\"",
             "timeout": 30,
-            "statusMessage": "Checking module documentation"
+            "statusMessage": "检查模块文档同步"
           }
         ]
       }

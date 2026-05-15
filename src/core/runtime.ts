@@ -10,6 +10,7 @@
  */
 
 import { ensureDefaultAgent } from "../agents/agent-registry";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { recoverRunningTasks } from "../tasks/task-store";
 import { getDb } from "./database";
 
@@ -82,4 +83,35 @@ export function initializeRuntime(): void {
   if (recoveredCount > 0) {
     console.warn(`[runtime] 已恢复 ${recoveredCount} 个重启前遗留的 running task`);
   }
+  const failedEpisodes = finalizeRecoveredEpisodes(db);
+  if (failedEpisodes > 0) {
+    console.warn(`[runtime] 已补齐 ${failedEpisodes} 个终态 task 的 episode`);
+  }
+}
+
+function finalizeRecoveredEpisodes(database = getDb()): number {
+  const rows = database
+    .query<{ id: string }, []>(
+      `SELECT tasks.id
+       FROM tasks
+       LEFT JOIN episodes ON episodes.task_id = tasks.id
+       WHERE tasks.status IN ('completed', 'failed', 'canceled')
+         AND (
+           episodes.id IS NULL OR
+           episodes.task_status != tasks.status OR
+           episodes.attempt_count != tasks.attempt_count OR
+           COALESCE(episodes.failure_type, '') != COALESCE(tasks.failure_type, '') OR
+           COALESCE(episodes.failure_stage, '') != COALESCE(tasks.failure_stage, '') OR
+           COALESCE(episodes.retriable, -1) != COALESCE(tasks.retriable, -1)
+         )`,
+    )
+    .all();
+
+  let count = 0;
+  for (const row of rows) {
+    if (finalizeEpisodeForTask(row.id, database)) {
+      count += 1;
+    }
+  }
+  return count;
 }

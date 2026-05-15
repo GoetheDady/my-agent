@@ -5,6 +5,7 @@ import { defaultAgentConfigService } from "../agents/config-service";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import {
@@ -331,6 +332,7 @@ async function runClaimedExternalChannelTask(input: {
       }, input.database);
       updateTaskProgress(task.id, { status: "persisting_result", message: "正在等待工具审批" }, input.database);
       markTaskCompleted(task.id, "等待工具审批", input.database);
+      finalizeEpisodeForTask(task.id, input.database);
       return;
     }
 
@@ -370,6 +372,7 @@ async function runClaimedExternalChannelTask(input: {
       type: "task.completed",
       payload: { result: result.text },
     }, input.database);
+    finalizeEpisodeForTask(task.id, input.database);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const classification = classifyTaskFailure(message, { stage: "delivery" });
@@ -386,6 +389,7 @@ async function runClaimedExternalChannelTask(input: {
         retriable: classification.retriable,
       },
     }, input.database);
+    finalizeEpisodeForTask(task.id, input.database);
     await deliverFailure({
       channelService: input.channelService,
       task,
@@ -456,14 +460,33 @@ export async function runExternalChannelTask(input: RunExternalChannelTaskInput)
       return;
     }
 
-    markTaskFailed(task.id, "任务当前不可执行，可能已被处理、取消或目标 Agent 状态异常。", database);
+    const message = "任务当前不可执行，可能已被处理、取消或目标 Agent 状态异常。";
+    const classification = {
+      failure_type: "unknown",
+      failure_stage: "claim",
+      retriable: false,
+    } as const;
+    markTaskFailed(task.id, message, classification, database);
+    appendEvent({
+      agent_id: task.agent_id,
+      task_id: task.id,
+      conversation_id: task.conversation_id,
+      type: "task.failed",
+      payload: {
+        error: message,
+        failureType: classification.failure_type,
+        failureStage: classification.failure_stage,
+        retriable: classification.retriable,
+      },
+    }, database);
+    finalizeEpisodeForTask(task.id, database);
 
     await deliverFailure({
       channelService,
       task,
       channel: input.received.channel,
       conversationId: input.received.conversationId,
-      message: "任务当前不可执行，可能已被处理、取消或目标 Agent 状态异常。",
+      message,
       metadata: getDeliverMetadata({
         taskId: task.id,
         deliverMetadata: input.deliverMetadata,
@@ -588,6 +611,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
       type: "task.completed",
       payload: { result: result.text, resumedFromApprovalId: input.approvalId },
     }, database);
+    finalizeEpisodeForTask(task.id, database);
     await channelService.deliverMessage({
       channel: approval.channel ?? task.source_channel,
       conversationId: approval.conversationId ?? task.conversation_id ?? "",
@@ -612,6 +636,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
         retriable: classification.retriable,
       },
     }, database);
+    finalizeEpisodeForTask(task.id, database);
     try {
       await channelService.deliverMessage({
         channel: approval.channel ?? task.source_channel,

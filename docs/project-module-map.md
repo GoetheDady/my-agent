@@ -43,16 +43,16 @@
 | M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
 | M5 | Prompt & Context | 每次执行带哪些上下文 | 已有 prompt builder | 上下文预算、记忆选择和 Skill 选择更稳定 |
 | M6 | Tool System | Agent 如何安全调用能力 | 已有工具和审批 | 权限更细、工具失败更可恢复 |
-| M7 | Memory System | Agent 如何长期记住和整理 | 已有长期记忆和 Dream Worker | 人类式记忆分层更完整 |
+| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker 和 Episode v1，已有模块文档 | 人类式记忆分层更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | Skill System | Agent 如何沉淀可复用做法 | 已有三类 Skill | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表，已有模块文档 | 事件规范、查询、诊断和回放更强 |
 | M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，微信 stub，已有模块文档 | 多渠道生产化 |
-| M12 | Multi-Agent Collaboration | 多 Agent 如何分工 | 已有异步委派 | 协作协议、角色边界和结果汇总完整化 |
+| M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
 | M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，已有模块文档 | 控制面完整化 |
-| M16 | Web Console | 如何观察和调试 | 已有工程控制台 | 继续作为控制台，不成为核心 |
+| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，已有模块文档 | 继续作为控制台，不成为核心 |
 | M17 | Evaluation & Testing | 如何知道 Agent 变好了 | 单元测试较多 | 行为评估和端到端场景测试 |
 | M18 | Documentation & Onboarding | 新 Agent 如何理解项目 | 已有基础文档 | 模块文档和开发路线成体系 |
 
@@ -287,6 +287,8 @@ src/tools/
 
 Memory System 负责让 Agent 长期记住重要信息，并能在需要时找回来。
 
+模块文档：[docs/modules/m7-memory-system.md](./modules/m7-memory-system.md)
+
 当前相关目录：
 
 ```text
@@ -305,7 +307,8 @@ src/memory/tools/
 - assistant message persisted 后自动触发记忆提取。
 - 记忆去重和再巩固。
 - Dream Worker。
-- 情景记忆 episode 基础能力。
+- 情景记忆 episode 基础能力，包含任务状态、失败分类、可重试性和关键步骤。
+- Runtime 启动时会补齐或刷新终态 task 的 episode，保证 retry 后同一 task 仍只有一条经历记录。
 - prospective memory 的基础工具能力。
 
 ### 还需要补齐
@@ -487,12 +490,16 @@ src/agents/
 src/tasks/
 ```
 
+模块文档：[docs/modules/m12-multi-agent-collaboration.md](./modules/m12-multi-agent-collaboration.md)
+
 ### 当前已有
 
 - Agent A 可以委派任务给 Agent B。
 - 子 Agent 完成后创建 callback Task。
 - 防止递归委派。
 - 子任务结果会回到父 Agent。
+- 取消 queued 子任务时会同步生成 canceled episode，保证多 Agent 失败或取消经历可追踪。
+- 委派流程复用 Task System 的生命周期、租约和进度字段，不绕过单 Agent 单线程约束。
 
 ### 还需要补齐
 
@@ -503,6 +510,7 @@ src/tasks/
 - 协作事件时间线。
 - 父 Agent 如何判断子 Agent 输出是否足够。
 - 委派失败后的回退策略。
+- 跨 Agent 的权限边界，避免通过委派绕过工具或文件访问策略。
 
 专业术语说明：
 
@@ -620,6 +628,8 @@ src/routes/
 
 ## 18. M16 Web Console
 
+模块文档：[docs/modules/m16-web-console.md](./modules/m16-web-console.md)
+
 ### 职责
 
 Web Console 是工程控制台，用来观察、调试和管理 Runtime。
@@ -643,11 +653,15 @@ web/
 - Events。
 - Architecture。
 - Settings。
+- Runtime Snapshot 会跟随当前选中的 Agent 拉取状态。
+- Task Queue 优先展示排队任务，并按新到旧展示最近历史任务。
 
 ### 还需要补齐
 
 - 不是优先做产品化 UI，而是补观察能力。
 - Task timeline 更完整。
+- 直接进入控制台时的实时订阅或 fallback 轮询。
+- 控制台显式 Agent 切换器。
 - Memory evidence 展示。
 - Skill diff / update / provenance 展示。
 - Channel message tracing。

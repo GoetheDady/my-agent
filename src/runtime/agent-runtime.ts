@@ -14,7 +14,7 @@ import { defaultSkillService } from "../skills";
 import { buildAgentTools, tools } from "../tools/service";
 import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
-import { upsertEpisodeForTask } from "../memory/episode-store";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import {
   classifyTaskFailure,
   getTask,
@@ -152,6 +152,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
     });
     if (classification.failure_type === "user_canceled") {
       markTaskCanceled(input.task.id, { failureType: "user_canceled", requestedBy: "runtime" }, database);
+      finalizeEpisodeForTask(input.task.id, database);
     } else {
       markTaskFailed(input.task.id, message, classification, database);
       appendEvent({
@@ -167,6 +168,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
         },
         created_at: nextEventTimestamp(),
       }, database);
+      finalizeEpisodeForTask(input.task.id, database);
     }
   };
 
@@ -266,19 +268,8 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
           payload: { result: text },
           created_at: nextEventTimestamp(),
         }, database);
-        try {
-          // Episode 是“做过什么”的情景摘要。失败不能回滚聊天结果，只记录 episode.failed。
-          upsertEpisodeForTask(input.task.id, database);
-        } catch (error) {
-          appendEvent({
-            agent_id: input.task.agent_id,
-            task_id: input.task.id,
-            conversation_id: input.task.conversation_id,
-            type: "episode.failed",
-            payload: { error: error instanceof Error ? error.message : String(error) },
-            created_at: nextEventTimestamp(),
-          }, database);
-        }
+        // Episode 是“做过什么”的情景摘要。生成失败不能回滚聊天结果，只记录 episode.failed。
+        finalizeEpisodeForTask(input.task.id, database);
       },
       onError: ({ error }) => {
         const message = error instanceof Error ? error.message : String(error);

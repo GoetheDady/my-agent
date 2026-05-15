@@ -8,8 +8,10 @@ import {
   type RuntimeAgentStatus,
   type RuntimeTask,
 } from "../../store/runtimeStore";
+import { useAgentStore } from "../../store/agentStore";
 
 export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }) {
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
   const {
     agent,
     tasks,
@@ -23,8 +25,8 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
   const queuedTasks = getQueuedTasks(tasks);
 
   useEffect(() => {
-    void fetchRuntimeSnapshot();
-  }, [fetchRuntimeSnapshot]);
+    void fetchRuntimeSnapshot(selectedAgentId);
+  }, [fetchRuntimeSnapshot, selectedAgentId]);
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
@@ -35,7 +37,7 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
             <p className="mt-1 text-sm text-[var(--color-text-muted)]">当前 Agent 状态、任务队列和错误信息。</p>
           </div>
           <button
-            onClick={() => fetchRuntimeSnapshot()}
+            onClick={() => fetchRuntimeSnapshot(selectedAgentId)}
             className="rounded-lg p-2 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
             title="刷新运行状态"
           >
@@ -72,7 +74,7 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
           <div className="mt-4">
             <h3 className="mb-2 text-sm font-semibold text-[var(--color-text)]">正在执行</h3>
             {currentTask ? (
-              <TaskCard task={currentTask} onCancel={() => cancelTask(currentTask.id)} />
+              <TaskCard task={currentTask} onCancel={() => cancelTask(currentTask.id, selectedAgentId)} />
             ) : (
               <div className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-4 py-3 text-sm text-[var(--color-text-soft)]">
                 当前没有运行中的任务
@@ -95,7 +97,7 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
           {mode === "events" ? (
             <EventList events={events} />
           ) : (
-            <TaskList tasks={tasks} queuedTasks={queuedTasks} onCancel={cancelTask} />
+            <TaskList tasks={tasks} queuedTasks={queuedTasks} agentId={selectedAgentId} onCancel={cancelTask} />
           )}
         </div>
       </section>
@@ -106,20 +108,27 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
 function TaskList({
   tasks,
   queuedTasks,
+  agentId,
   onCancel,
 }: {
   tasks: RuntimeTask[];
   queuedTasks: RuntimeTask[];
-  onCancel: (taskId: string) => Promise<void>;
+  agentId: string;
+  onCancel: (taskId: string, agentId?: string) => Promise<void>;
 }) {
-  const visibleTasks = queuedTasks.length > 0 ? queuedTasks : tasks.slice(0, 12);
+  const historyTasks = [...tasks]
+    .filter((task) => task.status !== "queued")
+    .sort((a, b) => b.created_at - a.created_at);
+  const visibleTasks = queuedTasks.length > 0
+    ? [...queuedTasks, ...historyTasks].slice(0, 12)
+    : historyTasks.slice(0, 12);
   if (visibleTasks.length === 0) {
     return <EmptyState text="暂无任务记录" />;
   }
   return (
     <div className="space-y-3">
       {visibleTasks.map((task) => (
-        <TaskCard key={task.id} task={task} onCancel={task.status === "queued" ? () => onCancel(task.id) : undefined} />
+        <TaskCard key={task.id} task={task} onCancel={task.status === "queued" ? () => onCancel(task.id, agentId) : undefined} />
       ))}
     </div>
   );

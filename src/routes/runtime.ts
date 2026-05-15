@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { getAgent } from "../agents/agent-registry";
 import { getDb } from "../core/database";
 import { listAgentEvents, listTaskEvents } from "../events/event-log";
+import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { getTask, listTasks, markTaskCanceled, retryTask } from "../tasks/task-store";
 import type { TaskStatus } from "../tasks/task-types";
 
@@ -92,6 +93,7 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     // cancel 是控制台操作：释放 task/agent 状态，但不会删除已经保存的事件。
     try {
       markTaskCanceled(taskId, { failureType: "user_canceled", requestedBy: "runtime_api" }, database);
+      finalizeEpisodeForTask(taskId, database);
       return c.json({ task: getTask(taskId, database) });
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
