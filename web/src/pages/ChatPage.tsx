@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+// No lucide-react imports needed anymore
 import { useNavigate, useParams } from "react-router";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import ChatInput from "../features/chat/ChatInput";
 import MessageList from "../features/chat/MessageList";
-import SessionSidebar from "../features/sessions/SessionSidebar";
 import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionPath } from "../lib/sessionRoute";
 import { useAgentStore } from "../store/agentStore";
@@ -21,19 +20,15 @@ type SessionMessagesResponse =
   | { session: Session; messages: RawSessionMessage[] };
 
 export default function ChatPage() {
-  const [sessionSidebarOpen, setSessionSidebarOpen] = useState(true);
   const [approvals, setApprovals] = useState<Record<string, ToolApprovalSummary>>({});
   const [approvalLoading, setApprovalLoading] = useState<Record<string, boolean>>({});
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string | null>>({});
   const navigate = useNavigate();
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
   const { thinkingEnabled, setSessionId } = useChatStore();
-  const agents = useAgentStore((s) => s.agents);
   const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const setSelectedAgentId = useAgentStore((s) => s.setSelectedAgentId);
-  const agentLoading = useAgentStore((s) => s.loading);
-  const agentError = useAgentStore((s) => s.error);
   const sessions = useSessionStore((s) => s.sessions);
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
   const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
@@ -47,10 +42,6 @@ export default function ChatPage() {
 
   const navigateToSession = useCallback((id: string, replace = false) => {
     navigate(getSessionPath(id), { replace });
-  }, [navigate]);
-
-  const navigateToNewSession = useCallback(() => {
-    navigate("/");
   }, [navigate]);
 
   const sessionResolver = useMemo(() => createSessionResolver({
@@ -187,34 +178,6 @@ export default function ChatPage() {
     );
   }, [sendMessage, sessionResolver, thinkingEnabled]);
 
-  const handleLoadSession = useCallback(async (id: string) => {
-    const loaded = await loadSession(id);
-    if (loaded) navigateToSession(id);
-  }, [loadSession, navigateToSession]);
-
-  const handleNewSession = useCallback(() => {
-    setMessages([]);
-    useChatStore.getState().clearSession();
-    navigateToNewSession();
-  }, [navigateToNewSession, setMessages]);
-
-  const handleAgentChange = useCallback((agentId: string) => {
-    setSelectedAgentId(agentId);
-    void fetchRuntimeSnapshot(agentId);
-    if (useChatStore.getState().sessionId) {
-      setMessages([]);
-      useChatStore.getState().clearSession();
-      setActiveSessionId(null);
-      navigateToNewSession();
-    }
-  }, [
-    fetchRuntimeSnapshot,
-    navigateToNewSession,
-    setActiveSessionId,
-    setMessages,
-    setSelectedAgentId,
-  ]);
-
   const registerApproval = useCallback(async (input: {
     toolCallId: string;
     toolName: string;
@@ -307,72 +270,24 @@ export default function ChatPage() {
   }, [addToolApprovalResponse, approvals]);
 
   return (
-    <main className="flex min-h-0 flex-1 bg-[var(--color-bg)]">
-      {sessionSidebarOpen && (
-        <SessionSidebar
-          selectedAgentId={selectedAgentId}
-          onLoadSession={handleLoadSession}
-          onNewSession={handleNewSession}
-        />
-      )}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] bg-white px-4 py-2">
-          <button
-            onClick={() => setSessionSidebarOpen(!sessionSidebarOpen)}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
-            title={sessionSidebarOpen ? "收起会话栏" : "展开会话栏"}
-          >
-            {sessionSidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-[var(--color-text)]">Control Chat</div>
-            <div className="text-xs text-[var(--color-text-soft)]">
-              当前 Agent：{selectedAgentId}；新会话会绑定到选中的 Agent。
-            </div>
-          </div>
-          <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-3 py-2">
-            <Bot size={16} className="text-[var(--color-accent)]" />
-            <span className="text-xs font-semibold text-[var(--color-text-muted)]">Agent</span>
-            <select
-              value={selectedAgentId}
-              onChange={(event) => handleAgentChange(event.target.value)}
-              disabled={agentLoading || agents.length === 0}
-              className="max-w-[220px] bg-transparent text-sm font-semibold text-[var(--color-text)] outline-none disabled:text-[var(--color-text-soft)]"
-              title="选择对话 Agent"
-            >
-              {agents.length === 0 ? (
-                <option value={selectedAgentId}>{agentLoading ? "加载中" : selectedAgentId}</option>
-              ) : agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.config.name || agent.name} ({agent.id})
-                </option>
-              ))}
-            </select>
-          </label>
-          {agentError && (
-            <div className="max-w-[240px] truncate rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
-              {agentError}
-            </div>
-          )}
-        </div>
-        <MessageList
-          messages={messages}
-          handleApprove={handleApprove}
-          handleDeny={handleDeny}
-          approvals={approvals}
-          approvalLoading={approvalLoading}
-          approvalErrors={approvalErrors}
-          registerApproval={registerApproval}
-        />
-        <ChatInput
-          isLoading={isLoading}
-          onSend={handleSend}
-          onStop={stop}
-          thinkingEnabled={thinkingEnabled}
-          onToggleThinking={() => useChatStore.getState().setThinkingEnabled(!thinkingEnabled)}
-        />
-      </section>
-    </main>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
+      <MessageList
+        messages={messages}
+        handleApprove={handleApprove}
+        handleDeny={handleDeny}
+        approvals={approvals}
+        approvalLoading={approvalLoading}
+        approvalErrors={approvalErrors}
+        registerApproval={registerApproval}
+      />
+      <ChatInput
+        isLoading={isLoading}
+        onSend={handleSend}
+        onStop={stop}
+        thinkingEnabled={thinkingEnabled}
+        onToggleThinking={() => useChatStore.getState().setThinkingEnabled(!thinkingEnabled)}
+      />
+    </section>
   );
 }
 
