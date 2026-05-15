@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // No lucide-react imports needed anymore
 import { useNavigate, useParams } from "react-router";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import ChatInput from "../features/chat/ChatInput";
 import MessageList from "../features/chat/MessageList";
+import { createChatTransport } from "../lib/chatTransport";
 import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionPath } from "../lib/sessionRoute";
+import { continueToolApprovalOnce } from "../lib/toolApprovalContinuation";
 import { useAgentStore } from "../store/agentStore";
 import { parseDbContent, useChatStore } from "../store/chatStore";
 import { useRealtimeStore } from "../store/realtimeStore";
@@ -35,9 +36,16 @@ export default function ChatPage() {
   const fetchRuntimeSnapshot = useRuntimeStore((s) => s.fetchRuntimeSnapshot);
   const lastRealtimeEvent = useRealtimeStore((s) => s.lastEvent);
   const isLoadingRef = useRef(false);
+  const continuedApprovalsRef = useRef<Set<string>>(new Set());
 
-  const chatTransport = useMemo(() => new DefaultChatTransport({
-    api: "/api/chat",
+  const chatTransport = useMemo(() => createChatTransport({
+    getSessionId: () => useChatStore.getState().sessionId,
+    getAgentId: () => {
+      const sessionId = useChatStore.getState().sessionId;
+      const boundSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId);
+      return boundSession?.agent_id ?? useAgentStore.getState().selectedAgentId;
+    },
+    getThinkingEnabled: () => useChatStore.getState().thinkingEnabled,
   }), []);
 
   const navigateToSession = useCallback((id: string, replace = false) => {
@@ -64,7 +72,6 @@ export default function ChatPage() {
     addToolApprovalResponse,
   } = useChat({
     transport: chatTransport,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: () => {
       void fetchSessions();
     },
@@ -162,21 +169,38 @@ export default function ChatPage() {
     }
   }, [fetchSessionUiMessages, lastRealtimeEvent, setMessages]);
 
-  const handleSend = useCallback(async (text: string) => {
-    const currentSessionId = await sessionResolver.ensureSessionId();
+  const getCurrentChatBody = useCallback(() => {
+    const currentSessionId = useChatStore.getState().sessionId;
     const boundSession = useSessionStore.getState().sessions.find((session) => session.id === currentSessionId);
     const boundAgentId = boundSession?.agent_id ?? useAgentStore.getState().selectedAgentId;
+    return {
+      sessionId: currentSessionId,
+      agentId: boundAgentId,
+      thinkingEnabled: useChatStore.getState().thinkingEnabled,
+    };
+  }, []);
+
+  const handleSend = useCallback(async (text: string) => {
+    await sessionResolver.ensureSessionId();
     sendMessage(
       { text },
       {
-        body: {
-          sessionId: currentSessionId,
-          agentId: boundAgentId,
-          thinkingEnabled,
-        },
+        body: getCurrentChatBody(),
       },
     );
-  }, [sendMessage, sessionResolver, thinkingEnabled]);
+  }, [getCurrentChatBody, sendMessage, sessionResolver]);
+
+  const continueToolApproval = useCallback(async (toolCallId: string, approved: boolean, reason?: string) => {
+    await continueToolApprovalOnce({
+      continued: continuedApprovalsRef.current,
+      toolCallId,
+      approved,
+      reason,
+      getBody: getCurrentChatBody,
+      addToolApprovalResponse,
+      sendMessage,
+    });
+  }, [addToolApprovalResponse, getCurrentChatBody, sendMessage]);
 
   const registerApproval = useCallback(async (input: {
     toolCallId: string;
@@ -207,6 +231,14 @@ export default function ChatPage() {
       }
       const approval = data.approval;
       setApprovals((current) => ({ ...current, [input.toolCallId]: approval }));
+      if (approval.status === "approved" || approval.status === "denied") {
+        void continueToolApproval(input.toolCallId, approval.status === "approved").catch((error) => {
+          setApprovalErrors((current) => ({
+            ...current,
+            [input.toolCallId]: error instanceof Error ? error.message : "继续执行工具审批失败",
+          }));
+        });
+      }
     } catch (error) {
       setApprovalErrors((current) => ({
         ...current,
@@ -215,12 +247,12 @@ export default function ChatPage() {
     } finally {
       setApprovalLoading((current) => ({ ...current, [input.toolCallId]: false }));
     }
-  }, [approvalLoading, approvals]);
+  }, [approvalLoading, approvals, continueToolApproval]);
 
   const handleApprove = useCallback(async (toolCallId: string, rememberChoice: boolean) => {
     const approval = approvals[toolCallId];
-    if (approval) {
-      try {
+    try {
+      if (approval) {
         const res = await fetch(`/api/tools/approvals/${encodeURIComponent(approval.id)}/approve`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -230,24 +262,20 @@ export default function ChatPage() {
         if (!res.ok || !data.approval) throw new Error(data.error ?? "批准工具审批失败");
         const updatedApproval = data.approval;
         setApprovals((current) => ({ ...current, [toolCallId]: updatedApproval }));
-      } catch (error) {
-        setApprovalErrors((current) => ({
-          ...current,
-          [toolCallId]: error instanceof Error ? error.message : "批准工具审批失败",
-        }));
-        return;
       }
+      await continueToolApproval(toolCallId, true);
+    } catch (error) {
+      setApprovalErrors((current) => ({
+        ...current,
+        [toolCallId]: error instanceof Error ? error.message : "批准工具审批失败",
+      }));
     }
-    addToolApprovalResponse({
-      id: toolCallId,
-      approved: true,
-    });
-  }, [addToolApprovalResponse, approvals]);
+  }, [approvals, continueToolApproval]);
 
   const handleDeny = useCallback(async (toolCallId: string) => {
     const approval = approvals[toolCallId];
-    if (approval) {
-      try {
+    try {
+      if (approval) {
         const res = await fetch(`/api/tools/approvals/${encodeURIComponent(approval.id)}/deny`, {
           method: "POST",
         });
@@ -255,19 +283,15 @@ export default function ChatPage() {
         if (!res.ok || !data.approval) throw new Error(data.error ?? "拒绝工具审批失败");
         const updatedApproval = data.approval;
         setApprovals((current) => ({ ...current, [toolCallId]: updatedApproval }));
-      } catch (error) {
-        setApprovalErrors((current) => ({
-          ...current,
-          [toolCallId]: error instanceof Error ? error.message : "拒绝工具审批失败",
-        }));
-        return;
       }
+      await continueToolApproval(toolCallId, false);
+    } catch (error) {
+      setApprovalErrors((current) => ({
+        ...current,
+        [toolCallId]: error instanceof Error ? error.message : "拒绝工具审批失败",
+      }));
     }
-    addToolApprovalResponse({
-      id: toolCallId,
-      approved: false,
-    });
-  }, [addToolApprovalResponse, approvals]);
+  }, [approvals, continueToolApproval]);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-bg)]">

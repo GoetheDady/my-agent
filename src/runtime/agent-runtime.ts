@@ -48,6 +48,11 @@ export interface AgentRunResult {
   taskId: string;
 }
 
+export interface AgentUiMessageStreamFinishEvent {
+  responseMessage: unknown;
+  isContinuation: boolean;
+}
+
 /**
  * Agent 忙碌错误。
  *
@@ -361,17 +366,24 @@ function createRunAbortSignal(
  */
 export function toAgentUiMessageStreamResponse(
   run: AgentRunResult,
-  onFinish: (event: { responseMessage: unknown }) => void,
+  onFinish: (event: AgentUiMessageStreamFinishEvent) => void,
+  originalMessages?: unknown[],
 ): Response {
   // AI SDK 的 UI stream response 负责把模型文本、工具调用、工具结果按前端可识别格式输出。
   return run.result.toUIMessageStreamResponse({
+    originalMessages: originalMessages as never,
     consumeSseStream: consumeStream,
     headers: {
       "access-control-allow-origin": "*",
       "cache-control": "no-cache",
       "connection": "keep-alive",
     },
-    onFinish,
+    onFinish: (event) => {
+      onFinish({
+        responseMessage: event.responseMessage,
+        isContinuation: event.isContinuation,
+      });
+    },
   });
 }
 

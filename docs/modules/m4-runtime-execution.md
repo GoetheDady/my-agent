@@ -45,6 +45,7 @@ src/runtime/internal-runner.ts
 - 20 秒租约续约。
 - 模型调用超时与 abort signal。
 - 成功、失败、取消时释放 Agent。
+- Web 工具审批续跑时，UI message stream 会带上原始 `messages`，让 AI SDK 能把批准后的工具输出合并回上一条 assistant 消息，而不是在服务端丢失工具调用上下文。
 
 本轮 M3 改动对 Runtime 的影响：
 
@@ -65,3 +66,4 @@ src/runtime/internal-runner.ts
 - 更细的模型错误分类。
 - 执行上下文快照。
 - running task 的当前步骤和最近输出。
+- 审批续跑仍需要更完整的任务语义：当前会创建新的 runtime task 执行批准后的工具，后续可考虑把“等待审批”和“审批后继续”建模为同一 Task 的暂停/恢复。

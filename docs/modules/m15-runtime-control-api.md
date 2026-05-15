@@ -39,6 +39,11 @@ Memory 相关 API 的业务语义属于 [M7 Memory System](./m7-memory-system.md
 
 当前 API 已支持：
 
+Chat 数据面 (`src/routes/chat.ts`)：
+
+- `POST /api/chat` 接收前端 UI messages、sessionId、agentId 和 thinkingEnabled，并把 Web 输入转成 Task。
+- 工具审批续跑时会把原始 UI messages 传给 Runtime 的 UI stream response；如果这是 assistant message continuation，会原地更新已有 assistant 消息，避免重复追加用户消息或丢失工具卡上下文。
+
 Runtime 控制面 (`src/routes/runtime.ts`)：
 
 - `GET /api/runtime/agents/:id`
@@ -72,3 +77,4 @@ Memory 观察面 (`src/routes/memory.ts`)：
 - running task 当前步骤视图。
 - 控制动作审计筛选。
 - 运行诊断接口。
+- Chat API 对缺失 `sessionId` 仍保留兼容兜底；后续可以把新版 Web 客户端的缺失 sessionId 视为 400，以便更早暴露前端状态错误。

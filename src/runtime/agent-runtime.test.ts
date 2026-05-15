@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent, getAgent, updateAgentStatus } from "../agents/agent-registry";
-import { AgentBusyError, runAgentTask, toModelMessages } from "./agent-runtime";
+import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "./agent-runtime";
 import { initializeDatabaseSchema } from "../core/database";
 import { listTaskEvents } from "../events/event-log";
 import { createTask, getTask } from "../tasks/task-store";
@@ -219,5 +219,41 @@ describe("agent runtime", () => {
     const serialized = JSON.stringify(messages);
     expect(serialized).toContain("我记下了。");
     expect(serialized).not.toContain("memory_extract-1");
+  });
+
+  test("passes original UI messages to the UI stream response for approval continuations", () => {
+    const originalMessages = [
+      {
+        id: "assistant-message-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-agent_create",
+            toolCallId: "call-1",
+            state: "approval-responded",
+            input: { agentId: "testagent" },
+            approval: { id: "approval-1", approved: true },
+          },
+        ],
+      },
+    ];
+    let receivedOriginalMessages: unknown;
+
+    const response = toAgentUiMessageStreamResponse(
+      {
+        taskId: "task-1",
+        result: {
+          toUIMessageStreamResponse: (options: { originalMessages?: unknown }) => {
+            receivedOriginalMessages = options.originalMessages;
+            return new Response("ok");
+          },
+        },
+      } as never,
+      () => {},
+      originalMessages,
+    );
+
+    expect(response.status).toBe(200);
+    expect(receivedOriginalMessages).toBe(originalMessages);
   });
 });

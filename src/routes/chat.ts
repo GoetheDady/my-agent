@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { generateText } from "ai";
 import { deepseek, createDeepSeek } from "@ai-sdk/deepseek";
-import { createSession, appendMessage, getSession, updateSessionTitle, type SessionMessage } from "../sessions/service";
+import { createSession, appendMessage, getSession, replaceAssistantMessageContent, updateSessionTitle, type SessionMessage } from "../sessions/service";
 import { getConfig } from "../core/config";
 import { extractAssistantText, serializeAssistantPartsForStorage } from "../channels/message-parts";
 import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../runtime/agent-runtime";
@@ -67,7 +67,8 @@ app.post("/", async (c) => {
   });
   const { task } = received;
 
-  const modelMessages = await toModelMessages(body.messages as Array<{ role: string; parts?: unknown; content?: unknown }>);
+  const requestMessages = body.messages as Array<{ id?: string; role: string; parts?: unknown; content?: unknown }>;
+  const modelMessages = await toModelMessages(requestMessages);
 
   let persisted = false;
   let run;
@@ -87,10 +88,12 @@ app.post("/", async (c) => {
     throw error;
   }
 
-  return toAgentUiMessageStreamResponse(run, ({ responseMessage }) => {
+  return toAgentUiMessageStreamResponse(run, ({ responseMessage, isContinuation }) => {
       if (persisted) return;
       persisted = true;
-      const persistedAssistant = persistUiConversation(capturedSessionId, userText, responseMessage);
+      const persistedAssistant = persistUiConversation(capturedSessionId, userText, responseMessage, {
+        isContinuation,
+      });
       if (persistedAssistant) {
         // 选择“消息已落库”作为生命周期点，是因为后台 worker 需要 assistantMessageId
         // 才能把 memory_extract / memory_reconsolidate 合成工具卡挂回对应消息。
@@ -107,28 +110,37 @@ app.post("/", async (c) => {
           createdAt: Date.now(),
         });
       }
-  });
+  }, requestMessages);
 });
 
 function persistUiConversation(
   sessionId: string,
   userText: string,
   responseMessage: unknown,
+  options: { isContinuation?: boolean } = {},
 ): (SessionMessage & { assistantText: string }) | null {
-  if (userText) {
+  if (userText && !options.isContinuation) {
     appendMessage(sessionId, "user", userText);
   }
 
-  const parts = serializeAssistantPartsForStorage((responseMessage as { parts?: unknown[] } | undefined)?.parts);
+  const response = responseMessage as { id?: unknown; parts?: unknown[] } | undefined;
+  const parts = serializeAssistantPartsForStorage(response?.parts);
   const assistantText = extractAssistantText(parts);
 
   // messages.content 存储的是结构化 parts JSON，不能只存纯文本，否则历史工具卡会丢失。
-  const assistantMessage = parts.length > 0
-    ? appendMessage(sessionId, "assistant", JSON.stringify(parts))
-    : null;
+  let assistantMessage: SessionMessage | null = null;
+  if (parts.length > 0) {
+    const content = JSON.stringify(parts);
+    const responseMessageId = typeof response?.id === "string" ? response.id : null;
+    assistantMessage = options.isContinuation && responseMessageId
+      ? replaceAssistantMessageContent(responseMessageId, content) ?? appendMessage(sessionId, "assistant", content)
+      : appendMessage(sessionId, "assistant", content);
+  }
 
-  ensureFallbackTitle(sessionId, userText);
-  void generateAndSaveTitle(sessionId, userText, assistantText);
+  if (!options.isContinuation) {
+    ensureFallbackTitle(sessionId, userText);
+    void generateAndSaveTitle(sessionId, userText, assistantText);
+  }
 
   return assistantMessage ? { ...assistantMessage, assistantText } : null;
 }

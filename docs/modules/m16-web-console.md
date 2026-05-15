@@ -64,11 +64,12 @@ src/routes/memory.ts
 - Agent 会话侧边栏按 Agent 分组展示会话，并支持选择当前 Agent。
 - Runtime 面板展示 Agent 状态、当前任务、排队任务、最近任务和最近事件。
 - Chat 页面通过 `/api/chat` 流式对话，并保留工具审批卡片。
+- Chat transport 会在手动发送和审批自动续发时统一带上当前 `sessionId`、绑定 Agent 和 thinking 开关，避免批准工具后创建额外“新对话”。
 - 实时连接通过 `/api/ws` 推动会话、运行时、工具、记忆和 Skill 相关刷新。
 
 ## 4. 本轮改动影响
 
-本轮修复了 Runtime 控制台的 Agent 和 Task 展示一致性问题：
+近期修复了 Runtime 控制台的 Agent 和 Task 展示一致性问题：
 
 - `RuntimeSummary` 现在读取 `useAgentStore.selectedAgentId`，并按当前选中的 Agent 拉取运行时快照。
 - 刷新按钮和取消 queued task 后的刷新也会使用当前 Agent，避免控制台固定看 `default`。
@@ -77,6 +78,15 @@ src/routes/memory.ts
 - `runtimeStore.fetchRuntimeSnapshot()` 会对 `agentId` 做 URL 编码，避免 Agent ID 中的特殊字符破坏请求路径。
 
 这次改动不改变后端 Task Store 的排序语义，只修正前端控制台的观察视图。
+
+本轮修复了聊天工具审批续跑问题：
+
+- `web/src/lib/chatTransport.ts` 统一构建 `DefaultChatTransport`，自动续发审批响应时也会读取当前会话、Agent 和 thinking 状态。
+- `web/src/lib/toolApprovalContinuation.ts` 在用户批准或拒绝工具审批后显式提交 continuation 请求，并按 tool call 去重，避免审批卡片只闪一下但不继续执行。
+- `ChatPage` 对已经处于 approved / denied 的历史审批卡片会自动补续跑，用于恢复刷新页面后卡住的工具调用。
+- `ChatPage` 不再只在用户手动发送时传 body，避免工具审批续跑请求缺少 `sessionId`。
+- `src/sessions/service.ts` 提供 assistant 消息原地替换能力，支持后端把审批后的工具输出更新回原消息。
+- 影响面只限 Web 聊天与会话持久化，不改变后端 Runtime 的 Agent 单线程模型。
 
 ## 5. 当前边界
 

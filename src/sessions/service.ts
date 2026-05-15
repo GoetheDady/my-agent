@@ -161,6 +161,49 @@ export function appendMessage(
 }
 
 /**
+ * 原地替换已有 assistant 消息内容。
+ *
+ * 审批续跑会继续更新上一条 assistant 消息里的工具卡，不能追加一条新 assistant 消息。
+ *
+ * @param messageId 要替换的 assistant 消息 id。
+ * @param content 新的 JSON parts 内容。
+ * @param database 可选数据库连接。
+ * @returns 更新后的消息；如果目标不存在或不是 assistant，返回 null。
+ */
+export function replaceAssistantMessageContent(
+  messageId: string,
+  content: string,
+  database: Database = getDb(),
+): SessionMessage | null {
+  const message = getSessionMessage(messageId, database);
+  if (!message || message.role !== "assistant") return null;
+
+  const now = Date.now();
+  database.run("UPDATE messages SET content = ? WHERE id = ?", [content, messageId]);
+  database.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, message.session_id]);
+  const nextMessage = { ...message, content };
+  const session = getSession(message.session_id, database);
+  defaultRealtimeService.broadcast({
+    type: "message.updated",
+    agentId: session?.agent_id,
+    sessionId: message.session_id,
+    payload: {
+      messageId,
+      content,
+    },
+    createdAt: now,
+  });
+  defaultRealtimeService.broadcast({
+    type: "session.updated",
+    agentId: session?.agent_id,
+    sessionId: message.session_id,
+    payload: { sessionId: message.session_id },
+    createdAt: now,
+  });
+  return nextMessage;
+}
+
+/**
  * 获取某个 session 的全部消息。
  *
  * @param sessionId session id。
@@ -252,29 +295,7 @@ function updateAssistantParts(
   if (!message || message.role !== "assistant") return;
 
   const parts = parseAssistantParts(message.content);
-  const nextContent = JSON.stringify(update(parts));
-  const now = Date.now();
-
-  database.run("UPDATE messages SET content = ? WHERE id = ?", [nextContent, messageId]);
-  database.run("UPDATE sessions SET updated_at = ? WHERE id = ?", [now, message.session_id]);
-  const session = getSession(message.session_id, database);
-  defaultRealtimeService.broadcast({
-    type: "message.updated",
-    agentId: session?.agent_id,
-    sessionId: message.session_id,
-    payload: {
-      messageId,
-      content: nextContent,
-    },
-    createdAt: now,
-  });
-  defaultRealtimeService.broadcast({
-    type: "session.updated",
-    agentId: session?.agent_id,
-    sessionId: message.session_id,
-    payload: { sessionId: message.session_id },
-    createdAt: now,
-  });
+  replaceAssistantMessageContent(messageId, JSON.stringify(update(parts)), database);
 }
 
 function parseAssistantParts(content: string): Array<Record<string, unknown>> {

@@ -36,7 +36,7 @@ MODULE_RULES: tuple[ModuleRule, ...] = (
     ModuleRule("M12", "Multi-Agent Collaboration", "docs/modules/m12-multi-agent-collaboration.md", ("src/delegations/", "src/collab/")),
     ModuleRule("M13", "Safety & Trust", "docs/modules/m13-safety-trust.md", ("src/guards/",)),
     ModuleRule("M15", "Runtime Control API", "docs/modules/m15-runtime-control-api.md", ("src/routes/",)),
-    ModuleRule("M16", "Web Console", "docs/modules/m16-web-console.md", ("web/src/",)),
+    ModuleRule("M16", "Web Console", "docs/modules/m16-web-console.md", ("web/src/", "src/sessions/")),
 )
 
 
