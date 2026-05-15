@@ -38,14 +38,21 @@ describe("skills routes", () => {
   test("GET /skills returns the skill list and index", async () => {
     await withSkillsApp(async (app) => {
       const listRes = await app.request("/skills?agentId=default");
-      const listBody = await listRes.json() as { skills: Array<{ id: string }> };
+      const listBody = await listRes.json() as {
+        skills: Array<{ id: string; readonly: boolean; origin: { type: string }; status: string }>;
+      };
       expect(listRes.status).toBe(200);
-      expect(listBody.skills).toEqual([]);
+      expect(listBody.skills).toContainEqual(expect.objectContaining({
+        id: "skill-creator",
+        readonly: true,
+        origin: expect.objectContaining({ type: "builtin" }),
+        status: "enabled",
+      }));
 
       const indexRes = await app.request("/skills/index?agentId=default");
       const indexBody = await indexRes.json() as { index: string };
       expect(indexRes.status).toBe(200);
-      expect(indexBody.index).toBe("");
+      expect(indexBody.index).toContain("skill-creator");
     });
   });
 

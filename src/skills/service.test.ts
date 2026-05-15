@@ -25,13 +25,14 @@ function insertAgent(db: Database, agentId: string, name: string): void {
 describe("SkillService", () => {
   test("creates, lists and toggles skills", () => {
     const rootDir = createTempRoot();
+    const builtinRootDir = createTempRoot();
     const db = new Database(":memory:");
     db.run("PRAGMA foreign_keys = ON");
     initializeDatabaseSchema(db);
     ensureDefaultAgent(db);
 
     try {
-      const service = new SkillService({ rootDir });
+      const service = new SkillService({ rootDir, builtinRootDir });
       const skill = service.createSkill({
         skillId: "web-debug",
         name: "Web Debug",
@@ -57,6 +58,7 @@ describe("SkillService", () => {
     } finally {
       db.close();
       rmSync(rootDir, { recursive: true, force: true });
+      rmSync(builtinRootDir, { recursive: true, force: true });
     }
   });
 
@@ -82,6 +84,7 @@ describe("SkillService", () => {
 
   test("keeps skill indexes isolated per agent", () => {
     const rootDir = createTempRoot();
+    const builtinRootDir = createTempRoot();
     const db = new Database(":memory:");
     db.run("PRAGMA foreign_keys = ON");
     initializeDatabaseSchema(db);
@@ -89,7 +92,7 @@ describe("SkillService", () => {
     insertAgent(db, "researcher", "Researcher");
 
     try {
-      const service = new SkillService({ rootDir });
+      const service = new SkillService({ rootDir, builtinRootDir });
       service.createSkill({
         skillId: "research-notes",
         name: "Research Notes",
@@ -104,11 +107,13 @@ describe("SkillService", () => {
     } finally {
       db.close();
       rmSync(rootDir, { recursive: true, force: true });
+      rmSync(builtinRootDir, { recursive: true, force: true });
     }
   });
 
   test("migrates legacy skills registry into agent config", () => {
-      const rootDir = createTempRoot();
+    const rootDir = createTempRoot();
+    const builtinRootDir = createTempRoot();
     try {
       const registryDir = join(rootDir, "agents", "default", "skills");
       mkdirSync(registryDir, { recursive: true });
@@ -129,12 +134,13 @@ describe("SkillService", () => {
         },
       }, null, 2));
 
-      const service = new SkillService({ rootDir });
+      const service = new SkillService({ rootDir, builtinRootDir });
       expect(service.listSkills("default", "enabled").skills.map((skill) => skill.id)).toEqual(["legacy"]);
       expect(service.listSkills("default", "enabled").skills[0].origin.type).toBe("agent_created");
       expect(existsSync(join(registryDir, "skills.json"))).toBe(false);
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
+      rmSync(builtinRootDir, { recursive: true, force: true });
     }
   });
 
@@ -185,6 +191,33 @@ describe("SkillService", () => {
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
       rmSync(builtinRootDir, { recursive: true, force: true });
+    }
+  });
+
+  test("exposes the bundled skill creator as a readonly builtin skill", () => {
+    const rootDir = createTempRoot();
+    try {
+      const service = new SkillService({ rootDir });
+      const skill = service.listSkills("default", "enabled").skills.find((item) => item.id === "skill-creator");
+
+      expect(skill).toBeDefined();
+      expect(skill).toMatchObject({
+        id: "skill-creator",
+        readonly: true,
+        source: "builtin",
+        origin: { type: "builtin" },
+        status: "enabled",
+      });
+      expect(skill?.filePath).toContain(join("skills", "builtin", "skill-creator", "SKILL.md"));
+      expect(existsSync(join(rootDir, "agents", "default", "skills", "skill-creator"))).toBe(false);
+
+      const view = service.viewSkill("skill-creator");
+      expect(view.content).toContain("# Skill Creator");
+
+      const reference = service.viewSkill("skill-creator", {}, { filePath: "references/openai_yaml.md" });
+      expect(reference.content).toContain("# openai.yaml fields");
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
     }
   });
 
