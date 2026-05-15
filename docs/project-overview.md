@@ -1,5 +1,7 @@
 # my-agent 项目完整说明
 
+如果要从“完整项目需要哪些模块”的角度讨论后续开发，先看 [project-module-map.md](./project-module-map.md)。本文档更偏当前项目架构说明。
+
 ## 1. 项目定位
 
 `my-agent` 是一个本地优先的个人 Agent Runtime 项目，并在这个基础上扩展出多 Agent 能力。

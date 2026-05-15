@@ -81,6 +81,12 @@ export function initializeDatabaseSchema(database: Database): void {
       lease_expires_at INTEGER,
       idempotency_key TEXT,
       canceled_at INTEGER,
+      failure_type TEXT,
+      failure_stage TEXT,
+      retriable INTEGER,
+      progress_status TEXT NOT NULL DEFAULT 'waiting',
+      progress_message TEXT NOT NULL DEFAULT '',
+      last_progress_at INTEGER,
       FOREIGN KEY (agent_id) REFERENCES agents(id)
     )
   `);
@@ -89,6 +95,12 @@ export function initializeDatabaseSchema(database: Database): void {
   ensureColumn(database, "tasks", "lease_expires_at", "INTEGER");
   ensureColumn(database, "tasks", "idempotency_key", "TEXT");
   ensureColumn(database, "tasks", "canceled_at", "INTEGER");
+  ensureColumn(database, "tasks", "failure_type", "TEXT");
+  ensureColumn(database, "tasks", "failure_stage", "TEXT");
+  ensureColumn(database, "tasks", "retriable", "INTEGER");
+  ensureColumn(database, "tasks", "progress_status", "TEXT NOT NULL DEFAULT 'waiting'");
+  ensureColumn(database, "tasks", "progress_message", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "tasks", "last_progress_at", "INTEGER");
 
   database.run(`
     CREATE TABLE IF NOT EXISTS events (

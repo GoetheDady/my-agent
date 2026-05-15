@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
 import { defaultRealtimeService } from "../realtime/service";
-import { getTask, TASK_LEASE_MS, TASK_SELECT_COLUMNS } from "./task-store";
+import { getTask, TASK_LEASE_MS, TASK_SELECT_COLUMNS, taskRowToRecord, type TaskRow } from "./task-store";
 import type { TaskRecord } from "./task-types";
 
 /**
@@ -33,21 +33,21 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
     }
 
     const nextTask = database
-      .query<TaskRecord, [string]>(
+      .query<TaskRow, [string]>(
         `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ? AND status = 'queued'
          ORDER BY priority DESC, created_at ASC
          LIMIT 1`,
       )
-      .get(agentId) ?? null;
+      .get(agentId);
 
     if (!nextTask) {
       return null;
     }
 
     // 队列顺序：priority 高的优先；同优先级下创建更早的先执行。
-    return claimQueuedTask(nextTask, database);
+    return claimQueuedTask(taskRowToRecord(nextTask), database);
   });
 
   return claim();
@@ -83,20 +83,20 @@ export function claimNextTaskForChannels(
 
     const placeholders = sourceChannels.map(() => "?").join(", ");
     const nextTask = database
-      .query<TaskRecord, [string, ...string[]]>(
+      .query<TaskRow, [string, ...string[]]>(
         `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ? AND status = 'queued' AND source_channel IN (${placeholders})
          ORDER BY priority DESC, created_at ASC
          LIMIT 1`,
       )
-      .get(agentId, ...sourceChannels) ?? null;
+      .get(agentId, ...sourceChannels);
 
     if (!nextTask) {
       return null;
     }
 
-    return claimQueuedTask(nextTask, database);
+    return claimQueuedTask(taskRowToRecord(nextTask), database);
   });
 
   return claim();
@@ -151,11 +151,17 @@ function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
            result = NULL,
            completed_at = NULL,
            canceled_at = NULL,
+           failure_type = NULL,
+           failure_stage = NULL,
+           retriable = NULL,
+           progress_status = 'claimed',
+           progress_message = '任务已领取',
+           last_progress_at = ?,
            lease_expires_at = ?,
            attempt_count = attempt_count + 1
        WHERE id = ?`,
     )
-    .run(now, leaseExpiresAt, task.id);
+    .run(now, now, leaseExpiresAt, task.id);
   updateAgentStatus(task.agent_id, "running", task.id, database);
 
   const claimed = getTask(task.id, database);

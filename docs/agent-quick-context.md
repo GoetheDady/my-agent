@@ -2,7 +2,7 @@
 
 这份文档给刚进入本项目的新 Agent 使用。目标是在几分钟内理解：这个项目为什么存在、核心架构是什么、改代码时哪些边界不能破坏。
 
-完整说明见 [project-overview.md](./project-overview.md)。
+完整说明见 [project-overview.md](./project-overview.md)。如果要讨论“整个项目还需要哪些模块才算完整”，先读 [project-module-map.md](./project-module-map.md)。
 
 ## 1. 项目初心
 
@@ -102,5 +102,6 @@ skills/builtin/ # 系统内置 Skill
 
 1. 先读本文件，理解项目初心和边界。
 2. 再读 [project-overview.md](./project-overview.md)，理解完整架构。
-3. 如果要改具体模块，再读对应目录源码和测试。
-4. 如果需要给后续新对话补充长期规则，优先更新 `AGENTS.md` 和本文档。
+3. 如果要做整体模块规划，读 [project-module-map.md](./project-module-map.md)。
+4. 如果要改具体模块，再读对应目录源码和测试。
+5. 如果需要给后续新对话补充长期规则，优先更新 `AGENTS.md` 和本文档。

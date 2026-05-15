@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent, updateAgentStatus } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
-import { appendEvent } from "../events/event-log";
+import { appendEvent, listTaskEvents } from "../events/event-log";
 import { claimTask } from "../tasks/task-queue";
 import { createTask, getTask, markTaskCompleted, markTaskFailed } from "../tasks/task-store";
 import { createRuntimeRoutes } from "./runtime";
@@ -52,12 +52,13 @@ describe("runtime routes", () => {
       createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
 
       const res = await app.request("/runtime/tasks/task-1");
-      const body = await res.json() as { task: { id: string; status: string } };
+      const body = await res.json() as { task: { id: string; status: string; progress_status: string } };
 
       expect(res.status).toBe(200);
       expect(body.task).toMatchObject({
         id: "task-1",
         status: "queued",
+        progress_status: "waiting",
       });
     });
   });
@@ -162,6 +163,7 @@ describe("runtime routes", () => {
 
       expect(res.status).toBe(409);
       expect(body.error).toBe("任务已完成，不能取消。");
+      expect(listTaskEvents("task-1", db).map((event) => event.type)).toContain("task.cancel.rejected");
     });
   });
 });

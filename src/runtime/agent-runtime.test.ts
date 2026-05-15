@@ -73,17 +73,42 @@ describe("agent runtime", () => {
       expect(getTask(task.id, db)).toMatchObject({
         status: "completed",
         result: "done",
+        progress_status: "completed",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
         current_task_id: null,
       });
-      expect(listTaskEvents(task.id, db).map((event) => event.type)).toEqual([
-        "task.started",
-        "assistant.message",
-        "task.completed",
-        "episode.created",
-      ]);
+      const completedTypes = listTaskEvents(task.id, db).map((event) => event.type);
+      expect(completedTypes.filter((type) => type === "task.progress.updated")).toHaveLength(4);
+      expect(completedTypes).toContain("task.started");
+      expect(completedTypes).toContain("assistant.message");
+      expect(completedTypes).toContain("task.completed");
+      expect(completedTypes).toContain("episode.created");
+    });
+  });
+
+  test("records tool progress when the stream emits tool chunks", () => {
+    withRunnerDb((db, task) => {
+      runAgentTask({
+        task,
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        streamTextRunner: ((options: {
+          onChunk?: (event: { chunk: { type: string } }) => void;
+          onFinish?: (event: { text: string }) => void;
+        }) => {
+          options.onChunk?.({ chunk: { type: "tool-call" } });
+          options.onFinish?.({ text: "done" });
+          return fakeStreamTextSuccess();
+        }) as never,
+        database: db,
+      });
+
+      const progressEvents = listTaskEvents(task.id, db)
+        .filter((event) => event.type === "task.progress.updated")
+        .map((event) => JSON.parse(event.payload) as { progressStatus: string });
+
+      expect(progressEvents.map((event) => event.progressStatus)).toContain("using_tool");
     });
   });
 
@@ -103,19 +128,24 @@ describe("agent runtime", () => {
       expect(getTask(task.id, db)).toMatchObject({
         status: "failed",
         error: "model down",
+        failure_type: "model_error",
+        failure_stage: "model_call",
+        retriable: true,
+        progress_status: "failed",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
         current_task_id: null,
       });
-      expect(listTaskEvents(task.id, db).map((event) => event.type)).toEqual([
-        "task.started",
-        "task.failed",
-      ]);
+      const failedTypes = listTaskEvents(task.id, db).map((event) => event.type);
+      expect(failedTypes.filter((type) => type === "task.progress.updated")).toHaveLength(3);
+      expect(failedTypes).toContain("task.started");
+      expect(failedTypes).toContain("task.failed.classified");
+      expect(failedTypes).toContain("task.failed");
     });
   });
 
-  test("marks task failed and releases agent when the client aborts the stream", () => {
+  test("marks task canceled and releases agent when the client aborts the stream", () => {
     withRunnerDb((db, task) => {
       const controller = new AbortController();
 
@@ -130,17 +160,22 @@ describe("agent runtime", () => {
       controller.abort();
 
       expect(getTask(task.id, db)).toMatchObject({
-        status: "failed",
-        error: "Client aborted stream",
+        status: "canceled",
+        error: null,
+        failure_type: "user_canceled",
+        failure_stage: "cancel",
+        retriable: false,
+        progress_status: "canceled",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
         current_task_id: null,
       });
-      expect(listTaskEvents(task.id, db).map((event) => event.type)).toEqual([
-        "task.started",
-        "task.failed",
-      ]);
+      const canceledTypes = listTaskEvents(task.id, db).map((event) => event.type);
+      expect(canceledTypes.filter((type) => type === "task.progress.updated")).toHaveLength(3);
+      expect(canceledTypes).toContain("task.started");
+      expect(canceledTypes).toContain("task.cancel.requested");
+      expect(canceledTypes).toContain("task.canceled");
     });
   });
 

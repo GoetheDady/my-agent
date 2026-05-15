@@ -22,6 +22,18 @@ Compact instruction file for AI agents working in this repository.
 - **Event**：事件。运行时审计记录，用于观察、恢复和调试。
 - **Agent-scoped**：按 Agent 隔离。数据属于某个 Agent，例如 `.my-agent/agents/<agentId>/agent.json`、`soul.md`、`user.md`、skills 和渠道绑定。
 
+## Codex Hooks 与文档同步规则
+
+本仓库使用 `.codex/hooks.json` 配置 Codex Stop hook。**Hook** 是 Codex 生命周期脚本；**Stop hook** 是 Codex 准备结束本轮回复前触发的脚本，用来做最后校验。
+
+当前 hook 脚本是 `.codex/hooks/ensure_module_docs.py`，它会检查本轮未提交改动：
+
+- 如果修改了已映射模块的代码，需要同步更新对应 `docs/modules/m*.md` 模块文档。
+- 如果修改了已映射模块的代码，需要同步更新 `docs/project-module-map.md`。
+- 当前已有 M3 文档：`docs/modules/m3-task-system.md`。后续第一次改其他核心模块时，也应该补齐对应模块文档。
+
+模块文档要记录：模块职责、当前状态、改动影响和下一步。`docs/project-module-map.md` 要保持整体模块状态、链接和优先级最新。
+
 ## 当前关键更正
 
 **记忆提取流程 (Memory Extraction Flow) 以后端触发为准。** 旧流程是 frontend-triggered，也就是前端在每条消息后调用 `/api/memory/extract`。当前实际流程是：

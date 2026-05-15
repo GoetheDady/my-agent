@@ -91,7 +91,7 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
 
     // cancel 是控制台操作：释放 task/agent 状态，但不会删除已经保存的事件。
     try {
-      markTaskCanceled(taskId, database);
+      markTaskCanceled(taskId, { failureType: "user_canceled", requestedBy: "runtime_api" }, database);
       return c.json({ task: getTask(taskId, database) });
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);

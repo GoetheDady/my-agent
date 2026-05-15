@@ -8,12 +8,14 @@ import { appendEvent, listTaskEvents } from "../events/event-log";
 import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import {
+  classifyTaskFailure,
   getQueuedTaskPosition,
   getTask,
   markTaskCompleted,
   markTaskFailed,
   renewTaskLease,
   TASK_LEASE_RENEW_INTERVAL_MS,
+  updateTaskProgress,
 } from "../tasks/task-store";
 import { claimNextTaskForChannels, claimTask } from "../tasks/task-queue";
 import type { TaskRecord } from "../tasks/task-types";
@@ -249,6 +251,7 @@ async function runClaimedExternalChannelTask(input: {
     type: "task.started",
     payload: { input: task.input, source_channel: task.source_channel },
   }, input.database);
+  updateTaskProgress(task.id, { status: "preparing", message: "正在准备渠道任务" }, input.database);
 
   await deliverStatus({
     channelService: input.channelService,
@@ -267,9 +270,12 @@ async function runClaimedExternalChannelTask(input: {
     const messages: ModelMessage[] = [
       { role: "user", content: [{ type: "text", text: input.userText }] },
     ];
+    updateTaskProgress(task.id, { status: "building_prompt", message: "正在构建提示词" }, input.database);
+    const systemPrompt = buildAgentSystemPrompt(task, input.database, { skillService: defaultSkillService });
+    updateTaskProgress(task.id, { status: "calling_model", message: "正在调用模型" }, input.database);
     const result = await input.generateTextRunner({
       model: getModel(task.agent_id),
-      system: buildAgentSystemPrompt(task, input.database, { skillService: defaultSkillService }),
+      system: systemPrompt,
       messages,
       tools: buildAgentTools({
         agentId: task.agent_id,
@@ -323,6 +329,7 @@ async function runClaimedExternalChannelTask(input: {
         type: "task.completed",
         payload: { result: "等待工具审批" },
       }, input.database);
+      updateTaskProgress(task.id, { status: "persisting_result", message: "正在等待工具审批" }, input.database);
       markTaskCompleted(task.id, "等待工具审批", input.database);
       return;
     }
@@ -347,6 +354,7 @@ async function runClaimedExternalChannelTask(input: {
       throw error;
     }
 
+    updateTaskProgress(task.id, { status: "persisting_result", message: "正在发送渠道回复" }, input.database);
     markTaskCompleted(task.id, result.text, input.database);
     appendEvent({
       agent_id: task.agent_id,
@@ -364,13 +372,19 @@ async function runClaimedExternalChannelTask(input: {
     }, input.database);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    markTaskFailed(task.id, message, input.database);
+    const classification = classifyTaskFailure(message, { stage: "delivery" });
+    markTaskFailed(task.id, message, classification, input.database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "task.failed",
-      payload: { error: message },
+      payload: {
+        error: message,
+        failureType: classification.failure_type,
+        failureStage: classification.failure_stage,
+        retriable: classification.retriable,
+      },
     }, input.database);
     await deliverFailure({
       channelService: input.channelService,
@@ -558,6 +572,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
           : [],
       },
     });
+    updateTaskProgress(task.id, { status: "persisting_result", message: "正在保存恢复结果" }, database);
     markTaskCompleted(task.id, result.text, database);
     appendEvent({
       agent_id: task.agent_id,
@@ -582,13 +597,20 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    markTaskFailed(task.id, message, database);
+    const classification = classifyTaskFailure(message, { stage: "delivery" });
+    markTaskFailed(task.id, message, classification, database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "task.failed",
-      payload: { error: message, resumedFromApprovalId: input.approvalId },
+      payload: {
+        error: message,
+        resumedFromApprovalId: input.approvalId,
+        failureType: classification.failure_type,
+        failureStage: classification.failure_stage,
+        retriable: classification.retriable,
+      },
     }, database);
     try {
       await channelService.deliverMessage({

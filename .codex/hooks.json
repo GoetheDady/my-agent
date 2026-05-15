@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/ensure_module_docs.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking module documentation"
+          }
+        ]
+      }
+    ]
+  }
+}

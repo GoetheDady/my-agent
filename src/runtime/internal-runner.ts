@@ -9,11 +9,13 @@ import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import { claimTask } from "../tasks/task-queue";
 import {
+  classifyTaskFailure,
   getTask,
   markTaskCompleted,
   markTaskFailed,
   renewTaskLease,
   TASK_LEASE_RENEW_INTERVAL_MS,
+  updateTaskProgress,
 } from "../tasks/task-store";
 import type { TaskRecord } from "../tasks/task-types";
 import { buildAgentTools } from "../tools/service";
@@ -93,6 +95,7 @@ function getModel(agentId: string) {
 export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Promise<InternalAgentTaskResult> {
   const database = input.database ?? getDb();
   const claimed = ensureClaimed(input.task, database);
+  updateTaskProgress(claimed.id, { status: "preparing", message: "正在准备后台任务" }, database);
   const stopLeaseHeartbeat = startTaskLeaseHeartbeat(claimed.id, database);
   appendEvent({
     agent_id: claimed.agent_id,
@@ -104,9 +107,12 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
 
   try {
     const runner = input.generateTextRunner ?? generateText;
+    updateTaskProgress(claimed.id, { status: "building_prompt", message: "正在构建提示词" }, database);
+    const systemPrompt = buildAgentSystemPrompt(claimed, database, { skillService: defaultSkillService });
+    updateTaskProgress(claimed.id, { status: "calling_model", message: "正在调用模型" }, database);
     const result = await runner({
       model: getModel(claimed.agent_id),
-      system: buildAgentSystemPrompt(claimed, database, { skillService: defaultSkillService }),
+      system: systemPrompt,
       messages: input.messages,
       tools: buildAgentTools({
         agentId: claimed.agent_id,
@@ -124,6 +130,10 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
       input.emptyResultMessage ?? "模型没有返回可用文本结果。",
     );
 
+    if (result.steps.flatMap((step) => step.toolResults).length > 0) {
+      updateTaskProgress(claimed.id, { status: "using_tool", message: "已完成工具调用" }, database);
+    }
+    updateTaskProgress(claimed.id, { status: "persisting_result", message: "正在保存最终结果" }, database);
     markTaskCompleted(claimed.id, text, database);
     appendEvent({
       agent_id: claimed.agent_id,
@@ -144,13 +154,19 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
     return { task: completed, text };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    markTaskFailed(claimed.id, message, database);
+    const classification = classifyTaskFailure(message, { stage: "model_call" });
+    markTaskFailed(claimed.id, message, classification, database);
     appendEvent({
       agent_id: claimed.agent_id,
       task_id: claimed.id,
       conversation_id: claimed.conversation_id,
       type: "task.failed",
-      payload: { error: message },
+      payload: {
+        error: message,
+        failureType: classification.failure_type,
+        failureStage: classification.failure_stage,
+        retriable: classification.retriable,
+      },
     }, database);
     throw error;
   } finally {

@@ -1,5 +1,45 @@
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "canceled";
 
+export type TaskFailureType =
+  | "model_error"
+  | "tool_error"
+  | "permission_denied"
+  | "timeout"
+  | "lease_expired"
+  | "user_canceled"
+  | "system_canceled"
+  | "context_missing"
+  | "unknown";
+
+export type TaskFailureStage =
+  | "claim"
+  | "prompt_build"
+  | "model_call"
+  | "tool_call"
+  | "persist_result"
+  | "cancel"
+  | "recovery"
+  | "delivery"
+  | "unknown";
+
+export type TaskProgressStatus =
+  | "waiting"
+  | "claimed"
+  | "preparing"
+  | "building_prompt"
+  | "calling_model"
+  | "using_tool"
+  | "persisting_result"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export interface TaskFailureClassification {
+  failure_type: TaskFailureType;
+  failure_stage: TaskFailureStage;
+  retriable: boolean;
+}
+
 export interface TaskRecord {
   id: string;
   agent_id: string;
@@ -19,4 +59,10 @@ export interface TaskRecord {
   lease_expires_at: number | null;
   idempotency_key: string | null;
   canceled_at: number | null;
+  failure_type: TaskFailureType | null;
+  failure_stage: TaskFailureStage | null;
+  retriable: boolean | null;
+  progress_status: TaskProgressStatus;
+  progress_message: string;
+  last_progress_at: number | null;
 }

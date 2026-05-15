@@ -16,11 +16,14 @@ import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { upsertEpisodeForTask } from "../memory/episode-store";
 import {
+  classifyTaskFailure,
   getTask,
+  markTaskCanceled,
   markTaskCompleted,
   markTaskFailed,
   renewTaskLease,
   TASK_LEASE_RENEW_INTERVAL_MS,
+  updateTaskProgress,
 } from "../tasks/task-store";
 import { claimTask } from "../tasks/task-queue";
 import type { TaskRecord } from "../tasks/task-types";
@@ -125,6 +128,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
   const database = input.database ?? getDb();
   let eventTimestamp = Date.now();
   let settled = false;
+  let toolProgressRecorded = false;
   let stopLeaseHeartbeat: (() => void) | null = null;
   const runAbortSignal = createRunAbortSignal(input.abortSignal, MODEL_RUN_TIMEOUT_MS);
   const nextEventTimestamp = (): number => {
@@ -141,15 +145,29 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
     const latest = getTask(input.task.id, database);
     if (!latest || latest.status !== "running") return;
 
-    markTaskFailed(input.task.id, message, database);
-    appendEvent({
-      agent_id: input.task.agent_id,
-      task_id: input.task.id,
-      conversation_id: input.task.conversation_id,
-      type: "task.failed",
-      payload: { error: message },
-      created_at: nextEventTimestamp(),
-    }, database);
+    const classification = classifyTaskFailure(message, {
+      isClientAbort: runAbortSignal.signal.aborted && message === "Client aborted stream",
+      isTimeout: /timed out/i.test(message),
+      stage: "model_call",
+    });
+    if (classification.failure_type === "user_canceled") {
+      markTaskCanceled(input.task.id, { failureType: "user_canceled", requestedBy: "runtime" }, database);
+    } else {
+      markTaskFailed(input.task.id, message, classification, database);
+      appendEvent({
+        agent_id: input.task.agent_id,
+        task_id: input.task.id,
+        conversation_id: input.task.conversation_id,
+        type: "task.failed",
+        payload: {
+          error: message,
+          failureType: classification.failure_type,
+          failureStage: classification.failure_stage,
+          retriable: classification.retriable,
+        },
+        created_at: nextEventTimestamp(),
+      }, database);
+    }
   };
 
   /**
@@ -161,6 +179,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
    * 5. 完成后生成/更新 episode，供之后的情景记忆和 Dream Worker 使用。
    */
   ensureTaskCanRun(input.task, database);
+  updateTaskProgress(input.task.id, { status: "preparing", message: "正在准备任务执行" }, database);
   stopLeaseHeartbeat = startTaskLeaseHeartbeat(input.task.id, database);
   appendEvent({
     agent_id: input.task.agent_id,
@@ -191,11 +210,14 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       sourceMetadata: input.sourceMetadata,
       database,
     });
+    updateTaskProgress(input.task.id, { status: "building_prompt", message: "正在构建提示词" }, database);
+    const systemPrompt = buildAgentSystemPrompt(input.task, database, {
+      skillService: defaultSkillService,
+    });
+    updateTaskProgress(input.task.id, { status: "calling_model", message: "正在调用模型" }, database);
     const result = runner({
       model: getModel(input.task.agent_id),
-      system: buildAgentSystemPrompt(input.task, database, {
-        skillService: defaultSkillService,
-      }),
+      system: systemPrompt,
       messages: input.messages,
       stopWhen: stepCountIs(5),
       tools: taskTools,
@@ -204,6 +226,10 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
         deepseek: { thinking: input.thinkingEnabled ? { type: "enabled" } : { type: "disabled" } },
       },
       onChunk: ({ chunk }) => {
+        if (!toolProgressRecorded && chunk.type.includes("tool")) {
+          toolProgressRecorded = true;
+          updateTaskProgress(input.task.id, { status: "using_tool", message: "正在执行工具" }, database);
+        }
         if (chunk.type === "text-delta") {
           // delta 事件用于 Runtime 面板观察流式输出，不作为最终消息历史。
           appendEvent({
@@ -222,6 +248,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
         runAbortSignal.cleanup();
         stopLeaseHeartbeat?.();
         stopLeaseHeartbeat = null;
+        updateTaskProgress(input.task.id, { status: "persisting_result", message: "正在保存最终结果" }, database);
         appendEvent({
           agent_id: input.task.agent_id,
           task_id: input.task.id,

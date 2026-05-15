@@ -13,6 +13,7 @@ import {
   recoverRunningTasks,
   renewTaskLease,
   retryTask,
+  updateTaskProgress,
 } from "./task-store";
 import { listTaskEvents } from "../events/event-log";
 
@@ -60,6 +61,11 @@ describe("task queue", () => {
         lease_expires_at: null,
         idempotency_key: null,
         canceled_at: null,
+        failure_type: null,
+        failure_stage: null,
+        retriable: null,
+        progress_status: "waiting",
+        progress_message: "",
       });
     });
   });
@@ -117,6 +123,8 @@ describe("task queue", () => {
       expect(claimed?.status).toBe("running");
       expect(claimed?.attempt_count).toBe(1);
       expect(claimed?.lease_expires_at).toBeGreaterThan(Date.now());
+      expect(claimed?.progress_status).toBe("claimed");
+      expect(claimed?.progress_message).toBe("任务已领取");
       expect(getAgent("default", db)).toMatchObject({
         status: "running",
         current_task_id: "high-old",
@@ -174,6 +182,7 @@ describe("task queue", () => {
         status: "completed",
         result: "done",
         lease_expires_at: null,
+        progress_status: "completed",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -194,6 +203,10 @@ describe("task queue", () => {
         status: "failed",
         error: "boom",
         lease_expires_at: null,
+        failure_type: "model_error",
+        failure_stage: "model_call",
+        retriable: true,
+        progress_status: "failed",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -222,6 +235,10 @@ describe("task queue", () => {
       expect(getTask("cancel-me", db)).toMatchObject({
         status: "canceled",
         lease_expires_at: null,
+        failure_type: "user_canceled",
+        failure_stage: "cancel",
+        retriable: false,
+        progress_status: "canceled",
       });
       expect(typeof getTask("cancel-me", db)?.canceled_at).toBe("number");
       expect(getAgent("default", db)).toMatchObject({
@@ -244,6 +261,21 @@ describe("task queue", () => {
     });
   });
 
+  test("updateTaskProgress stores current progress and writes event", () => {
+    withTaskDb((db) => {
+      createTask({ id: "progress", source_channel: "web", input: "run" }, db);
+      claimNextTask("default", db);
+
+      updateTaskProgress("progress", { status: "calling_model", message: "正在调用模型" }, db);
+
+      expect(getTask("progress", db)).toMatchObject({
+        progress_status: "calling_model",
+        progress_message: "正在调用模型",
+      });
+      expect(listTaskEvents("progress", db).map((event) => event.type)).toContain("task.progress.updated");
+    });
+  });
+
   test("retryTask requeues failed task without increasing attempt count", () => {
     withTaskDb((db) => {
       createTask({ id: "retry-me", source_channel: "web", input: "retry" }, db);
@@ -259,6 +291,11 @@ describe("task queue", () => {
         error: null,
         completed_at: null,
         lease_expires_at: null,
+        failure_type: null,
+        failure_stage: null,
+        retriable: null,
+        progress_status: "waiting",
+        progress_message: "任务已重新排队",
       });
       expect(listTaskEvents("retry-me", db).map((event) => event.type)).toContain("task.retry_scheduled");
     });
@@ -324,6 +361,7 @@ describe("task queue", () => {
         status: "queued",
         error: null,
         lease_expires_at: null,
+        progress_status: "waiting",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -347,6 +385,10 @@ describe("task queue", () => {
       expect(getTask("max-stale", db)).toMatchObject({
         status: "failed",
         lease_expires_at: null,
+        failure_type: "lease_expired",
+        failure_stage: "recovery",
+        retriable: false,
+        progress_status: "failed",
       });
       expect(getAgent("default", db)).toMatchObject({
         status: "idle",
@@ -354,6 +396,7 @@ describe("task queue", () => {
       });
       expect(listTaskEvents("max-stale", db).map((event) => event.type)).toEqual([
         "task.failed_permanently",
+        "task.failed.classified",
       ]);
     });
   });

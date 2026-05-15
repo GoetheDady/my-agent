@@ -107,6 +107,12 @@ describe("runtime database schema", () => {
         ["lease_expires_at", "INTEGER", 0, null, 0],
         ["idempotency_key", "TEXT", 0, null, 0],
         ["canceled_at", "INTEGER", 0, null, 0],
+        ["failure_type", "TEXT", 0, null, 0],
+        ["failure_stage", "TEXT", 0, null, 0],
+        ["retriable", "INTEGER", 0, null, 0],
+        ["progress_status", "TEXT", 1, "'waiting'", 0],
+        ["progress_message", "TEXT", 1, "''", 0],
+        ["last_progress_at", "INTEGER", 0, null, 0],
       ]);
 
       expect(readTableColumns(db, "events")).toEqual([
