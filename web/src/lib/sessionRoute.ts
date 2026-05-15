@@ -9,6 +9,11 @@ export const SKILLS_PATH = "/skills";
 export const TASKS_PATH = "/tasks";
 export const EVENTS_PATH = "/events";
 export const SETTINGS_PATH = "/settings";
+export const CONSOLE_PATH = "/console";
+
+export function getConsolePath(subPath: string): string {
+  return `${CONSOLE_PATH}${subPath}`;
+}
 
 export function getSessionPath(sessionId: string): string {
   return `${SESSION_PREFIX}${encodeURIComponent(sessionId)}`;
