@@ -458,6 +458,7 @@ src/channels/
 - Feishu onboarding 和 binding。
 - Channel identity。
 - Channel conversation。
+- 外部渠道禁用 DeepSeek thinking 并提供空模型输出兜底，避免飞书收到空回复。
 - WeChat stub。
 
 ### 还需要补齐

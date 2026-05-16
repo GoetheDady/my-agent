@@ -40,6 +40,7 @@ src/channels/
 - Feishu WebSocket MVP。
 - Feishu onboarding 和 binding。
 - 外部渠道队列 drain。
+- 外部渠道最终回复会对空模型输出做兜底，避免飞书收到空消息。
 - 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
 - WeChat stub。
 
@@ -54,6 +55,14 @@ src/channels/
 - 外部渠道 runner（`external-runner.ts`）在所有终态路径接入 `finalizeEpisodeForTask()`：正常完成、失败、投递失败、任务不可执行、审批后恢复完成/失败。
 - 飞书等外部渠道任务现在和 Web / internal runner 一样，完成后会生成 episode 经历摘要，记录任务状态、失败分类、关键步骤等信息。
 - episode 生成失败时只写 `episode.failed` 审计事件，不会回滚渠道任务的终态或阻碍投递。
+
+本轮飞书空回复修复对 Channel 的影响：
+
+- `external-runner.ts` 不再直接把空的 `generateText().text` 投递给飞书。
+- 外部渠道模型调用显式设置 DeepSeek `thinking: disabled`，和 Web 聊天默认行为保持一致，避免只返回 reasoning 而没有最终正文。
+- 如果模型执行了工具但没有生成最终文本，会把最近工具结果摘要作为可见回复和 Task result。
+- 如果模型没有文本也没有工具结果，会回发明确兜底文案，避免用户看到空白消息。
+- 审批恢复后的飞书回复也复用同一空输出兜底逻辑。
 
 ## 4. 后续需要补齐
 

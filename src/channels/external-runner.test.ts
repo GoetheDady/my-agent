@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { ensureDefaultAgent, updateAgentStatus } from "../agents/agent-registry";
 import { AgentConfigService } from "../agents/config-service";
 import { initializeDatabaseSchema } from "../core/database";
@@ -69,6 +69,7 @@ describe("external channel runner", () => {
   test("notifies Feishu immediately when a task starts processing", async () => {
     const db = createRunnerDb();
     const deliveries: ChannelMessageOutput[] = [];
+    const generateTextRunner = mock(createTextGenerator(["final answer"]));
     const task = createTask({
       id: "feishu-task-1",
       conversation_id: "conversation-1",
@@ -84,7 +85,7 @@ describe("external channel runner", () => {
         database: db,
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
-        generateTextRunner: createTextGenerator(["final answer"]),
+        generateTextRunner: generateTextRunner as never,
       });
 
       expect(deliveries[0]).toMatchObject({
@@ -96,8 +97,95 @@ describe("external channel runner", () => {
         channel: "feishu",
         text: "final answer",
       });
+      expect(generateTextRunner.mock.calls[0]?.[0]).toMatchObject({
+        providerOptions: {
+          deepseek: {
+            thinking: { type: "disabled" },
+          },
+        },
+      });
       expect(getTask(task.id, db)).toMatchObject({ status: "completed", result: "final answer" });
       expect(listTaskEvents(task.id, db).map((event) => event.type)).toContain("task.processing.notified");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("turns empty Feishu model output with tool errors into a visible reply", async () => {
+    const db = createRunnerDb();
+    const deliveries: ChannelMessageOutput[] = [];
+    const task = createTask({
+      id: "feishu-task-empty-tool-error",
+      conversation_id: "conversation-1",
+      source_channel: "feishu",
+      source_user_id: "ou_user",
+      input: "读取文件",
+    }, db);
+    try {
+      await runExternalChannelTask({
+        received: createReceived(task.id, db),
+        userText: "读取文件",
+        deliverMetadata: { appId: "cli_test", chatId: "oc_chat", messageId: "om_empty_tool" },
+        database: db,
+        approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
+        channelService: createDeliveringChannelService(deliveries) as never,
+        generateTextRunner: (async () => ({
+          text: "",
+          content: [],
+          response: { messages: [] },
+          steps: [{
+            toolResults: [{
+              toolName: "read_file",
+              output: {
+                success: false,
+                error: {
+                  message: "Path \"src/missing.ts\" is not readable",
+                  suggestion: "Ask the user to grant access",
+                },
+              },
+            }],
+          }],
+        })) as never,
+      });
+
+      expect(deliveries.at(-1)?.text).toContain("模型执行了工具，但没有生成最终文本回复");
+      expect(deliveries.at(-1)?.text).toContain("src/missing.ts");
+      expect(getTask(task.id, db)?.result).toContain("src/missing.ts");
+      expect(listTaskEvents(task.id, db).find((event) => event.type === "assistant.message")?.payload)
+        .toContain("src/missing.ts");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("turns empty Feishu model output without tools into a visible fallback", async () => {
+    const db = createRunnerDb();
+    const deliveries: ChannelMessageOutput[] = [];
+    const task = createTask({
+      id: "feishu-task-empty-no-tools",
+      conversation_id: "conversation-1",
+      source_channel: "feishu",
+      source_user_id: "ou_user",
+      input: "总结",
+    }, db);
+    try {
+      await runExternalChannelTask({
+        received: createReceived(task.id, db),
+        userText: "总结",
+        deliverMetadata: { appId: "cli_test", chatId: "oc_chat", messageId: "om_empty" },
+        database: db,
+        approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
+        channelService: createDeliveringChannelService(deliveries) as never,
+        generateTextRunner: (async () => ({
+          text: "   ",
+          content: [],
+          response: { messages: [] },
+          steps: [],
+        })) as never,
+      });
+
+      expect(deliveries.at(-1)?.text).toBe("模型没有返回可用文本结果，请换一种问法或稍后重试。");
+      expect(getTask(task.id, db)?.result).toBe("模型没有返回可用文本结果，请换一种问法或稍后重试。");
     } finally {
       db.close();
     }

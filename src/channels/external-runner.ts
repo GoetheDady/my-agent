@@ -48,6 +48,9 @@ export interface ResumeExternalChannelTaskInput {
 
 const EXTERNAL_QUEUE_CHANNELS = ["feishu"];
 const drainingAgents = new Set<string>();
+const DEFAULT_PROVIDER_OPTIONS = {
+  deepseek: { thinking: { type: "disabled" } },
+} as const;
 
 type DeliveryStage = "accepted" | "queued" | "failed";
 
@@ -88,6 +91,46 @@ function findApprovalRequest(result: GenerateTextResult<ToolSet, never>): {
     };
   }
   return null;
+}
+
+function stringifyCompact(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeToolOutputs(result: GenerateTextResult<ToolSet, never>): string {
+  const toolResults = result.steps.flatMap((step) => step.toolResults);
+  if (toolResults.length === 0) return "";
+
+  const lines = toolResults.slice(-3).map((toolResult) => {
+    const output = toolResult.output as { success?: boolean; error?: { message?: string; suggestion?: string } } | unknown;
+    const outputObject = output && typeof output === "object" && !Array.isArray(output)
+      ? output as { success?: boolean; error?: { message?: string; suggestion?: string } }
+      : null;
+    if (outputObject?.success === false && outputObject.error) {
+      const suggestion = outputObject.error.suggestion ? `；建议：${outputObject.error.suggestion}` : "";
+      return `- ${toolResult.toolName}: ${outputObject.error.message ?? "工具执行失败"}${suggestion}`;
+    }
+    return `- ${toolResult.toolName}: ${stringifyCompact(toolResult.output).slice(0, 500)}`;
+  });
+
+  return [
+    "模型执行了工具，但没有生成最终文本回复。最近工具结果：",
+    ...lines,
+  ].join("\n");
+}
+
+function normalizeExternalResultText(result: GenerateTextResult<ToolSet, never>): string {
+  const text = result.text.trim();
+  if (text) return result.text;
+
+  const toolSummary = summarizeToolOutputs(result);
+  if (toolSummary) return toolSummary;
+  return "模型没有返回可用文本结果，请换一种问法或稍后重试。";
 }
 
 function buildResumeMessages(input: {
@@ -289,6 +332,7 @@ async function runClaimedExternalChannelTask(input: {
       }),
       stopWhen: stepCountIs(5),
       experimental_context: {},
+      providerOptions: DEFAULT_PROVIDER_OPTIONS,
     });
 
     const approvalRequest = findApprovalRequest(result as GenerateTextResult<ToolSet, never>);
@@ -336,12 +380,14 @@ async function runClaimedExternalChannelTask(input: {
       return;
     }
 
+    const responseText = normalizeExternalResultText(result as GenerateTextResult<ToolSet, never>);
+
     try {
       await input.channelService.deliverMessage({
         channel: input.received.channel,
         conversationId: input.received.conversationId,
         taskId: task.id,
-        text: result.text,
+        text: responseText,
         metadata: deliverMetadata,
       });
     } catch (error) {
@@ -357,20 +403,20 @@ async function runClaimedExternalChannelTask(input: {
     }
 
     updateTaskProgress(task.id, { status: "persisting_result", message: "正在发送渠道回复" }, input.database);
-    markTaskCompleted(task.id, result.text, input.database);
+    markTaskCompleted(task.id, responseText, input.database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "assistant.message",
-      payload: { text: result.text },
+      payload: { text: responseText },
     }, input.database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "task.completed",
-      payload: { result: result.text },
+      payload: { result: responseText },
     }, input.database);
     finalizeEpisodeForTask(task.id, input.database);
   } catch (error) {
@@ -594,29 +640,31 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
           ? [approval.args.path]
           : [],
       },
+      providerOptions: DEFAULT_PROVIDER_OPTIONS,
     });
+    const responseText = normalizeExternalResultText(result as GenerateTextResult<ToolSet, never>);
     updateTaskProgress(task.id, { status: "persisting_result", message: "正在保存恢复结果" }, database);
-    markTaskCompleted(task.id, result.text, database);
+    markTaskCompleted(task.id, responseText, database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "assistant.message",
-      payload: { text: result.text, resumedFromApprovalId: input.approvalId },
+      payload: { text: responseText, resumedFromApprovalId: input.approvalId },
     }, database);
     appendEvent({
       agent_id: task.agent_id,
       task_id: task.id,
       conversation_id: task.conversation_id,
       type: "task.completed",
-      payload: { result: result.text, resumedFromApprovalId: input.approvalId },
+      payload: { result: responseText, resumedFromApprovalId: input.approvalId },
     }, database);
     finalizeEpisodeForTask(task.id, database);
     await channelService.deliverMessage({
       channel: approval.channel ?? task.source_channel,
       conversationId: approval.conversationId ?? task.conversation_id ?? "",
       taskId: task.id,
-      text: result.text,
+      text: responseText,
       metadata: resumePayload.deliverMetadata,
     });
   } catch (error) {
