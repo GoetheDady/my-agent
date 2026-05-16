@@ -43,6 +43,7 @@ export interface RetryTaskOptions {
 export interface UpdateTaskProgressInput {
   status: TaskProgressStatus;
   message?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CancelTaskOptions {
@@ -800,6 +801,7 @@ export function updateTaskProgress(
       progressStatus: updated.progress_status,
       progressMessage: updated.progress_message,
       lastProgressAt: updated.last_progress_at,
+      ...(progress.metadata ?? {}),
     },
     created_at: now,
   }, database);

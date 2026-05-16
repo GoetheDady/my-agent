@@ -1,12 +1,17 @@
 import { useEffect } from "react";
-import { Activity, AlertCircle, CheckCircle2, Clock3, History, RefreshCw, Square } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Clock3, History, RefreshCw, Square, X } from "lucide-react";
 import {
   getCurrentTask,
   getQueuedTasks,
   getRuntimeEventView,
+  getTaskStatusDetail,
+  getWatchdogNotice,
   useRuntimeStore,
   type RuntimeAgentStatus,
   type RuntimeTask,
+  type RuntimeTaskTimelineItem,
+  type RuntimeTaskTimelineResponse,
+  type RuntimeTaskTimelineTone,
 } from "../../store/runtimeStore";
 import { useAgentStore } from "../../store/agentStore";
 
@@ -16,13 +21,20 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
     agent,
     tasks,
     events,
+    selectedTaskId,
+    selectedTaskTimeline,
+    taskTimelineLoading,
+    taskTimelineError,
     loading,
     error,
     fetchRuntimeSnapshot,
+    selectTask,
+    clearSelectedTask,
     cancelTask,
   } = useRuntimeStore();
   const currentTask = getCurrentTask(agent, tasks);
   const queuedTasks = getQueuedTasks(tasks);
+  const watchdogNotice = getWatchdogNotice(events);
 
   useEffect(() => {
     void fetchRuntimeSnapshot(selectedAgentId);
@@ -69,12 +81,34 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
                 {error}
               </div>
             )}
+            {watchdogNotice && (
+              <button
+                type="button"
+                onClick={() => watchdogNotice.taskId && void selectTask(watchdogNotice.taskId)}
+                className={`mt-3 flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm ${
+                watchdogNotice.tone === "error"
+                  ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
+                  : "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
+              } ${watchdogNotice.taskId ? "cursor-pointer transition-opacity hover:opacity-85" : "cursor-default"}`}
+              >
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold">{watchdogNotice.title}</div>
+                  <div className="mt-0.5 leading-5">{watchdogNotice.detail}</div>
+                </div>
+              </button>
+            )}
           </div>
 
           <div className="mt-4">
             <h3 className="mb-2 text-sm font-semibold text-[var(--color-text)]">正在执行</h3>
             {currentTask ? (
-              <TaskCard task={currentTask} onCancel={() => cancelTask(currentTask.id, selectedAgentId)} />
+              <TaskCard
+                task={currentTask}
+                selected={selectedTaskId === currentTask.id}
+                onSelect={() => void selectTask(currentTask.id)}
+                onCancel={() => cancelTask(currentTask.id, selectedAgentId)}
+              />
             ) : (
               <div className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-4 py-3 text-sm text-[var(--color-text-soft)]">
                 当前没有运行中的任务
@@ -97,10 +131,64 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
           {mode === "events" ? (
             <EventList events={events} />
           ) : (
-            <TaskList tasks={tasks} queuedTasks={queuedTasks} agentId={selectedAgentId} onCancel={cancelTask} />
+            <TaskWorkspace
+              tasks={tasks}
+              queuedTasks={queuedTasks}
+              agentId={selectedAgentId}
+              selectedTaskId={selectedTaskId}
+              selectedTimeline={selectedTaskTimeline}
+              loading={taskTimelineLoading}
+              error={taskTimelineError}
+              onSelect={(taskId) => void selectTask(taskId)}
+              onClear={clearSelectedTask}
+              onCancel={cancelTask}
+            />
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function TaskWorkspace({
+  tasks,
+  queuedTasks,
+  agentId,
+  selectedTaskId,
+  selectedTimeline,
+  loading,
+  error,
+  onSelect,
+  onClear,
+  onCancel,
+}: {
+  tasks: RuntimeTask[];
+  queuedTasks: RuntimeTask[];
+  agentId: string;
+  selectedTaskId: string | null;
+  selectedTimeline: RuntimeTaskTimelineResponse | null;
+  loading: boolean;
+  error: string | null;
+  onSelect: (taskId: string) => void;
+  onClear: () => void;
+  onCancel: (taskId: string, agentId?: string) => Promise<void>;
+}) {
+  return (
+    <div className="grid gap-4 2xl:grid-cols-[0.92fr_1.08fr]">
+      <TaskList
+        tasks={tasks}
+        queuedTasks={queuedTasks}
+        agentId={agentId}
+        selectedTaskId={selectedTaskId}
+        onSelect={onSelect}
+        onCancel={onCancel}
+      />
+      <TaskDetailPanel
+        timeline={selectedTimeline}
+        loading={loading}
+        error={error}
+        onClear={onClear}
+      />
     </div>
   );
 }
@@ -109,11 +197,15 @@ function TaskList({
   tasks,
   queuedTasks,
   agentId,
+  selectedTaskId,
+  onSelect,
   onCancel,
 }: {
   tasks: RuntimeTask[];
   queuedTasks: RuntimeTask[];
   agentId: string;
+  selectedTaskId: string | null;
+  onSelect: (taskId: string) => void;
   onCancel: (taskId: string, agentId?: string) => Promise<void>;
 }) {
   const historyTasks = [...tasks]
@@ -128,7 +220,13 @@ function TaskList({
   return (
     <div className="space-y-3">
       {visibleTasks.map((task) => (
-        <TaskCard key={task.id} task={task} onCancel={task.status === "queued" ? () => onCancel(task.id, agentId) : undefined} />
+        <TaskCard
+          key={task.id}
+          task={task}
+          selected={selectedTaskId === task.id}
+          onSelect={() => onSelect(task.id)}
+          onCancel={task.status === "queued" ? () => onCancel(task.id, agentId) : undefined}
+        />
       ))}
     </div>
   );
@@ -158,9 +256,33 @@ function EventList({ events }: { events: ReturnType<typeof useRuntimeStore.getSt
   );
 }
 
-function TaskCard({ task, onCancel }: { task: RuntimeTask; onCancel?: () => void }) {
+function TaskCard({
+  task,
+  selected,
+  onSelect,
+  onCancel,
+}: {
+  task: RuntimeTask;
+  selected?: boolean;
+  onSelect?: () => void;
+  onCancel?: () => void;
+}) {
+  const detail = getTaskStatusDetail(task);
   return (
-    <div className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] p-3">
+    <div
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (!onSelect) return;
+        if (event.key === "Enter" || event.key === " ") onSelect();
+      }}
+      className={`rounded-lg border p-3 transition-colors ${
+        selected
+          ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+          : "border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)]"
+      } ${onSelect ? "cursor-pointer hover:border-[var(--color-accent)]" : ""}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -170,16 +292,180 @@ function TaskCard({ task, onCancel }: { task: RuntimeTask; onCancel?: () => void
             <span className="font-mono text-xs text-[var(--color-text-soft)]">{task.id.slice(0, 8)}</span>
           </div>
           <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--color-text)]">{task.input}</p>
+          {detail && (
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-text-soft)]">{detail}</p>
+          )}
         </div>
         {onCancel && (
           <button
-            onClick={onCancel}
+            onClick={(event) => {
+              event.stopPropagation();
+              onCancel();
+            }}
             className="rounded-md p-1.5 text-[var(--color-text-soft)] transition-colors hover:bg-white hover:text-[var(--color-danger)]"
             title="取消任务"
           >
             <Square size={14} />
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function TaskDetailPanel({
+  timeline,
+  loading,
+  error,
+  onClear,
+}: {
+  timeline: RuntimeTaskTimelineResponse | null;
+  loading: boolean;
+  error: string | null;
+  onClear: () => void;
+}) {
+  if (!timeline) {
+    return (
+      <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-[var(--color-border)] bg-white px-4 py-10 text-sm text-[var(--color-text-soft)]">
+        {loading ? "正在加载任务时间线..." : "选择一个任务查看执行时间线"}
+      </div>
+    );
+  }
+
+  const { task, current, episode } = timeline;
+  return (
+    <div className="rounded-lg border border-[var(--color-border-soft)] bg-white">
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${taskStatusClass(task.status)}`}>
+              {taskStatusLabel(task.status)}
+            </span>
+            <span className="font-mono text-xs text-[var(--color-text-soft)]">{task.id}</span>
+          </div>
+          <p className="mt-2 break-words text-sm leading-6 text-[var(--color-text)]">{task.input}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded-md p-1.5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text)]"
+          title="关闭详情"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="space-y-4 p-4">
+        {error && (
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">{error}</div>
+        )}
+        {loading && (
+          <div className="rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2 text-sm text-[var(--color-text-soft)]">正在刷新时间线...</div>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <DetailRow label="Agent" value={task.agent_id} />
+          <DetailRow label="渠道" value={task.source_channel} />
+          <DetailRow label="尝试" value={`${task.attempt_count ?? 0}/${task.max_attempts ?? 0}`} />
+          <DetailRow label="进度" value={current.progressMessage || current.progressStatus} />
+          <DetailRow label="最近进展" value={formatFullTime(current.lastProgressAt)} />
+          <DetailRow label="租约到期" value={formatFullTime(current.leaseExpiresAt)} />
+        </div>
+
+        {(current.failureType || current.failureStage || current.retriable !== null) && (
+          <div className="rounded-lg border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
+            失败分类：{current.failureType ?? "unknown"} / {current.failureStage ?? "unknown"} · 可重试：{current.retriable ? "是" : "否"}
+          </div>
+        )}
+
+        {(current.currentToolName || current.recentOutput) && (
+          <div className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-3 py-2">
+            {current.currentToolName && (
+              <div className="text-xs font-semibold text-[var(--color-text-muted)]">
+                最近工具：{current.currentToolName}
+                {current.currentToolCallId ? <span className="font-mono"> · {current.currentToolCallId}</span> : null}
+              </div>
+            )}
+            {current.recentOutput && (
+              <p className="mt-1 line-clamp-3 break-words text-sm leading-6 text-[var(--color-text)]">{current.recentOutput}</p>
+            )}
+          </div>
+        )}
+
+        <EpisodeSummary episode={episode} />
+        <TimelineList items={timeline.timeline} />
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2">
+      <div className="text-[11px] text-[var(--color-text-soft)]">{label}</div>
+      <div className="mt-1 break-words text-sm font-medium text-[var(--color-text)]">{value || "-"}</div>
+    </div>
+  );
+}
+
+function EpisodeSummary({ episode }: { episode: RuntimeTaskTimelineResponse["episode"] }) {
+  if (!episode) {
+    return (
+      <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-3 text-sm text-[var(--color-text-soft)]">
+        暂无经历摘要
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-[var(--color-border-soft)] px-3 py-3">
+      <div className="text-sm font-semibold text-[var(--color-text)]">{episode.title}</div>
+      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text-muted)]">{episode.summary}</p>
+      {episode.key_steps.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-[var(--color-text-soft)]">关键步骤</div>
+          <div className="mt-1 space-y-1">
+            {episode.key_steps.map((step) => (
+              <div key={step} className="text-sm text-[var(--color-text-muted)]">• {step}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {episode.problems.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-[var(--color-danger)]">问题</div>
+          <div className="mt-1 space-y-1">
+            {episode.problems.map((problem) => (
+              <div key={problem} className="text-sm text-[var(--color-danger)]">• {problem}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimelineList({ items }: { items: RuntimeTaskTimelineItem[] }) {
+  if (items.length === 0) {
+    return <EmptyState text="暂无任务事件" />;
+  }
+  return (
+    <div>
+      <div className="mb-2 text-sm font-semibold text-[var(--color-text)]">执行时间线</div>
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.id} className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-subtle)] px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${timelineToneClass(item.tone)}`} />
+                <span className="truncate text-sm font-semibold text-[var(--color-text)]">{item.title}</span>
+              </div>
+              <span className="shrink-0 text-xs text-[var(--color-text-soft)]">{formatTime(item.createdAt)}</span>
+            </div>
+            <div className="mt-1 break-words text-sm text-[var(--color-text-muted)]">{item.detail}</div>
+            <div className="mt-1 font-mono text-[11px] text-[var(--color-text-soft)]">{item.kind}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -231,6 +517,16 @@ function eventToneClass(tone: "task" | "tool" | "memory" | "error" | "neutral") 
   return classes[tone];
 }
 
+function timelineToneClass(tone: RuntimeTaskTimelineTone) {
+  const classes: Record<RuntimeTaskTimelineTone, string> = {
+    info: "bg-[var(--color-accent)]",
+    success: "bg-[var(--color-success)]",
+    warning: "bg-[var(--color-warning)]",
+    error: "bg-[var(--color-danger)]",
+  };
+  return classes[tone];
+}
+
 function taskStatusLabel(status: RuntimeTask["status"]) {
   const labels: Record<RuntimeTask["status"], string> = {
     queued: "排队",
@@ -259,5 +555,16 @@ function formatTime(timestamp: number): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatFullTime(timestamp: number | null): string | null {
+  if (!timestamp) return null;
+  return new Date(timestamp).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   });
 }

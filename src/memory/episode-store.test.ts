@@ -45,6 +45,20 @@ describe("episode store", () => {
         payload: { toolName: "read_file", args: { path: "src/memory/store.ts" } },
         created_at: 120,
       }, db);
+      appendEvent({
+        agent_id: "default",
+        task_id: task.id,
+        conversation_id: task.conversation_id,
+        type: "tool.result",
+        payload: {
+          toolName: "read_file",
+          toolCallId: "tool-call-1",
+          success: true,
+          durationMs: 10,
+          outputPreview: "ok",
+        },
+        created_at: 121,
+      }, db);
       markTaskCompleted(task.id, "总结完成：缺少 episodic memory", db);
 
       const first = upsertEpisodeForTask(task.id, db);
@@ -59,6 +73,7 @@ describe("episode store", () => {
         attempt_count: 1,
         files_touched: ["src/memory/store.ts"],
         key_steps: expect.arrayContaining(["调用工具：read_file"]),
+        tools_used: expect.arrayContaining(["read_file"]),
       });
       expect(searchEpisodes({ query: "记忆系统", agentId: "default" }, db)).toHaveLength(1);
       expect(listTaskEvents(task.id, db).map((event) => event.type)).toContain("episode.updated");

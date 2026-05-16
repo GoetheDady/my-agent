@@ -3,6 +3,8 @@ import {
   getCurrentTask,
   getQueuedTasks,
   getRuntimeEventView,
+  getTaskStatusDetail,
+  getWatchdogNotice,
   useRuntimeStore,
   type RuntimeAgent,
   type RuntimeEvent,
@@ -75,6 +77,43 @@ const events: RuntimeEvent[] = [
   },
 ];
 
+const timelineResponse = {
+  task: tasks[0],
+  episode: {
+    id: "episode-1",
+    task_id: "task-running",
+    title: "当前任务",
+    summary: "任务执行摘要",
+    outcome: "完成",
+    key_steps: ["任务开始执行", "调用工具：read_file"],
+    problems: [],
+  },
+  current: {
+    progressStatus: "using_tool",
+    progressMessage: "正在执行工具：read_file",
+    currentToolName: "read_file",
+    currentToolCallId: "call-1",
+    recentOutput: "读取完成",
+    failureType: null,
+    failureStage: null,
+    retriable: null,
+    leaseExpiresAt: null,
+    lastProgressAt: 40,
+  },
+  timeline: [
+    {
+      id: "event-tool",
+      eventId: "event-tool",
+      kind: "tool",
+      tone: "success",
+      title: "工具结果",
+      detail: "read_file",
+      createdAt: 40,
+      payloadJson: { toolName: "read_file", success: true },
+    },
+  ],
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -93,6 +132,10 @@ describe("runtimeStore", () => {
       error: null,
       polling: false,
       pollingAgentId: "default",
+      selectedTaskId: null,
+      selectedTaskTimeline: null,
+      taskTimelineLoading: false,
+      taskTimelineError: null,
     });
   });
 
@@ -157,6 +200,54 @@ describe("runtimeStore", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/runtime/tasks/task-queued/cancel", { method: "POST" });
     expect(useRuntimeStore.getState().agent?.id).toBe("researcher");
+  });
+
+  test("fetches and stores task timeline details", async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/runtime/tasks/task-running/timeline") return jsonResponse(timelineResponse);
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await useRuntimeStore.getState().fetchTaskTimeline("task-running");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runtime/tasks/task-running/timeline");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.task.id).toBe("task-running");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.current.currentToolName).toBe("read_file");
+    expect(useRuntimeStore.getState().taskTimelineError).toBeNull();
+  });
+
+  test("selectTask records selected id and loads the task timeline", async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/runtime/tasks/task-running/timeline") return jsonResponse(timelineResponse);
+      return jsonResponse({ error: "unexpected url" }, 404);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await useRuntimeStore.getState().selectTask("task-running");
+
+    expect(useRuntimeStore.getState().selectedTaskId).toBe("task-running");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.timeline[0]).toMatchObject({
+      title: "工具结果",
+      detail: "read_file",
+    });
+  });
+
+  test("clearSelectedTask clears timeline state", () => {
+    useRuntimeStore.setState({
+      selectedTaskId: "task-running",
+      selectedTaskTimeline: timelineResponse,
+      taskTimelineLoading: false,
+      taskTimelineError: "旧错误",
+    });
+
+    useRuntimeStore.getState().clearSelectedTask();
+
+    expect(useRuntimeStore.getState().selectedTaskId).toBeNull();
+    expect(useRuntimeStore.getState().selectedTaskTimeline).toBeNull();
+    expect(useRuntimeStore.getState().taskTimelineError).toBeNull();
   });
 
   test("startPolling keeps a selected snapshot without creating an interval", async () => {
@@ -248,6 +339,80 @@ describe("runtimeStore", () => {
       label: "Skill 启用",
       detail: "web-debug",
       tone: "memory",
+    });
+  });
+
+  test("renders watchdog events for the control panel", () => {
+    expect(getRuntimeEventView({
+      id: "event-watchdog-canceled",
+      agent_id: "default",
+      task_id: "task-queued",
+      conversation_id: "conversation-1",
+      type: "task.watchdog.canceled",
+      payload: JSON.stringify({ reason: "web_queued_stale" }),
+      payloadJson: { reason: "web_queued_stale" },
+      created_at: 80,
+    })).toMatchObject({
+      label: "Watchdog 取消任务",
+      detail: "web_queued_stale",
+      tone: "error",
+    });
+    expect(getRuntimeEventView({
+      id: "event-agent-repaired",
+      agent_id: "default",
+      task_id: null,
+      conversation_id: null,
+      type: "agent.watchdog.repaired",
+      payload: JSON.stringify({ reason: "agent_running_without_running_task" }),
+      payloadJson: { reason: "agent_running_without_running_task" },
+      created_at: 90,
+    })).toMatchObject({
+      label: "Watchdog 修复 Agent",
+      detail: "agent_running_without_running_task",
+      tone: "task",
+    });
+  });
+
+  test("formats system-canceled task detail", () => {
+    expect(getTaskStatusDetail({
+      ...tasks[1],
+      status: "canceled",
+      failure_type: "system_canceled",
+      failure_stage: "cancel",
+      retriable: false,
+      progress_status: "canceled",
+      progress_message: "任务已取消",
+    })).toBe("系统自动取消：任务已取消");
+  });
+
+  test("summarizes elevated watchdog events for the control panel", () => {
+    const notice = getWatchdogNotice([
+      {
+        id: "event-watchdog-batch",
+        agent_id: "default",
+        task_id: null,
+        conversation_id: null,
+        type: "task.watchdog.alerted",
+        payload: JSON.stringify({ reason: "web_queued_stale_batch", count: 4, notificationLevel: "P1" }),
+        payloadJson: { reason: "web_queued_stale_batch", count: 4, notificationLevel: "P1" },
+        created_at: 100,
+      },
+      {
+        id: "event-watchdog-detected",
+        agent_id: "default",
+        task_id: "task-queued",
+        conversation_id: "conversation-1",
+        type: "task.watchdog.detected",
+        payload: JSON.stringify({ reason: "web_queued_stale", notificationLevel: "P2" }),
+        payloadJson: { reason: "web_queued_stale", notificationLevel: "P2" },
+        created_at: 90,
+      },
+    ]);
+
+    expect(notice).toEqual({
+      title: "Watchdog 状态提醒",
+      detail: "系统清理了 4 个异常任务",
+      tone: "warning",
     });
   });
 });

@@ -37,22 +37,22 @@
 
 | 编号 | 模块 | 核心问题 | 当前状态 | 完整目标 |
 |---|---|---|---|---|
-| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，已有模块文档 | 可诊断、可迁移、可恢复 |
+| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 调度器，已有模块文档 | 可诊断、可迁移、可恢复 |
 | M2 | Agent Identity & Config | Agent 是谁、允许做什么 | 已有基础 | 配置边界清晰、可版本化 |
-| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性与可观察性 v1，已有模块文档 | 增加计划、依赖和 Episode 输入契约 |
-| M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation 已修复，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
+| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性和 Watchdog 自愈 v1，已有模块文档 | 增加计划、依赖和 Episode 输入契约 |
+| M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation 和工具审计事件已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
 | M5 | Prompt & Context | 每次执行带哪些上下文 | 已有 prompt builder | 上下文预算、记忆选择和 Skill 选择更稳定 |
-| M6 | Tool System | Agent 如何安全调用能力 | 已有工具和审批 | 权限更细、工具失败更可恢复 |
-| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker 和 Episode v1，已有模块文档 | 人类式记忆分层更完整 |
+| M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批和工具调用审计，已有模块文档 | 权限更细、工具失败更可恢复 |
+| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker 和 Episode v1；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | Skill System | Agent 如何沉淀可复用做法 | 已有三类 Skill | 生命周期、安全、统计和推荐完整化 |
-| M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表，已有模块文档 | 事件规范、查询、诊断和回放更强 |
+| M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件和工具调用审计，已有模块文档 | 事件规范、查询、诊断和回放更强 |
 | M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，微信 stub，已有模块文档 | 多渠道生产化 |
 | M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
-| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，Chat API 会保留审批续跑上下文，已有模块文档 | 控制面完整化 |
-| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，聊天审批自动续发已保留 session 上下文，已有模块文档 | 继续作为控制台，不成为核心 |
+| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog 扫描和 Task timeline 聚合，已有模块文档 | 控制面完整化 |
+| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog 提醒和 Task timeline 详情，已有模块文档 | 继续作为控制台，不成为核心 |
 | M17 | Evaluation & Testing | 如何知道 Agent 变好了 | 单元测试较多 | 行为评估和端到端场景测试 |
 | M18 | Documentation & Onboarding | 新 Agent 如何理解项目 | 已有基础文档 | 模块文档和开发路线成体系 |
 
@@ -87,6 +87,7 @@ src/scripts/
 - `.my-agent/` 运行时目录。
 - Gateway start / stop / restart / status / logs。
 - 启动时恢复租约过期 Task。
+- 启动 Task Watchdog 调度器，运行期间持续巡检异常 Task 和 Agent 状态。
 
 ### 还需要补齐
 
@@ -161,6 +162,8 @@ src/tasks/
 - 失败分类：模型失败、工具失败、权限失败、超时、租约过期、取消、上下文缺失。
 - 执行进度：`progress_status`、`progress_message`、`last_progress_at`。
 - Task 事件审计。
+- Task Watchdog：自动取消 Web 僵尸 queued task、恢复租约过期 running task、修复 Agent running 状态不一致、提醒外部队列和审批超时。
+- Task progress event 支持轻量 metadata，用于当前工具、tool call id 和最近输出摘要；完整工具流水仍归 Event。
 
 ### 还需要补齐
 
@@ -196,6 +199,7 @@ src/channels/external-runner.ts
 - 外部渠道 runner 可处理飞书任务并回发。
 - 执行期间续约 Task 租约。
 - 成功、失败、取消时释放 Agent。
+- 工具调用统一写入 `tool.call` / `tool.result` 审计事件，包含工具名、tool call id、耗时、输出摘要或错误。
 
 ### 还需要补齐
 
@@ -250,6 +254,8 @@ src/prompts/
 
 Tool System 决定 Agent 能调用什么能力，以及如何安全调用。
 
+模块文档：[docs/modules/m6-tool-system.md](./modules/m6-tool-system.md)
+
 当前相关目录：
 
 ```text
@@ -265,6 +271,9 @@ src/tools/
 - 写工具默认需要审批。
 - 文件路径 allowlist。
 - 工具审批事件。
+- 工具调用审计事件：`tool.call` 与 `tool.result`。
+- `buildAgentTools(context)` 会为每次 Agent run 注入 task/conversation/agent 上下文，并统一包装工具审计。
+- 工具审计会更新 Task progress metadata，用于展示当前工具、tool call id 和最近输出摘要。
 - 防止 `write_file` 直接改 `agent.json`。
 
 ### 还需要补齐
@@ -275,6 +284,7 @@ src/tools/
 - 工具权限模板。
 - 工具使用统计。
 - 工具安全等级：只读、写入、网络、执行命令、敏感数据。
+- 审批等待状态和 Task 暂停/恢复语义的进一步打通。
 
 专业术语说明：
 
@@ -308,6 +318,7 @@ src/memory/tools/
 - 记忆去重和再巩固。
 - Dream Worker。
 - 情景记忆 episode 基础能力，包含任务状态、失败分类、可重试性和关键步骤。
+- Episode 从 `tool.call` / `tool.result` 提取 `tools_used` 和 `key_steps`，但完整执行链路仍以 Event 为事实源。
 - Runtime 启动时会补齐或刷新终态 task 的 episode，保证 retry 后同一 task 仍只有一条经历记录。
 - prospective memory 的基础工具能力。
 
@@ -422,6 +433,8 @@ src/events/
 
 - 事件写入 SQLite。
 - Task、Tool、Memory、Skill 相关事件。
+- Watchdog 事件：`task.watchdog.*` 与 `agent.watchdog.repaired`。
+- 工具审计事件：`tool.call` 与 `tool.result`。
 - 按 Agent、Task、Conversation 查询事件。
 - Runtime 页面可展示事件。
 
@@ -429,7 +442,7 @@ src/events/
 
 - 事件类型注册表。
 - 事件 payload schema。
-- 事件严重等级。
+- 事件严重等级和 Watchdog `notificationLevel` 统一规范。
 - 事件关联链路：一次外部消息到 Task、Tool、Memory、Channel 回复。
 - 事件导出。
 - 事件压缩或归档。
@@ -608,6 +621,8 @@ src/routes/
 - Agent API。
 - Task API。
 - Event API。
+- Watchdog 手动扫描 API。
+- Task timeline 聚合 API。
 - Skill API。
 - Tool approval API。
 - Channel API。
@@ -619,7 +634,7 @@ src/routes/
 - API 错误码规范。
 - 管理操作审计。
 - 批量操作。
-- 诊断接口。
+- 诊断接口，包括 Watchdog 最近扫描结果和调度器健康状态。
 - 数据导入导出接口。
 - 只读观察接口和写入控制接口分层。
 
@@ -656,11 +671,15 @@ web/
 - Settings。
 - Runtime Snapshot 会跟随当前选中的 Agent 拉取状态。
 - Task Queue 优先展示排队任务，并按新到旧展示最近历史任务。
+- Runtime Events 支持 Watchdog 事件中文展示。
+- Runtime Snapshot 支持 P0/P1 Watchdog 提醒和 Task 自动取消/失败原因展示。
+- Tasks 控制台支持选中单个任务并展示 Task timeline、当前工具、最近输出和 episode 摘要。
 
 ### 还需要补齐
 
 - 不是优先做产品化 UI，而是补观察能力。
-- Task timeline 更完整。
+- Task timeline 更完整，例如事件 payload 展开、过滤和父子任务串联。
+- Watchdog 提醒跳转到对应任务或事件时间线。
 - 直接进入控制台时的实时订阅或 fallback 轮询。
 - 控制台显式 Agent 切换器。
 - Memory evidence 展示。

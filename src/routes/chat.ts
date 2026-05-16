@@ -7,6 +7,7 @@ import { extractAssistantText, serializeAssistantPartsForStorage } from "../chan
 import { AgentBusyError, runAgentTask, toAgentUiMessageStreamResponse, toModelMessages } from "../runtime/agent-runtime";
 import { defaultChannelService } from "../channels/service";
 import { emitLifecycleHook } from "../lifecycle/hooks";
+import { handleBusyWebTask } from "./chat-busy";
 
 const app = new Hono();
 
@@ -83,7 +84,7 @@ app.post("/", async (c) => {
     });
   } catch (error) {
     if (error instanceof AgentBusyError) {
-      return c.json({ queued: true, taskId: task.id }, 202);
+      return handleBusyWebTask(task);
     }
     throw error;
   }

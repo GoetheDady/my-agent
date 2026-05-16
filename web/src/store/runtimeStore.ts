@@ -27,6 +27,16 @@ export interface RuntimeTask {
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
+  attempt_count?: number;
+  max_attempts?: number;
+  lease_expires_at?: number | null;
+  canceled_at?: number | null;
+  failure_type?: string | null;
+  failure_stage?: string | null;
+  retriable?: boolean | null;
+  progress_status?: string;
+  progress_message?: string;
+  last_progress_at?: number | null;
 }
 
 export interface RuntimeEvent {
@@ -46,16 +56,86 @@ export interface RuntimeEventView {
   tone: "task" | "tool" | "memory" | "error" | "neutral";
 }
 
+export type RuntimeTaskTimelineKind =
+  | "task"
+  | "progress"
+  | "tool"
+  | "approval"
+  | "assistant"
+  | "memory"
+  | "episode"
+  | "channel"
+  | "watchdog"
+  | "agent"
+  | "other";
+
+export type RuntimeTaskTimelineTone = "info" | "success" | "warning" | "error";
+
+export interface RuntimeTaskTimelineItem {
+  id: string;
+  eventId: string;
+  kind: RuntimeTaskTimelineKind;
+  tone: RuntimeTaskTimelineTone;
+  title: string;
+  detail: string;
+  createdAt: number;
+  payloadJson: Record<string, unknown>;
+}
+
+export interface RuntimeTaskCurrentView {
+  progressStatus: string;
+  progressMessage: string;
+  currentToolName: string | null;
+  currentToolCallId: string | null;
+  recentOutput: string | null;
+  failureType: string | null;
+  failureStage: string | null;
+  retriable: boolean | null;
+  leaseExpiresAt: number | null;
+  lastProgressAt: number | null;
+}
+
+export interface RuntimeTaskEpisode {
+  id: string;
+  task_id: string;
+  title: string;
+  summary: string;
+  outcome: string;
+  key_steps: string[];
+  problems: string[];
+}
+
+export interface RuntimeTaskTimelineResponse {
+  task: RuntimeTask;
+  episode: RuntimeTaskEpisode | null;
+  current: RuntimeTaskCurrentView;
+  timeline: RuntimeTaskTimelineItem[];
+}
+
+export interface RuntimeWatchdogNotice {
+  title: string;
+  detail: string;
+  tone: "warning" | "error";
+  taskId?: string;
+}
+
 interface RuntimeState {
   agent: RuntimeAgent | null;
   tasks: RuntimeTask[];
   events: RuntimeEvent[];
+  selectedTaskId: string | null;
+  selectedTaskTimeline: RuntimeTaskTimelineResponse | null;
+  taskTimelineLoading: boolean;
+  taskTimelineError: string | null;
   loading: boolean;
   error: string | null;
   polling: boolean;
   pollingAgentId: string;
 
   fetchRuntimeSnapshot: (agentId?: string) => Promise<void>;
+  selectTask: (taskId: string) => Promise<void>;
+  fetchTaskTimeline: (taskId: string) => Promise<void>;
+  clearSelectedTask: () => void;
   cancelTask: (taskId: string, agentId?: string) => Promise<void>;
   startPolling: (intervalMs?: number, agentId?: string) => void;
   stopPolling: () => void;
@@ -96,6 +176,11 @@ function getDisplayValue(payload: Record<string, unknown>, key: string): string 
   return null;
 }
 
+function getNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function getQueuedTasks(tasks: RuntimeTask[]): RuntimeTask[] {
   return tasks
     .filter((task) => task.status === "queued")
@@ -109,6 +194,78 @@ export function getCurrentTask(agent: RuntimeAgent | null, tasks: RuntimeTask[])
     if (current) return current;
   }
   return tasks.find((task) => task.status === "running") ?? null;
+}
+
+export function getTaskStatusDetail(task: RuntimeTask): string | null {
+  const progressMessage = task.progress_message?.trim();
+  if (task.status === "canceled") {
+    if (task.failure_type === "system_canceled") {
+      return `系统自动取消${progressMessage ? `：${progressMessage}` : ""}`;
+    }
+    if (task.failure_type === "user_canceled") {
+      return `用户取消${progressMessage ? `：${progressMessage}` : ""}`;
+    }
+  }
+  if (task.status === "failed") {
+    const reason = task.failure_type ?? "unknown";
+    return `失败原因：${reason}${progressMessage ? ` · ${progressMessage}` : ""}`;
+  }
+  return progressMessage && task.status !== "completed" ? progressMessage : null;
+}
+
+export function getWatchdogNotice(events: RuntimeEvent[]): RuntimeWatchdogNotice | null {
+  let canceled = 0;
+  let alerted = 0;
+  let recovered = 0;
+  let repaired = 0;
+  let hasP0 = false;
+  let taskId: string | null = null;
+
+  for (const event of events) {
+    const isWatchdogEvent = event.type.startsWith("task.watchdog.") || event.type === "agent.watchdog.repaired";
+    if (!isWatchdogEvent) continue;
+
+    const payload = payloadRecord(event);
+    const notificationLevel = getString(payload, "notificationLevel");
+    if (notificationLevel !== "P0" && notificationLevel !== "P1") continue;
+    hasP0 ||= notificationLevel === "P0";
+    taskId ??= event.task_id ?? getString(payload, "taskId") ?? getString(payload, "task_id");
+
+    if (event.type === "task.watchdog.canceled") {
+      canceled += 1;
+    } else if (event.type === "task.watchdog.recovered") {
+      recovered += 1;
+    } else if (event.type === "agent.watchdog.repaired") {
+      repaired += 1;
+    } else if (event.type === "task.watchdog.alerted") {
+      const reason = getString(payload, "reason");
+      if (reason === "web_queued_stale_batch") {
+        canceled += getNumber(payload, "count") ?? 0;
+      } else {
+        alerted += 1;
+      }
+    }
+  }
+
+  const details: string[] = [];
+  if (canceled > 0) details.push(`系统清理了 ${canceled} 个异常任务`);
+  if (repaired > 0) details.push(`修复了 ${repaired} 个 Agent 状态`);
+  if (recovered > 0) details.push(`恢复了 ${recovered} 个运行任务`);
+  if (alerted > 0) details.push(`发现 ${alerted} 个需要关注的任务`);
+  if (details.length === 0) return null;
+
+  return taskId
+    ? {
+        title: "Watchdog 状态提醒",
+        detail: details.join("；"),
+        tone: hasP0 ? "error" : "warning",
+        taskId,
+      }
+    : {
+        title: "Watchdog 状态提醒",
+        detail: details.join("；"),
+        tone: hasP0 ? "error" : "warning",
+      };
 }
 
 export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
@@ -174,6 +331,28 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
         tone: "error",
       };
     }
+  }
+
+  if (event.type === "agent.watchdog.repaired") {
+    return {
+      label: "Watchdog 修复 Agent",
+      detail: getString(payload, "reason") ?? getString(payload, "previousCurrentTaskId") ?? event.type,
+      tone: "task",
+    };
+  }
+
+  if (event.type.startsWith("task.watchdog.")) {
+    const labels: Record<string, string> = {
+      "task.watchdog.detected": "Watchdog 检测任务",
+      "task.watchdog.canceled": "Watchdog 取消任务",
+      "task.watchdog.recovered": "Watchdog 恢复任务",
+      "task.watchdog.alerted": "Watchdog 告警",
+    };
+    return {
+      label: labels[event.type] ?? "Watchdog 事件",
+      detail: getString(payload, "reason") ?? getString(payload, "action") ?? event.task_id ?? event.type,
+      tone: event.type === "task.watchdog.canceled" || event.type === "task.watchdog.alerted" ? "error" : "task",
+    };
   }
 
   if (event.type.startsWith("memory.")) {
@@ -456,6 +635,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   agent: null,
   tasks: [],
   events: [],
+  selectedTaskId: null,
+  selectedTaskTimeline: null,
+  taskTimelineLoading: false,
+  taskTimelineError: null,
   loading: false,
   error: null,
   polling: false,
@@ -486,12 +669,50 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         loading: false,
         error: null,
       });
+      const selectedTaskId = get().selectedTaskId;
+      if (selectedTaskId) {
+        void get().fetchTaskTimeline(selectedTaskId);
+      }
     } catch (error) {
       set({
         loading: false,
         error: error instanceof Error ? error.message : "获取运行状态失败",
       });
     }
+  },
+
+  selectTask: async (taskId) => {
+    set({ selectedTaskId: taskId });
+    await get().fetchTaskTimeline(taskId);
+  },
+
+  fetchTaskTimeline: async (taskId) => {
+    set({ taskTimelineLoading: true, taskTimelineError: null, selectedTaskTimeline: null });
+    try {
+      const res = await fetch(`/api/runtime/tasks/${encodeURIComponent(taskId)}/timeline`);
+      if (!res.ok) throw new Error("获取任务时间线失败");
+      const timeline = await res.json() as RuntimeTaskTimelineResponse;
+      set({
+        selectedTaskId: taskId,
+        selectedTaskTimeline: timeline,
+        taskTimelineLoading: false,
+        taskTimelineError: null,
+      });
+    } catch (error) {
+      set({
+        taskTimelineLoading: false,
+        taskTimelineError: error instanceof Error ? error.message : "获取任务时间线失败",
+      });
+    }
+  },
+
+  clearSelectedTask: () => {
+    set({
+      selectedTaskId: null,
+      selectedTaskTimeline: null,
+      taskTimelineLoading: false,
+      taskTimelineError: null,
+    });
   },
 
   cancelTask: async (taskId, agentId) => {

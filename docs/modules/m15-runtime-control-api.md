@@ -18,6 +18,7 @@ Runtime Control API 负责暴露后端运行状态和安全控制动作。
 - 查询 Task 列表和单个 Task。
 - 查询 Task 事件时间线。
 - 触发 retry / cancel 等控制动作。
+- 手动触发运行时诊断或自愈动作。
 - 返回清晰中文错误。
 
 它不应该负责：
@@ -43,6 +44,7 @@ Chat 数据面 (`src/routes/chat.ts`)：
 
 - `POST /api/chat` 接收前端 UI messages、sessionId、agentId 和 thinkingEnabled，并把 Web 输入转成 Task。
 - 工具审批续跑时会把原始 UI messages 传给 Runtime 的 UI stream response；如果这是 assistant message continuation，会原地更新已有 assistant 消息，避免重复追加用户消息或丢失工具卡上下文。
+- Web 流式请求如果遇到目标 Agent 正忙，会通过 `src/routes/chat-busy.ts` 把本次刚创建的 Web task 标记为 `canceled/system_canceled` 并返回 409，避免 Web task 因没有后台 HTTP stream 可接管而永久停留在 queued。
 
 Runtime 控制面 (`src/routes/runtime.ts`)：
 
@@ -50,6 +52,8 @@ Runtime 控制面 (`src/routes/runtime.ts`)：
 - `GET /api/runtime/tasks`
 - `GET /api/runtime/tasks/:id`
 - `GET /api/runtime/tasks/:id/events`
+- `GET /api/runtime/tasks/:id/timeline`
+- `POST /api/runtime/watchdog/run`
 - `POST /api/runtime/tasks/:id/retry`
 - `POST /api/runtime/tasks/:id/cancel`
 
@@ -65,6 +69,10 @@ Memory 观察面 (`src/routes/memory.ts`)：
 - Task 响应包含 progress 与 failure 字段。
 - cancel 默认按用户取消处理：`user_canceled / cancel / retriable=false`。
 - completed / failed task 重复 cancel 返回 409，并写 `task.cancel.rejected`。
+- 新增 `POST /api/runtime/watchdog/run`，手动触发一次 Task Watchdog 扫描，返回 `{ scanned, canceled, recovered, alerted, repaired }`。
+- Watchdog 会通过 Runtime events 暴露 `task.watchdog.*` 和 `agent.watchdog.repaired`，用于解释自动取消、恢复、告警或 Agent 状态修复。
+- 该接口不新增业务规则，只复用 Task System 的 watchdog 实现；正常控制动作仍应通过 Task Store 和 Runtime API 完成。
+- 新增 `GET /api/runtime/tasks/:id/timeline`，返回 Task、Episode、当前进度视图和事件时间线。它是只读聚合接口，不新增数据源。
 
 本轮 M7 改动对 API 的影响：
 
@@ -73,8 +81,10 @@ Memory 观察面 (`src/routes/memory.ts`)：
 
 ## 4. 后续需要补齐
 
-- Task 时间线聚合接口。
-- running task 当前步骤视图。
+- Task timeline v1 已有，后续补过滤、分页和 payload schema。
+- running task 当前步骤视图已有基础，后续补模型 step、token 用量和更细工具状态。
 - 控制动作审计筛选。
 - 运行诊断接口。
+- Watchdog 运行历史和最近一次扫描耗时。
+- Web 多消息排队体验：当前策略是忙碌时拒绝并取消本次 Web task；后续如果要支持真正排队，需要后台 runner 和前端通知协议共同接管。
 - Chat API 对缺失 `sessionId` 仍保留兼容兜底；后续可以把新版 Web 客户端的缺失 sessionId 视为 400，以便更早暴露前端状态错误。

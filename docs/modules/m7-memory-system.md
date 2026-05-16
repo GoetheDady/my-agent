@@ -50,15 +50,18 @@ src/memory/episode-store.ts
 - 主动去重：保留高置信度记忆，并停用重复记忆。
 - Dream Worker：按运行记录做每日整理和反思。
 - Episode v1：终态 Task 可生成经历摘要，并写入 `episode.created` / `episode.updated` / `episode.failed` 事件。
+- Episode 会从任务事件流提取工具使用和关键步骤，包括 `tool.call` / `tool.result` 中的工具名。
 - Prospective memory 基础工具能力，用于记录未来计划或待办。
 
 本轮改动对 Memory System 的影响：
 
 - Episode 记录现在保存 task 派生状态，包括 `task_status`、`attempt_count`、`failure_type`、`failure_stage` 和 `retriable`。
 - Episode 记录新增 `key_steps`，用于表达一次任务经历里的关键步骤。
+- 新增工具审计事实后，Episode 的 `tools_used` 和 `key_steps` 以 `tool.call` / `tool.result` 为主要来源提取工具链路。
 - Episode 搜索参数扩展了 `taskId`、`taskStatus` 和 `failureType`，为按任务结果或失败类型回看经历打基础。
 - Runtime 启动时会为缺失或状态过期的终态 task 补齐/刷新 episode，保证 retry 后仍维护同一条 episode。
 - 数据库 schema 已在 Core Runtime 初始化阶段补齐兼容迁移，老数据会获得默认值。
+- Task timeline API 会读取 `getEpisodeByTaskId()`，把 Episode 作为终态经历摘要展示；Episode 不是新的事实源，完整执行链路仍由 Event 提供。
 
 ## 4. 后续需要补齐
 

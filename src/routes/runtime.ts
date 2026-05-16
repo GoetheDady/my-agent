@@ -4,8 +4,10 @@ import { getAgent } from "../agents/agent-registry";
 import { getDb } from "../core/database";
 import { listAgentEvents, listTaskEvents } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
+import { getTaskTimeline } from "../runtime/task-timeline";
 import { getTask, listTasks, markTaskCanceled, retryTask } from "../tasks/task-store";
 import type { TaskStatus } from "../tasks/task-types";
+import { runTaskWatchdogOnce } from "../tasks/watchdog";
 
 /**
  * 创建 Runtime 观察与控制路由。
@@ -49,6 +51,12 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     return c.json({ task });
   });
 
+  app.get("/tasks/:id/timeline", (c) => {
+    const timeline = getTaskTimeline(c.req.param("id"), database);
+    if (!timeline) return c.json({ error: "任务不存在。" }, 404);
+    return c.json(timeline);
+  });
+
   app.get("/tasks/:id/events", (c) => {
     const taskId = c.req.param("id");
     const task = getTask(taskId, database);
@@ -68,6 +76,10 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     return c.json({
       events: listAgentEvents(agentId, limit, database).filter((event) => event.type.startsWith("skill.")),
     });
+  });
+
+  app.post("/watchdog/run", (c) => {
+    return c.json(runTaskWatchdogOnce(database));
   });
 
   app.post("/tasks/:id/retry", async (c) => {

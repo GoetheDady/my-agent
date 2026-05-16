@@ -88,6 +88,20 @@ src/routes/memory.ts
 - `src/sessions/service.ts` 提供 assistant 消息原地替换能力，支持后端把审批后的工具输出更新回原消息。
 - 影响面只限 Web 聊天与会话持久化，不改变后端 Runtime 的 Agent 单线程模型。
 
+本轮新增了 Task Watchdog 的控制台可见性：
+
+- `runtimeStore` 支持解析 `task.watchdog.*` 与 `agent.watchdog.repaired` 事件，并转换为中文事件标题。
+- `RuntimeTask` 类型补齐 progress、failure、lease、attempt 等可观察字段，Task 卡片会展示系统自动取消、失败原因或运行进度。
+- `RuntimeSummary` 会从最近事件里提取 P0/P1 watchdog 提醒，例如批量清理 Web 僵尸任务、外部队列告警、审批超时或 Agent 状态修复。
+- 这部分只做观察与提示，不在前端实现自动状态修复；所有修复动作仍由后端 Task Watchdog 和 Runtime API 完成。
+
+本轮新增了 Task timeline 控制台详情：
+
+- Task 卡片可选中，并通过 `GET /api/runtime/tasks/:id/timeline` 加载单个任务详情。
+- 详情面板展示任务输入、状态、Agent、渠道、attempt、lease、失败分类、当前工具、最近输出、episode 摘要和正序事件时间线。
+- Watchdog 提醒如果能定位到 task，会点击打开对应任务详情。
+- 这仍是观察面能力；前端不保存新的任务状态，也不重新实现 Task / Event / Episode 业务规则。
+
 ## 5. 当前边界
 
 - Web Console 只是观察和控制面，真实执行仍由后端 Runtime、Task System 和 Channel System 负责。
@@ -97,9 +111,10 @@ src/routes/memory.ts
 
 ## 6. 后续需要补齐
 
-- Task timeline：按单个 Task 聚合 `task.*`、`tool.*`、`assistant.*`、`memory.*`、`episode.*` 事件。
-- Task 详情页：展示进度、失败分类、工具调用、episode 和可重试原因。
+- Task timeline 已有 v1，后续补事件过滤、payload 展开和跨父子任务串联。
+- Task 详情页已有基础，后续补更强的诊断建议、重试入口和事件 payload 展开。
 - 控制台级实时连接：直接进入 `/console` 时也应建立订阅或 fallback 轮询。
+- Watchdog 提醒详情页：从提示跳转到对应 task/event 时间线。
 - Agent 切换器：控制台侧边栏需要能显式切换当前 Agent，而不只显示当前 Agent。
 - Memory evidence 展示：让记忆能看到来源消息、Task 和事件证据。
 - Skill diff / provenance：展示 Skill 内容差异、来源和更新时间。

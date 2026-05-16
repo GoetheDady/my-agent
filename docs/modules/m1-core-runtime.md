@@ -44,6 +44,7 @@ src/scripts/
 - `ensureColumn()` 兼容迁移。
 - WAL 和外键约束。
 - Gateway 相关脚本。
+- 启动后注册后台调度器，包括梦整理调度器和 Task Watchdog 调度器。
 
 本轮 M7 改动对 Core Runtime 的影响：
 
@@ -53,9 +54,16 @@ src/scripts/
 - Runtime 启动时会扫描终态 task，并为缺失或过期的 episode 做一次确定性补齐/刷新。
 - 这些字段仍属于 Memory System 的业务语义；Core Runtime 只负责 schema 初始化和兼容迁移。
 
+本轮 M3/M15 改动对 Core Runtime 的影响：
+
+- `src/main.ts` 在 `initializeRuntime()` 和 `startDreamScheduler()` 后启动 `startTaskWatchdogScheduler()`。
+- Watchdog 默认每 60 秒巡检一次异常 Task 和 Agent 状态。
+- 启动时的 `recoverRunningTasks()` 仍保留在 Runtime 初始化流程；Watchdog 负责运行期间的持续巡检和审计事件写入。
+
 ## 4. 后续需要补齐
 
 - 数据库 schema 版本号。
 - 启动诊断报告。
 - 运行时目录权限检查。
 - 迁移失败时的中文错误说明。
+- 后台调度器健康状态和最近运行时间展示。

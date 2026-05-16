@@ -16,6 +16,7 @@ import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
 import { startDreamScheduler } from "./memory/dream-scheduler";
 import { defaultRealtimeService } from "./realtime/service";
+import { startTaskWatchdogScheduler } from "./tasks/watchdog";
 import type { RealtimeSocketData } from "./realtime/types";
 
 /**
@@ -29,6 +30,7 @@ import type { RealtimeSocketData } from "./realtime/types";
 initializeRuntime();
 registerMemoryLifecycleHooks();
 startDreamScheduler();
+startTaskWatchdogScheduler();
 void startFeishuWebSocketService();
 
 const app = new Hono();

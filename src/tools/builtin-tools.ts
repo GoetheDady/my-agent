@@ -10,6 +10,7 @@ import { createHumanMemoryTools } from '../memory/human-memory-tools';
 import { createSkillTools } from '../skills';
 import { evaluateToolPolicy } from './policy';
 import { buildAiToolSet, registerTool } from './registry';
+import { withToolAudit } from './audit';
 
 interface ToolRuntimeContext {
   /**
@@ -413,6 +414,14 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     Object.entries(allTools)
       // 未登记到 toolsetByName 的工具默认归到 core；当前内置工具都应显式登记。
       .filter(([toolName]) => enabledToolsets.has(toolsetByName.get(toolName) ?? 'core'))
-      .map(([toolName, builtTool]) => [toolName, withConfiguredApproval(toolName, builtTool, agentId)]),
+      .map(([toolName, builtTool]) => {
+        const approvedTool = withConfiguredApproval(toolName, builtTool, agentId);
+        return [toolName, withToolAudit(toolName, approvedTool, {
+          agentId,
+          taskId: context.taskId,
+          conversationId: context.conversationId,
+          database: context.database,
+        })];
+      }),
   );
 }
