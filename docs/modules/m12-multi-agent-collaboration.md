@@ -61,6 +61,9 @@ src/memory/episode-store.ts
 - callback Task 可以把子 Agent 结果追加回 Web session，或通过外部 Channel 投递。
 - 委派事件包括创建、完成、失败、callback 创建、callback 完成和 callback 失败。
 - 取消 queued 状态的委派时，会取消对应子 Task。
+- DelegationService 支持接收 `planStepId` 和 `dependsOnTaskIds`，为委派 child task 写入 `parent_task_id`、`plan_step_id` 和前置依赖。
+- `task_child_create` 工具复用 DelegationService，把父任务的某个 plan step 委派给目标 Agent，而不是另建一套 child task 机制。
+- 带依赖的委派会先写 `task_dependencies`，再触发目标 Agent drain，避免未满足依赖的 child task 抢跑。
 
 本轮 M7 改动对 Multi-Agent Collaboration 的影响：
 
@@ -80,7 +83,7 @@ src/memory/episode-store.ts
 - 角色模板：让 Agent 能根据能力、工具和职责选择合适的目标 Agent。
 - 委派协议：规范输入格式、期望输出、证据要求和失败说明。
 - 结果汇总协议：父 Agent 如何判断子 Agent 输出是否足够。
-- 多 Agent 任务依赖图：表达多个子任务之间的顺序和依赖关系。
+- 多 Agent 任务依赖图已有 task-level v1；后续需要完整 DAG 调度和更好的父任务结果汇总。
 - 协作事件时间线：把父任务、子任务、callback task 和 episode 串起来展示。
 - 委派失败后的回退策略：例如重试、换 Agent、降级为父 Agent 自己执行。
 - 跨 Agent 的权限边界：避免父 Agent 通过子 Agent 间接获得不该拥有的工具或文件权限。

@@ -20,6 +20,11 @@ Agent 配置文件 agent.json 不在项目根目录，它位于 .my-agent/agents
 如果用户明确要求“让另一个 Agent 做某件事”，使用 agent_delegate。agent_delegate 是异步委派工具：调用后不要等待目标 Agent 完成，先告诉用户“已派发”；目标 Agent 完成后，系统会创建你的 callback task，由你整理结果并通知用户。
 不要把任务委派给自己；MVP 不支持多层递归委派。
 
+遇到复杂任务时，优先先调用 task_plan_set 写出结构化步骤计划。
+执行步骤时，用 task_step_update 标记步骤状态，例如 running、completed、failed 或 skipped。
+如果某个步骤需要交给其他 Agent 完成，优先调用 task_child_create，让子任务绑定到对应 plan step，并在需要时附带 dependsOnTaskIds。
+不要直接用普通 agent_delegate 绕过计划步骤绑定；只有在明确不需要 plan step 关联时才使用 agent_delegate。
+
 优先使用 memory_recall 处理类人记忆问题：
 - 问过去经历、刚才、上午、昨天、之前做过什么时，查 episodic 记忆。
 - 问用户偏好、项目事实、协作习惯时，查 semantic/social 记忆。

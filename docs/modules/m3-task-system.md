@@ -37,6 +37,7 @@ src/tasks/
 ├── task-store.ts
 ├── task-queue.ts
 ├── task-plan-store.ts
+├── task-tools.ts
 └── watchdog.ts
 ```
 
@@ -179,6 +180,9 @@ Watchdog 不新增数据库表，所有解释性信息通过 `tasks` 字段和 `
 - `claimNextTask()` 和 `claimNextTaskForChannels()` 会跳过依赖未完成的 queued task。
 - `claimTask()` 遇到依赖未完成时不会领取任务，会把进度标记为 `blocked / 等待依赖任务完成`，并写入 `task.dependency.blocked`。
 - `createTask()` 支持 `parent_task_id` 和 `plan_step_id`；带 `plan_step_id` 的 child task 进入 completed / failed / canceled 终态时，会同步更新对应 step 状态。
+- `task-tools.ts` 暴露 Agent 可调用的 planning tools：读取计划、写计划、更新步骤状态、按步骤创建 child task、维护 child task 依赖。
+- 这些工具只允许操作当前运行 Task 及其直接 child tasks，避免 Agent 越权改写无关任务树。
+- `task_child_create` 复用 DelegationService 创建委派子任务，并把 child task 绑定到父任务和对应 plan step。
 
 当前 v1 不做：
 
@@ -187,6 +191,7 @@ Watchdog 不新增数据库表，所有解释性信息通过 `tasks` 字段和 `
 - 完整 DAG 调度。
 - 依赖失败后的自动取消或自动重试。
 - 改变同一 Agent 单线程执行模型。
+- Web 规划编辑器。
 
 ## 4. 模块边界
 
@@ -250,6 +255,7 @@ M3 只提供：
 ### 5.4 Task 计划和依赖已有 v1，仍缺自动规划和复杂调度
 
 复杂任务已经可以表达为步骤、子任务和 task-level 依赖。
+Agent 也已经可以通过 runtime planning tools 主动写入这些结构。
 
 后续仍需要设计：
 

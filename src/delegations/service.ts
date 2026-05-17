@@ -10,6 +10,7 @@ import { runInternalAgentTask, type RunInternalAgentTaskInput } from "../runtime
 import { claimNextTaskForChannels } from "../tasks/task-queue";
 import { createTask, getTask, markTaskCanceled } from "../tasks/task-store";
 import type { TaskRecord } from "../tasks/task-types";
+import { addTaskDependency } from "../tasks/task-plan-store";
 import {
   createDelegation,
   getDelegation,
@@ -140,11 +141,16 @@ export class DelegationService {
     };
     const childTask = createTask({
       agent_id: childAgentId,
+      parent_task_id: parentTask.id,
+      plan_step_id: input.planStepId ?? null,
       conversation_id: input.parentConversationId ?? parentTask.conversation_id,
       source_channel: "delegation",
       source_user_id: input.sourceUserId,
       input: instruction,
     }, this.database);
+    for (const dependsOnTaskId of input.dependsOnTaskIds ?? []) {
+      addTaskDependency(childTask.id, dependsOnTaskId, input.reason ?? "", this.database);
+    }
     const delegation = createDelegation({
       parentSessionId: input.parentSessionId,
       parentAgentId,

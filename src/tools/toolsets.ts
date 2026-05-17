@@ -29,8 +29,15 @@ export const TOOLSETS: ToolsetDefinition[] = [
   },
   {
     name: "runtime",
-    description: "运行时任务、事件和状态工具预留分组。",
-    tools: [],
+    description: "运行时任务、计划、依赖和任务状态工具。",
+    tools: [
+      "task_plan_get",
+      "task_plan_set",
+      "task_step_update",
+      "task_child_create",
+      "task_dependency_add",
+      "task_dependency_remove",
+    ],
   },
   {
     name: "core",

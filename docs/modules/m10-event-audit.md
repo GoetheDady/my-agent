@@ -72,6 +72,7 @@ Task Plan / Dependency 事件边界：
 - `task.dependency.*` 记录依赖添加、移除和领取时被阻塞的事实。
 - `task.child.created` 记录 parent task 与 child task 的关联。
 - 这些事件是审计事实，不替代 `task_steps` / `task_dependencies` 的当前结构化状态。
+- Agent 通过 `task_plan_*`、`task_step_update`、`task_child_create` 和 `task_dependency_*` 工具写入计划和依赖时，仍会同时产生 `tool.call` / `tool.result` 工具审计事件，以及对应的 `task.*` 事实事件。
 
 ## 4. 后续需要补齐
 

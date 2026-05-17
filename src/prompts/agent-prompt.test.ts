@@ -84,4 +84,28 @@ describe("prompt builder", () => {
       expect(prompt).toContain("- agent-id: researcher");
     });
   });
+
+  test("documents task planning tools for complex tasks", () => {
+    withPromptDb((db) => {
+      const task = createTask({
+        id: "task-planning",
+        source_channel: "web",
+        source_user_id: "default",
+        input: "复杂任务",
+      }, db);
+
+      const prompt = buildAgentSystemPrompt(task, db, {
+        profileContext: {
+          soul: "",
+          user: "",
+          files: [],
+        },
+      });
+
+      expect(prompt).toContain("task_plan_set");
+      expect(prompt).toContain("task_step_update");
+      expect(prompt).toContain("task_child_create");
+      expect(prompt).toContain("不要直接用普通 agent_delegate 绕过计划步骤绑定");
+    });
+  });
 });

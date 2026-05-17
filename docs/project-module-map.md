@@ -39,16 +39,16 @@
 |---|---|---|---|---|
 | M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 调度器，支持 Task Plan/Dependency schema 兼容迁移，已有模块文档 | 可诊断、可迁移、可恢复 |
 | M2 | Agent Identity & Config | Agent 是谁、允许做什么 | 已有基础 | 配置边界清晰、可版本化 |
-| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈和 Task Plan/Dependency v1，已有模块文档 | 增加自动规划、复杂依赖和 Episode 输入契约 |
+| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1 和 Agent planning tools，已有模块文档 | 增加自动规划、复杂依赖和 Episode 输入契约 |
 | M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation 和工具审计事件已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
-| M5 | Prompt & Context | 每次执行带哪些上下文 | 已有 prompt builder | 上下文预算、记忆选择和 Skill 选择更稳定 |
-| M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批和工具调用审计，已有模块文档 | 权限更细、工具失败更可恢复 |
+| M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder，包含 Task planning tools 指引，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
+| M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批、工具调用审计和 Runtime planning tools，已有模块文档 | 权限更细、工具失败更可恢复 |
 | M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker 和 Episode v1；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | Skill System | Agent 如何沉淀可复用做法 | 已有三类 Skill | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件和工具调用审计，已有模块文档 | 事件规范、查询、诊断和回放更强 |
 | M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，微信 stub，已有模块文档 | 多渠道生产化 |
-| M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
+| M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，支持 plan step child task 和 child task 依赖，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
 | M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline 和 Task Plan/Dependency 控制面，已有模块文档 | 控制面完整化 |
@@ -166,11 +166,12 @@ src/tasks/
 - Task Watchdog：自动取消 Web 僵尸 queued task、恢复租约过期 running task、修复 Agent running 状态不一致、提醒外部队列和审批超时。
 - Task progress event 支持轻量 metadata，用于当前工具、tool call id 和最近输出摘要；完整工具流水仍归 Event。
 - Task Plan / Dependency v1：`task_steps` 表达步骤，`task_dependencies` 表达 task-level 依赖；依赖未完成的 queued task 不会被领取。
+- Agent 可通过 Runtime planning tools 主动写计划、更新步骤、创建绑定 plan step 的 child task，并维护 child task 之间的依赖。
 
 ### 还需要补齐
 
 - Episode 输入契约：Task outcome 和 plan/dependency 如何稳定供 Episode 生成经历摘要。
-- 自动 Task planning：复杂任务由模型或系统拆成步骤/子任务。
+- 自动 Task planning：复杂任务由模型或系统自动决定何时拆成步骤/子任务。
 - 复杂依赖调度和父子任务汇总。
 - Task priority 更完整的调度策略。
 - 长期任务和暂停恢复。
@@ -222,6 +223,8 @@ src/channels/external-runner.ts
 
 这个模块决定每次模型调用时，Agent 能看到什么。
 
+模块文档：[docs/modules/m5-prompt-context.md](./modules/m5-prompt-context.md)
+
 当前相关目录：
 
 ```text
@@ -235,6 +238,7 @@ src/prompts/
 - 注入 Skill index。
 - 注入工具说明。
 - 避免直接把全部记忆塞进 prompt。
+- 指引复杂任务使用 `task_plan_set`、`task_step_update` 和 `task_child_create` 写入结构化计划。
 
 ### 还需要补齐
 

@@ -73,6 +73,8 @@ describe("tool registry", () => {
     expect(names).toContain("agent_list");
     expect(names).toContain("agent_get");
     expect(names).toContain("agent_create");
+    expect(names).toContain("task_plan_get");
+    expect(names).toContain("task_child_create");
   });
 
   test("can disable a tool for one agent", () => {
@@ -106,6 +108,26 @@ describe("tool registry", () => {
       expect(names).not.toContain("read_file");
       expect(names).not.toContain("write_file");
       expect(names).toContain("memory_recall");
+    });
+  });
+
+  test("buildAgentTools exposes runtime planning tools by default and hides them with runtime disabled", async () => {
+    await withTemporaryAgentConfig(async () => {
+      let names = Object.keys(buildAgentTools({ agentId: "default", taskId: "task-1" }));
+      expect(names).toContain("task_plan_get");
+      expect(names).toContain("task_plan_set");
+      expect(names).toContain("task_step_update");
+      expect(names).toContain("task_child_create");
+      expect(names).toContain("task_dependency_add");
+      expect(names).toContain("task_dependency_remove");
+
+      defaultAgentConfigService.patchAgentConfig("default", {
+        tools: { removeEnabledToolsets: ["runtime"] },
+      });
+      names = Object.keys(buildAgentTools({ agentId: "default", taskId: "task-1" }));
+
+      expect(names).not.toContain("task_plan_get");
+      expect(names).not.toContain("task_child_create");
     });
   });
 

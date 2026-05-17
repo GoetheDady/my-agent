@@ -52,6 +52,7 @@ src/agents/config-tools.ts
 src/agents/tools.ts
 src/memory/memory-tools.ts
 src/memory/human-memory-tools.ts
+src/tasks/task-tools.ts
 src/skills/
 ```
 
@@ -75,6 +76,8 @@ tasks
 - `write_file` 禁止直接修改 `.my-agent/agents/<agentId>/agent.json`，Agent 配置必须通过受控工具修改。
 - `ApprovalService` 持久化审批记录，并写入 `tool.approval.*` 审计事件。
 - Skill、Memory、AgentConfig、Agent Delegation 工具都通过同一工具策略入口暴露给 Agent。
+- Runtime planning tools 通过 `runtime` toolset 暴露：`task_plan_get`、`task_plan_set`、`task_step_update`、`task_child_create`、`task_dependency_add`、`task_dependency_remove`。
+- Planning tools 写的是当前 Task 的运行时计划和依赖状态，不写文件、不改 Agent 配置；默认不加入 `requiresApproval`。
 - 所有暴露给 AI SDK 的工具统一经过 `withToolAudit()` 包装。
 
 本轮改动对 Tool System 的影响：
@@ -96,6 +99,7 @@ Tool System 应该保存工具执行事实，但不保存完整 Task 历史。
 - Task 只保存轻量进度字段和 progress metadata，不保存完整工具流水。
 - Episode 可以从工具审计事件提取 `tools_used` 和 `key_steps`，但 Episode 不替代原始工具事件。
 - 工具审批事件只表示用户是否批准某次工具调用，不表示工具本身已经执行成功。
+- `task_child_create` 属于 Runtime planning 工具，但底层复用 Multi-Agent Delegation；工具层只负责当前 Task 的作用域校验和工具返回格式。
 
 ## 5. 后续需要补齐
 

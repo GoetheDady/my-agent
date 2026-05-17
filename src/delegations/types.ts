@@ -51,4 +51,6 @@ export interface DelegateTaskInput {
   targetAgentId: string;
   instruction: string;
   reason?: string;
+  planStepId?: string | null;
+  dependsOnTaskIds?: string[];
 }

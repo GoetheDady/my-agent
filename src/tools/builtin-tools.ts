@@ -8,6 +8,7 @@ import { createAgentTools } from '../agents/tools';
 import { createMemoryTools, memoryTools, type MemoryToolContext } from '../memory/memory-tools';
 import { createHumanMemoryTools } from '../memory/human-memory-tools';
 import { createSkillTools } from '../skills';
+import { createTaskTools } from '../tasks/task-tools';
 import { evaluateToolPolicy } from './policy';
 import { buildAiToolSet, registerTool } from './registry';
 import { withToolAudit } from './audit';
@@ -67,6 +68,12 @@ const toolsetByName = new Map<string, string>([
   ['agent_config_get', 'agent_config'],
   ['agent_config_patch', 'agent_config'],
   ['agent_config_reset', 'agent_config'],
+  ['task_plan_get', 'runtime'],
+  ['task_plan_set', 'runtime'],
+  ['task_step_update', 'runtime'],
+  ['task_child_create', 'runtime'],
+  ['task_dependency_add', 'runtime'],
+  ['task_dependency_remove', 'runtime'],
 ]);
 
 /**
@@ -376,6 +383,45 @@ registerTool({
   category: 'write',
 });
 
+const taskTools = createTaskTools();
+
+registerTool({
+  name: 'task_plan_get',
+  tool: taskTools.task_plan_get,
+  toolset: 'runtime',
+  category: 'read',
+});
+registerTool({
+  name: 'task_plan_set',
+  tool: taskTools.task_plan_set,
+  toolset: 'runtime',
+  category: 'write',
+});
+registerTool({
+  name: 'task_step_update',
+  tool: taskTools.task_step_update,
+  toolset: 'runtime',
+  category: 'write',
+});
+registerTool({
+  name: 'task_child_create',
+  tool: taskTools.task_child_create,
+  toolset: 'runtime',
+  category: 'write',
+});
+registerTool({
+  name: 'task_dependency_add',
+  tool: taskTools.task_dependency_add,
+  toolset: 'runtime',
+  category: 'write',
+});
+registerTool({
+  name: 'task_dependency_remove',
+  tool: taskTools.task_dependency_remove,
+  toolset: 'runtime',
+  category: 'write',
+});
+
 /**
  * 默认工具集合。
  *
@@ -408,6 +454,7 @@ export function buildAgentTools(context: MemoryToolContext = {}) {
     ...createSkillTools(context),
     ...createAgentTools(context),
     ...createAgentConfigTools(context),
+    ...createTaskTools(context),
   };
 
   return Object.fromEntries(

@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { defaultAgentService } from "../agents/service";
 import { initializeDatabaseSchema } from "../core/database";
+import { getUnmetTaskDependencies, listTaskDependencies, setTaskPlan } from "../tasks/task-plan-store";
 import { createTask, getTask } from "../tasks/task-store";
 import { DelegationService } from "./service";
 
@@ -51,6 +52,77 @@ describe("DelegationService", () => {
 
     expect(delegation.status).toBe("queued");
     expect(delegation.childAgentId).toBe("researcher");
+    expect(getTask(delegation.childTaskId, db)?.status).toBe("queued");
+  });
+
+  test("delegateTask can bind a child task to a plan step", () => {
+    const parentTask = createTask({
+      agent_id: "default",
+      source_channel: "web",
+      source_user_id: "default",
+      input: "委派",
+    }, db);
+    const [step] = setTaskPlan(parentTask.id, [{ title: "研究", detail: "交给 researcher" }], db);
+    const service = new DelegationService({ database: db, autoStart: false });
+
+    const delegation = service.delegateTask({
+      parentAgentId: "default",
+      parentTaskId: parentTask.id,
+      sourceChannel: "web",
+      sourceUserId: "default",
+      targetAgentId: "researcher",
+      instruction: "研究实现",
+      planStepId: step.id,
+    });
+
+    expect(getTask(delegation.childTaskId, db)).toMatchObject({
+      parent_task_id: parentTask.id,
+      plan_step_id: step.id,
+      source_channel: "delegation",
+    });
+  });
+
+  test("delegateTask writes dependencies before auto-start can claim the child", async () => {
+    const parentTask = createTask({
+      agent_id: "default",
+      source_channel: "web",
+      source_user_id: "default",
+      input: "委派",
+    }, db);
+    const blocker = createTask({
+      id: "blocker",
+      agent_id: "researcher",
+      parent_task_id: parentTask.id,
+      source_channel: "web",
+      source_user_id: "default",
+      input: "blocker",
+    }, db);
+    const calls: string[] = [];
+    const service = new DelegationService({
+      database: db,
+      autoStart: true,
+      internalRunner: async ({ task }) => {
+        calls.push(task.id);
+        return { task, text: "ran" };
+      },
+    });
+
+    const delegation = service.delegateTask({
+      parentAgentId: "default",
+      parentTaskId: parentTask.id,
+      sourceChannel: "web",
+      sourceUserId: "default",
+      targetAgentId: "researcher",
+      instruction: "blocked child",
+      dependsOnTaskIds: [blocker.id],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(listTaskDependencies(delegation.childTaskId, db)).toMatchObject([
+      { task_id: delegation.childTaskId, depends_on_task_id: blocker.id },
+    ]);
+    expect(getUnmetTaskDependencies(delegation.childTaskId, db)).toHaveLength(1);
+    expect(calls).toEqual([]);
     expect(getTask(delegation.childTaskId, db)?.status).toBe("queued");
   });
 
