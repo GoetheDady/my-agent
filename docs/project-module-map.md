@@ -41,11 +41,11 @@
 | M2 | Agent Identity & Config | Agent 是谁、允许做什么 | 已有基础 | 配置边界清晰、可版本化 |
 | M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1 和 Agent planning tools，已有模块文档 | 增加自动规划、复杂依赖和 Episode 输入契约 |
 | M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation 和工具审计事件已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
-| M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder，包含 Task planning tools 指引，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
+| M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder、Task planning tools 指引和父任务汇总上下文预算，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
 | M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批、工具调用审计和 Runtime planning tools，已有模块文档 | 权限更细、工具失败更可恢复 |
 | M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker 和 Episode v1；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
-| M9 | Skill System | Agent 如何沉淀可复用做法 | 已有三类 Skill | 生命周期、安全、统计和推荐完整化 |
+| M9 | [Skill System](./modules/m9-skill-system.md) | Agent 如何沉淀可复用做法 | 已有三类 Skill、provenance/usage 元数据和 episode skill candidate，已有模块文档 | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件和工具调用审计，已有模块文档 | 事件规范、查询、诊断和回放更强 |
 | M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，微信 stub，已有模块文档 | 多渠道生产化 |
 | M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，支持 plan step child task 和 child task 依赖，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
@@ -239,13 +239,14 @@ src/prompts/
 - 注入工具说明。
 - 避免直接把全部记忆塞进 prompt。
 - 指引复杂任务使用 `task_plan_set`、`task_step_update` 和 `task_child_create` 写入结构化计划。
+- 父任务汇总上下文会按预算压缩 parent input、plan steps、直接 child task 结果/错误和 episode 摘要，避免把完整事件流水放进 prompt。
 
 ### 还需要补齐
 
-- 上下文预算管理。
+- 更完整的全局上下文预算管理。
 - Skill 自动选择策略。
 - 记忆召回选择策略。
-- Task history 摘要策略。
+- Task history 与事件流水的通用摘要策略。
 - 多渠道上下文格式统一。
 - Prompt 版本记录和回归测试。
 
@@ -408,11 +409,11 @@ skills/builtin/
 
 ### 还需要补齐
 
-- Skill 使用统计。
-- Skill 成功率和失败率。
+- Skill candidate 的 UI 审查、接受、拒绝和转正式 Skill 流程。
+- Skill 内容 diff 和远程更新风险审批。
 - Skill 版本历史。
 - Skill 安全扫描。
-- Skill 推荐创建机制。
+- 相似 Skill 合并建议。
 - Skill 重复检测和合并建议。
 - 远程 Skill 更新前后的 diff 和审批。
 - Skill 生命周期：active、stale、archived。

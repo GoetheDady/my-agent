@@ -55,9 +55,16 @@ src/runtime/internal-runner.ts
 - 注入 `soul.md` 和 `user.md` 稳定上下文。
 - 注入当前 Agent 的 Skill index。
 - 注入当前 Task 的 working memory。
+- 为父任务汇总构造受预算限制的结构化上下文，包含 plan steps、直接 child task 结果/错误摘要、delegation callback 信息和已有 episode 摘要。
 - 明确长期记忆不会整体塞进 prompt，必须通过 `memory_recall`、`memory_evidence` 等工具查询。
 - 明确 Agent 配置必须通过 `agent_config_get` / `agent_config_patch` 访问和修改。
 - 明确普通异步委派使用 `agent_delegate`，并说明不等待目标 Agent 同步完成。
+
+本轮 M3/M12 父任务汇总上下文改动对 Prompt & Context 的影响：
+
+- 新增 `task-context-summary.ts`，用 `TASK_CONTEXT_BUDGETS` 控制父任务输入、step、child input/result/error 和 episode 摘要长度。
+- `buildSummaryTaskMessages()` 只把结构化摘要交给模型，不把完整事件流水塞进 prompt。
+- 汇总 prompt 明确要求父 Agent 说明子任务完成、失败或取消情况，并禁止继续委派或创建新的子任务。
 
 本轮 M3 Task Planning Tools v1 改动对 Prompt & Context 的影响：
 
@@ -80,9 +87,9 @@ Prompt & Context 只告诉模型如何使用能力，不保存能力状态。
 ## 5. 后续需要补齐
 
 - Prompt 版本记录。
-- 上下文预算管理。
+- 更完整的全局上下文预算管理。
 - Skill 自动选择策略。
 - 记忆召回选择策略。
-- Task history 摘要策略。
+- Task history 与事件流水的通用摘要策略。
 - 多渠道上下文格式统一。
 - Prompt 回归评估，验证关键工具指引不会被后续修改破坏。
