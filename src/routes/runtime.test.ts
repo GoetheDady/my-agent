@@ -7,6 +7,7 @@ import { appendEvent, listTaskEvents } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { claimTask } from "../tasks/task-queue";
 import { createTask, getTask, markTaskCompleted, markTaskFailed, markTaskRunning, updateTaskProgress } from "../tasks/task-store";
+import { addTaskDependency, setTaskPlan } from "../tasks/task-plan-store";
 import { createRuntimeRoutes } from "./runtime";
 
 function withRuntimeApp<T>(run: (app: Hono, db: Database) => T | Promise<T>): Promise<T> {
@@ -140,6 +141,125 @@ describe("runtime routes", () => {
       expect(body.timeline.map((item) => item.createdAt)).toEqual(
         [...body.timeline.map((item) => item.createdAt)].sort((a, b) => a - b),
       );
+    });
+  });
+
+  test("GET /runtime/tasks/:id/timeline returns plan, dependencies, and children", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "parent", source_channel: "web", input: "parent", created_at: 100 }, db);
+      createTask({ id: "blocker", source_channel: "web", input: "blocker", created_at: 101 }, db);
+      const [step] = setTaskPlan("parent", [{ title: "子任务", detail: "由 child 完成" }], db);
+      createTask({
+        id: "child",
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+        source_channel: "delegation",
+        input: "child",
+        created_at: 102,
+      }, db);
+      addTaskDependency("parent", "blocker", "等待 blocker", db);
+
+      const res = await app.request("/runtime/tasks/parent/timeline");
+      const body = await res.json() as {
+        plan: { steps: Array<{ title: string; child_task_id: string | null }> };
+        dependencies: Array<{ depends_on_task_id: string; reason: string }>;
+        children: Array<{ id: string }>;
+      };
+
+      expect(res.status).toBe(200);
+      expect(body.plan.steps).toEqual([
+        expect.objectContaining({ title: "子任务", child_task_id: "child" }),
+      ]);
+      expect(body.dependencies).toEqual([
+        expect.objectContaining({ depends_on_task_id: "blocker", reason: "等待 blocker" }),
+      ]);
+      expect(body.children).toEqual([expect.objectContaining({ id: "child" })]);
+    });
+  });
+
+  test("task plan routes read and replace plans", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+
+      const putRes = await app.request("/runtime/tasks/task-1/plan", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          steps: [
+            { title: "读取上下文", detail: "read" },
+            { title: "实现", detail: "" },
+          ],
+        }),
+      });
+      const getRes = await app.request("/runtime/tasks/task-1/plan");
+      const body = await getRes.json() as { steps: Array<{ title: string; step_index: number }> };
+
+      expect(putRes.status).toBe(200);
+      expect(getRes.status).toBe(200);
+      expect(body.steps.map((step) => [step.step_index, step.title])).toEqual([
+        [0, "读取上下文"],
+        [1, "实现"],
+      ]);
+    });
+  });
+
+  test("PUT /runtime/tasks/:id/plan rejects replacing a plan with child tasks", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "parent", source_channel: "web", input: "parent" }, db);
+      const [step] = setTaskPlan("parent", [{ title: "child", detail: "" }], db);
+      createTask({
+        id: "child",
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+        source_channel: "delegation",
+        input: "child",
+      }, db);
+
+      const res = await app.request("/runtime/tasks/parent/plan", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ steps: [{ title: "新计划" }] }),
+      });
+      const body = await res.json() as { error: string };
+
+      expect(res.status).toBe(409);
+      expect(body.error).toBe("已有步骤关联子任务，不能直接覆盖计划。");
+    });
+  });
+
+  test("dependency routes add and remove dependencies", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+      createTask({ id: "blocker", source_channel: "web", input: "blocker" }, db);
+
+      const addRes = await app.request("/runtime/tasks/task-1/dependencies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dependsOnTaskId: "blocker", reason: "等待 blocker" }),
+      });
+      const addBody = await addRes.json() as { dependency: { depends_on_task_id: string } };
+
+      const deleteRes = await app.request("/runtime/tasks/task-1/dependencies/blocker", { method: "DELETE" });
+
+      expect(addRes.status).toBe(200);
+      expect(addBody.dependency.depends_on_task_id).toBe("blocker");
+      expect(deleteRes.status).toBe(200);
+    });
+  });
+
+  test("dependency route returns 409 for invalid dependencies", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+
+      const res = await app.request("/runtime/tasks/task-1/dependencies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dependsOnTaskId: "task-1" }),
+      });
+      const body = await res.json() as { error: string };
+
+      expect(res.status).toBe(409);
+      expect(body.error).toBe("任务不能依赖自己。");
     });
   });
 

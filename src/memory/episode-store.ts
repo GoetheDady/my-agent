@@ -420,6 +420,33 @@ function extractKeySteps(task: TaskRecord, events: RuntimeEvent[]): string[] {
   for (const event of events) {
     const payload = parsePayload(event.payload);
     if (event.type === "task.started") steps.push("任务开始执行");
+    if (event.type === "task.plan.updated") {
+      for (const title of planStepTitles(payload)) {
+        steps.push(`计划步骤：${title}`);
+      }
+    }
+    if (event.type === "task.step.updated") {
+      const title = stringValue(payload.title);
+      const status = stringValue(payload.status);
+      if (title && status) steps.push(`步骤${taskStepStatusLabel(status)}：${title}`);
+    }
+    if (event.type === "task.dependency.added") {
+      const dependsOnTaskId = stringValue(payload.dependsOnTaskId);
+      if (dependsOnTaskId) steps.push(`添加依赖：${dependsOnTaskId}`);
+    }
+    if (event.type === "task.dependency.removed") {
+      const dependsOnTaskId = stringValue(payload.dependsOnTaskId);
+      if (dependsOnTaskId) steps.push(`移除依赖：${dependsOnTaskId}`);
+    }
+    if (event.type === "task.dependency.blocked") {
+      for (const blockerId of blockerTaskIds(payload)) {
+        steps.push(`等待依赖：${blockerId}`);
+      }
+    }
+    if (event.type === "task.child.created") {
+      const childTaskId = stringValue(payload.childTaskId);
+      if (childTaskId) steps.push(`创建子任务：${childTaskId}`);
+    }
     if (event.type === "task.progress.updated") {
       const message = stringValue(payload.progressMessage) ?? stringValue(payload.progressStatus);
       if (message) steps.push(`进度：${message}`);
@@ -445,6 +472,40 @@ function extractKeySteps(task: TaskRecord, events: RuntimeEvent[]): string[] {
   }
   if (steps.length === 0) steps.push(`任务进入终态：${taskStatusLabel(task.status)}`);
   return uniqueStrings(steps).slice(0, 12);
+}
+
+function planStepTitles(payload: Record<string, unknown>): string[] {
+  const steps = payload.steps;
+  if (!Array.isArray(steps)) return [];
+  return steps
+    .map((step) => {
+      if (!step || typeof step !== "object" || Array.isArray(step)) return null;
+      return stringValue((step as Record<string, unknown>).title);
+    })
+    .filter((title): title is string => Boolean(title));
+}
+
+function blockerTaskIds(payload: Record<string, unknown>): string[] {
+  const blockers = payload.blockers;
+  if (!Array.isArray(blockers)) return [];
+  return blockers
+    .map((blocker) => {
+      if (!blocker || typeof blocker !== "object" || Array.isArray(blocker)) return null;
+      return stringValue((blocker as Record<string, unknown>).taskId);
+    })
+    .filter((taskId): taskId is string => Boolean(taskId));
+}
+
+function taskStepStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "待执行",
+    running: "执行中",
+    completed: "完成",
+    failed: "失败",
+    canceled: "取消",
+    skipped: "跳过",
+  };
+  return labels[status] ?? status;
 }
 
 function extractProblems(task: TaskRecord, events: RuntimeEvent[]): string[] {

@@ -17,7 +17,7 @@ export const TASK_LEASE_MS = 60_000;
 export const TASK_LEASE_RENEW_INTERVAL_MS = 20_000;
 
 export const TASK_SELECT_COLUMNS = `
-  id, agent_id, conversation_id, source_channel, source_user_id, status,
+  id, agent_id, parent_task_id, plan_step_id, conversation_id, source_channel, source_user_id, status,
   priority, input, result, error, created_at, started_at, completed_at,
   attempt_count, max_attempts, lease_expires_at, idempotency_key, canceled_at,
   failure_type, failure_stage, retriable, progress_status, progress_message, last_progress_at
@@ -26,6 +26,8 @@ export const TASK_SELECT_COLUMNS = `
 export interface CreateTaskInput {
   id?: string;
   agent_id?: string;
+  parent_task_id?: string | null;
+  plan_step_id?: string | null;
   conversation_id?: string | null;
   source_channel: string;
   source_user_id?: string;
@@ -82,6 +84,8 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
   const task: TaskRecord = {
     id: input.id ?? crypto.randomUUID(),
     agent_id: input.agent_id ?? "default",
+    parent_task_id: input.parent_task_id ?? null,
+    plan_step_id: input.plan_step_id ?? null,
     conversation_id: input.conversation_id ?? null,
     source_channel: input.source_channel,
     source_user_id: input.source_user_id ?? "default",
@@ -115,16 +119,18 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
     database
       .query(
         `INSERT INTO tasks (
-           id, agent_id, conversation_id, source_channel, source_user_id, status,
+           id, agent_id, parent_task_id, plan_step_id, conversation_id, source_channel, source_user_id, status,
            priority, input, result, error, created_at, started_at, completed_at,
            attempt_count, max_attempts, lease_expires_at, idempotency_key, canceled_at,
            failure_type, failure_stage, retriable, progress_status, progress_message, last_progress_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         task.id,
         task.agent_id,
+        task.parent_task_id,
+        task.plan_step_id,
         task.conversation_id,
         task.source_channel,
         task.source_user_id,
@@ -148,6 +154,30 @@ export function createTask(input: CreateTaskInput, database: Database = getDb())
         task.progress_message,
         task.last_progress_at,
       );
+    if (task.plan_step_id) {
+      database
+        .query(
+          `UPDATE task_steps
+           SET child_task_id = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(task.id, now, task.plan_step_id);
+    }
+    if (task.parent_task_id) {
+      const parentTask = getTask(task.parent_task_id, database);
+      appendEvent({
+        agent_id: parentTask?.agent_id ?? task.agent_id,
+        task_id: task.parent_task_id,
+        conversation_id: parentTask?.conversation_id ?? task.conversation_id,
+        type: "task.child.created",
+        payload: {
+          childTaskId: task.id,
+          planStepId: task.plan_step_id,
+          sourceChannel: task.source_channel,
+        },
+        created_at: now,
+      }, database);
+    }
     return task;
   });
 
@@ -436,6 +466,7 @@ export function markTaskCanceled(
       payload: { failureType, failureStage: "cancel", retriable: false, requestedBy },
       created_at: now,
     }, targetDatabase);
+    syncLinkedPlanStepStatus(task, "canceled", targetDatabase, now);
     scheduleQueueDrain(task);
   });
 
@@ -765,6 +796,7 @@ function completeTask(
         created_at: now,
       }, database);
     }
+    syncLinkedPlanStepStatus(task, status, database, now);
     scheduleQueueDrain(task);
   });
 
@@ -911,6 +943,60 @@ function broadcastTaskUpdated(task: TaskRecord): void {
     payload: { task },
     createdAt: Date.now(),
   });
+}
+
+function syncLinkedPlanStepStatus(
+  task: TaskRecord,
+  status: "completed" | "failed" | "canceled",
+  database: Database,
+  now: number,
+): void {
+  if (!task.plan_step_id) return;
+  const step = database
+    .query<{
+      id: string;
+      task_id: string;
+      step_index: number;
+      title: string;
+      child_task_id: string | null;
+      parent_agent_id: string;
+      parent_conversation_id: string | null;
+    }, [string]>(
+      `SELECT
+         step.id,
+         step.task_id,
+         step.step_index,
+         step.title,
+         step.child_task_id,
+         parent.agent_id AS parent_agent_id,
+         parent.conversation_id AS parent_conversation_id
+       FROM task_steps step
+       JOIN tasks parent ON parent.id = step.task_id
+       WHERE step.id = ?`,
+    )
+    .get(task.plan_step_id);
+  if (!step) return;
+  database
+    .query(
+      `UPDATE task_steps
+       SET status = ?, child_task_id = COALESCE(child_task_id, ?), updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(status, task.id, now, step.id);
+  appendEvent({
+    agent_id: step.parent_agent_id,
+    task_id: step.task_id,
+    conversation_id: step.parent_conversation_id,
+    type: "task.step.updated",
+    payload: {
+      stepId: step.id,
+      stepIndex: step.step_index,
+      title: step.title,
+      status,
+      childTaskId: step.child_task_id ?? task.id,
+    },
+    created_at: now,
+  }, database);
 }
 
 function scheduleQueueDrain(task: TaskRecord): void {

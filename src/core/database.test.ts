@@ -91,6 +91,8 @@ describe("runtime database schema", () => {
       expect(readTableColumns(db, "tasks")).toEqual([
         ["id", "TEXT", 0, null, 1],
         ["agent_id", "TEXT", 1, null, 0],
+        ["parent_task_id", "TEXT", 0, null, 0],
+        ["plan_step_id", "TEXT", 0, null, 0],
         ["conversation_id", "TEXT", 0, null, 0],
         ["source_channel", "TEXT", 1, null, 0],
         ["source_user_id", "TEXT", 1, "'default'", 0],
@@ -113,6 +115,25 @@ describe("runtime database schema", () => {
         ["progress_status", "TEXT", 1, "'waiting'", 0],
         ["progress_message", "TEXT", 1, "''", 0],
         ["last_progress_at", "INTEGER", 0, null, 0],
+      ]);
+
+      expect(readTableColumns(db, "task_steps")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["task_id", "TEXT", 1, null, 0],
+        ["step_index", "INTEGER", 1, null, 0],
+        ["title", "TEXT", 1, null, 0],
+        ["detail", "TEXT", 1, "''", 0],
+        ["status", "TEXT", 1, "'pending'", 0],
+        ["child_task_id", "TEXT", 0, null, 0],
+        ["created_at", "INTEGER", 1, null, 0],
+        ["updated_at", "INTEGER", 1, null, 0],
+      ]);
+
+      expect(readTableColumns(db, "task_dependencies")).toEqual([
+        ["task_id", "TEXT", 1, null, 1],
+        ["depends_on_task_id", "TEXT", 1, null, 2],
+        ["reason", "TEXT", 1, "''", 0],
+        ["created_at", "INTEGER", 1, null, 0],
       ]);
 
       expect(readTableColumns(db, "events")).toEqual([
@@ -247,7 +268,19 @@ describe("runtime database schema", () => {
   test("creates runtime foreign keys", () => {
     withSchemaDb((db) => {
       expect(readForeignKeys(db, "tasks")).toEqual([
+        { table: "task_steps", from: "plan_step_id", to: "id", on_delete: "NO ACTION" },
+        { table: "tasks", from: "parent_task_id", to: "id", on_delete: "NO ACTION" },
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
+      ]);
+
+      expect(readForeignKeys(db, "task_steps")).toEqual([
+        { table: "tasks", from: "child_task_id", to: "id", on_delete: "NO ACTION" },
+        { table: "tasks", from: "task_id", to: "id", on_delete: "NO ACTION" },
+      ]);
+
+      expect(readForeignKeys(db, "task_dependencies")).toEqual([
+        { table: "tasks", from: "depends_on_task_id", to: "id", on_delete: "NO ACTION" },
+        { table: "tasks", from: "task_id", to: "id", on_delete: "NO ACTION" },
       ]);
 
       expect(readForeignKeys(db, "sessions")).toEqual([]);
@@ -301,6 +334,10 @@ describe("runtime database schema", () => {
         "created_at",
       ]);
       expect(readIndexColumns(db, "idx_tasks_idempotency_key")).toEqual(["idempotency_key"]);
+      expect(readIndexColumns(db, "idx_tasks_parent")).toEqual(["parent_task_id"]);
+      expect(readIndexColumns(db, "idx_task_steps_task")).toEqual(["task_id", "step_index"]);
+      expect(readIndexColumns(db, "idx_task_steps_child")).toEqual(["child_task_id"]);
+      expect(readIndexColumns(db, "idx_task_dependencies_depends_on")).toEqual(["depends_on_task_id"]);
       expect(readIndexColumns(db, "idx_events_agent_created")).toEqual(["agent_id", "created_at"]);
       expect(readIndexColumns(db, "idx_events_task_created")).toEqual(["task_id", "created_at"]);
       expect(readIndexColumns(db, "idx_sessions_agent_updated")).toEqual(["agent_id", "updated_at"]);

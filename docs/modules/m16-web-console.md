@@ -99,6 +99,7 @@ src/routes/memory.ts
 
 - Task 卡片可选中，并通过 `GET /api/runtime/tasks/:id/timeline` 加载单个任务详情。
 - 详情面板展示任务输入、状态、Agent、渠道、attempt、lease、失败分类、当前工具、最近输出、episode 摘要和正序事件时间线。
+- 详情面板会展示 Task Plan steps、Dependency blockers 和 child tasks；blocked task 会通过 progress message 解释正在等待依赖。
 - Watchdog 提醒如果能定位到 task，会点击打开对应任务详情。
 - 这仍是观察面能力；前端不保存新的任务状态，也不重新实现 Task / Event / Episode 业务规则。
 
@@ -112,7 +113,7 @@ src/routes/memory.ts
 ## 6. 后续需要补齐
 
 - Task timeline 已有 v1，后续补事件过滤、payload 展开和跨父子任务串联。
-- Task 详情页已有基础，后续补更强的诊断建议、重试入口和事件 payload 展开。
+- Task 详情页已有基础，后续补更强的诊断建议、重试入口、事件 payload 展开和计划编辑入口。
 - 控制台级实时连接：直接进入 `/console` 时也应建立订阅或 fallback 轮询。
 - Watchdog 提醒详情页：从提示跳转到对应 task/event 时间线。
 - Agent 切换器：控制台侧边栏需要能显式切换当前 Agent，而不只显示当前 Agent。

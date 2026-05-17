@@ -6,6 +6,14 @@ import { listAgentEvents, listTaskEvents } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { getTaskTimeline } from "../runtime/task-timeline";
 import { getTask, listTasks, markTaskCanceled, retryTask } from "../tasks/task-store";
+import {
+  addTaskDependency,
+  listTaskDependencies,
+  listTaskSteps,
+  removeTaskDependency,
+  setTaskPlan,
+  type TaskPlanStepInput,
+} from "../tasks/task-plan-store";
 import type { TaskStatus } from "../tasks/task-types";
 import { runTaskWatchdogOnce } from "../tasks/watchdog";
 
@@ -62,6 +70,56 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     const task = getTask(taskId, database);
     if (!task) return c.json({ error: "任务不存在。" }, 404);
     return c.json({ events: listTaskEvents(taskId, database) });
+  });
+
+  app.get("/tasks/:id/plan", (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    return c.json({
+      steps: listTaskSteps(taskId, database),
+      dependencies: listTaskDependencies(taskId, database),
+    });
+  });
+
+  app.put("/tasks/:id/plan", async (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    const body = await readJsonObject(c.req.raw);
+    const steps = Array.isArray(body.steps)
+      ? body.steps.map(toTaskPlanStepInput)
+      : [];
+    try {
+      return c.json({ steps: setTaskPlan(taskId, steps, database) });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.post("/tasks/:id/dependencies", async (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    const body = await readJsonObject(c.req.raw);
+    const dependsOnTaskId = typeof body.dependsOnTaskId === "string"
+      ? body.dependsOnTaskId
+      : "";
+    const reason = typeof body.reason === "string" ? body.reason : "";
+    try {
+      return c.json({ dependency: addTaskDependency(taskId, dependsOnTaskId, reason, database) });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.delete("/tasks/:id/dependencies/:dependsOnTaskId", (c) => {
+    const taskId = c.req.param("id");
+    const task = getTask(taskId, database);
+    if (!task) return c.json({ error: "任务不存在。" }, 404);
+    return c.json({
+      removed: removeTaskDependency(taskId, c.req.param("dependsOnTaskId"), database),
+    });
   });
 
   app.get("/events", (c) => {
@@ -121,4 +179,25 @@ async function readJsonBody(request: Request): Promise<{ force?: boolean }> {
   } catch {
     return {};
   }
+}
+
+async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const parsed = await request.json() as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function toTaskPlanStepInput(value: unknown): TaskPlanStepInput {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    title: typeof record.title === "string" ? record.title : "",
+    detail: typeof record.detail === "string" ? record.detail : "",
+  };
 }

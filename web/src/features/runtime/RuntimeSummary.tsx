@@ -392,6 +392,7 @@ function TaskDetailPanel({
           </div>
         )}
 
+        <TaskPlanSummary timeline={timeline} />
         <EpisodeSummary episode={episode} />
         <TimelineList items={timeline.timeline} />
       </div>
@@ -404,6 +405,76 @@ function DetailRow({ label, value }: { label: string; value: string | null }) {
     <div className="rounded-lg bg-[var(--color-surface-subtle)] px-3 py-2">
       <div className="text-[11px] text-[var(--color-text-soft)]">{label}</div>
       <div className="mt-1 break-words text-sm font-medium text-[var(--color-text)]">{value || "-"}</div>
+    </div>
+  );
+}
+
+function TaskPlanSummary({ timeline }: { timeline: RuntimeTaskTimelineResponse }) {
+  const steps = timeline.plan?.steps ?? [];
+  const dependencies = timeline.dependencies ?? [];
+  const children = timeline.children ?? [];
+  if (steps.length === 0 && dependencies.length === 0 && children.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-[var(--color-border-soft)] px-3 py-3">
+      <div className="text-sm font-semibold text-[var(--color-text)]">任务计划</div>
+      {dependencies.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-[var(--color-text-soft)]">依赖</div>
+          <div className="mt-1 space-y-1">
+            {dependencies.map((dependency) => (
+              <div key={dependency.depends_on_task_id} className="flex items-center justify-between gap-2 text-sm text-[var(--color-text-muted)]">
+                <span className="min-w-0 truncate">
+                  {dependency.reason || dependency.depends_on_input || dependency.depends_on_task_id}
+                </span>
+                <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${taskStatusClass(dependency.depends_on_status)}`}>
+                  {taskStatusLabel(dependency.depends_on_status)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {steps.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-[var(--color-text-soft)]">步骤</div>
+          <div className="mt-1 space-y-2">
+            {steps.map((step) => (
+              <div key={step.id} className="rounded-md bg-[var(--color-surface-subtle)] px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">
+                    {step.step_index + 1}. {step.title}
+                  </span>
+                  <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${stepStatusClass(step.status)}`}>
+                    {stepStatusLabel(step.status)}
+                  </span>
+                </div>
+                {step.detail && (
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)]">{step.detail}</div>
+                )}
+                {step.child_task_id && (
+                  <div className="mt-1 font-mono text-[11px] text-[var(--color-text-soft)]">child: {step.child_task_id}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {children.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-[var(--color-text-soft)]">子任务</div>
+          <div className="mt-1 space-y-1">
+            {children.map((child) => (
+              <div key={child.id} className="flex items-center justify-between gap-2 text-sm text-[var(--color-text-muted)]">
+                <span className="min-w-0 truncate">{child.input}</span>
+                <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold ${taskStatusClass(child.status)}`}>
+                  {taskStatusLabel(child.status)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -545,6 +616,30 @@ function taskStatusClass(status: RuntimeTask["status"]) {
     completed: "bg-[var(--color-success-soft)] text-[var(--color-success)]",
     failed: "bg-[var(--color-danger-soft)] text-[var(--color-danger)]",
     canceled: "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
+  };
+  return classes[status];
+}
+
+function stepStatusLabel(status: RuntimeTaskTimelineResponse["plan"]["steps"][number]["status"]) {
+  const labels: Record<RuntimeTaskTimelineResponse["plan"]["steps"][number]["status"], string> = {
+    pending: "待执行",
+    running: "执行中",
+    completed: "完成",
+    failed: "失败",
+    canceled: "取消",
+    skipped: "跳过",
+  };
+  return labels[status];
+}
+
+function stepStatusClass(status: RuntimeTaskTimelineResponse["plan"]["steps"][number]["status"]) {
+  const classes: Record<RuntimeTaskTimelineResponse["plan"]["steps"][number]["status"], string> = {
+    pending: "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
+    running: "bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
+    completed: "bg-[var(--color-success-soft)] text-[var(--color-success)]",
+    failed: "bg-[var(--color-danger-soft)] text-[var(--color-danger)]",
+    canceled: "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
+    skipped: "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
   };
   return classes[status];
 }

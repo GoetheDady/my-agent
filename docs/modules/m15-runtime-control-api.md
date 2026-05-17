@@ -53,6 +53,10 @@ Runtime 控制面 (`src/routes/runtime.ts`)：
 - `GET /api/runtime/tasks/:id`
 - `GET /api/runtime/tasks/:id/events`
 - `GET /api/runtime/tasks/:id/timeline`
+- `GET /api/runtime/tasks/:id/plan`
+- `PUT /api/runtime/tasks/:id/plan`
+- `POST /api/runtime/tasks/:id/dependencies`
+- `DELETE /api/runtime/tasks/:id/dependencies/:dependsOnTaskId`
 - `POST /api/runtime/watchdog/run`
 - `POST /api/runtime/tasks/:id/retry`
 - `POST /api/runtime/tasks/:id/cancel`
@@ -73,6 +77,9 @@ Memory 观察面 (`src/routes/memory.ts`)：
 - Watchdog 会通过 Runtime events 暴露 `task.watchdog.*` 和 `agent.watchdog.repaired`，用于解释自动取消、恢复、告警或 Agent 状态修复。
 - 该接口不新增业务规则，只复用 Task System 的 watchdog 实现；正常控制动作仍应通过 Task Store 和 Runtime API 完成。
 - 新增 `GET /api/runtime/tasks/:id/timeline`，返回 Task、Episode、当前进度视图和事件时间线。它是只读聚合接口，不新增数据源。
+- Task timeline 响应现在包含 `plan.steps`、`dependencies` 和 `children`，用于解释单个任务的计划、阻塞原因和子任务。
+- 新增 Task Plan / Dependency 控制面 API：可读取/替换计划步骤、添加依赖和删除依赖。缺失 task 返回 404；计划覆盖冲突或依赖校验失败返回 409。
+- `PUT /tasks/:id/plan` 在已有步骤关联 child task 时返回 409，避免覆盖计划后留下 orphan child task。
 
 本轮 M7 改动对 API 的影响：
 
@@ -81,7 +88,7 @@ Memory 观察面 (`src/routes/memory.ts`)：
 
 ## 4. 后续需要补齐
 
-- Task timeline v1 已有，后续补过滤、分页和 payload schema。
+- Task timeline v1 已有，后续补过滤、分页、payload schema 和跨父子任务串联。
 - running task 当前步骤视图已有基础，后续补模型 step、token 用量和更细工具状态。
 - 控制动作审计筛选。
 - 运行诊断接口。

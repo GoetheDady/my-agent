@@ -4,7 +4,12 @@ import { listTaskEvents } from "../events/event-log";
 import type { RuntimeEvent } from "../events/event-types";
 import { getEpisodeByTaskId, type EpisodeRecord } from "../memory/episode-store";
 import { getTask } from "../tasks/task-store";
-import type { TaskRecord } from "../tasks/task-types";
+import {
+  listChildTasks,
+  listTaskDependencies,
+  listTaskSteps,
+} from "../tasks/task-plan-store";
+import type { TaskDependencyRecord, TaskRecord, TaskStepRecord } from "../tasks/task-types";
 
 export type RuntimeTaskTimelineKind =
   | "task"
@@ -49,6 +54,11 @@ export interface RuntimeTaskTimelineResponse {
   task: TaskRecord;
   episode: EpisodeRecord | null;
   current: RuntimeTaskCurrentView;
+  plan: {
+    steps: TaskStepRecord[];
+  };
+  dependencies: TaskDependencyRecord[];
+  children: TaskRecord[];
   timeline: RuntimeTaskTimelineItem[];
 }
 
@@ -65,6 +75,11 @@ export function getTaskTimeline(
     task,
     episode,
     current: buildCurrentView(task, events),
+    plan: {
+      steps: listTaskSteps(taskId, database),
+    },
+    dependencies: listTaskDependencies(taskId, database),
+    children: listChildTasks(taskId, database),
     timeline: events.map(toTimelineItem),
   };
 }
@@ -158,6 +173,12 @@ function eventTone(event: RuntimeEvent, payload: Record<string, unknown>): Runti
 function eventTitle(event: RuntimeEvent): string {
   const labels: Record<string, string> = {
     "task.created": "任务入队",
+    "task.plan.updated": "任务计划更新",
+    "task.step.updated": "任务步骤更新",
+    "task.dependency.added": "任务依赖添加",
+    "task.dependency.removed": "任务依赖移除",
+    "task.dependency.blocked": "等待依赖",
+    "task.child.created": "子任务创建",
     "task.started": "任务开始",
     "task.completed": "任务完成",
     "task.failed": "任务失败",
@@ -193,12 +214,14 @@ function eventTitle(event: RuntimeEvent): string {
 
 function eventDetail(event: RuntimeEvent, payload: Record<string, unknown>): string {
   return stringValue(payload.progressMessage)
+    ?? stringValue(payload.title)
+    ?? stringValue(payload.dependsOnTaskId)
+    ?? stringValue(payload.childTaskId)
     ?? stringValue(payload.toolName)
     ?? stringValue(payload.reason)
     ?? stringValue(payload.error)
     ?? stringValue(payload.text)
     ?? stringValue(payload.result)
-    ?? stringValue(payload.title)
     ?? stringValue(payload.episodeId)
     ?? event.type;
 }

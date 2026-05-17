@@ -5,6 +5,7 @@ import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
 import { createTask, markTaskRunning, markTaskCompleted, updateTaskProgress } from "../tasks/task-store";
+import { addTaskDependency, setTaskPlan } from "../tasks/task-plan-store";
 import { getTaskTimeline } from "./task-timeline";
 
 function withTimelineDb<T>(run: (db: Database) => T | Promise<T>): Promise<T> {
@@ -77,6 +78,33 @@ describe("task timeline", () => {
   test("returns null for a missing task", async () => {
     await withTimelineDb((db) => {
       expect(getTaskTimeline("missing-task", db)).toBeNull();
+    });
+  });
+
+  test("includes plan steps, dependencies, and child tasks", async () => {
+    await withTimelineDb((db) => {
+      createTask({ id: "parent", source_channel: "web", input: "parent", created_at: 100 }, db);
+      createTask({ id: "blocker", source_channel: "web", input: "blocker", created_at: 101 }, db);
+      const [step] = setTaskPlan("parent", [{ title: "交给子任务", detail: "child work" }], db);
+      createTask({
+        id: "child",
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+        source_channel: "delegation",
+        input: "child",
+        created_at: 102,
+      }, db);
+      addTaskDependency("parent", "blocker", "等待 blocker", db);
+
+      const timeline = getTaskTimeline("parent", db);
+
+      expect(timeline?.plan.steps).toHaveLength(1);
+      expect(timeline?.plan.steps[0]).toMatchObject({
+        title: "交给子任务",
+        child_task_id: "child",
+      });
+      expect(timeline?.dependencies.map((dependency) => dependency.depends_on_task_id)).toEqual(["blocker"]);
+      expect(timeline?.children.map((task) => task.id)).toEqual(["child"]);
     });
   });
 });

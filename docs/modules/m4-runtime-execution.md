@@ -47,6 +47,7 @@ src/runtime/internal-runner.ts
 - 成功、失败、取消时释放 Agent。
 - Web 工具审批续跑时，UI message stream 会带上原始 `messages`，让 AI SDK 能把批准后的工具输出合并回上一条 assistant 消息，而不是在服务端丢失工具调用上下文。
 - 工具执行统一经过审计包装，执行前写 `tool.call`，执行后写 `tool.result`，并更新 Task progress metadata。
+- Runtime 领取任务时会尊重 Task Dependency；依赖未完成的 task 保持 queued，并通过 `blocked` progress 解释原因。
 
 本轮 M3 改动对 Runtime 的影响：
 
@@ -54,6 +55,7 @@ src/runtime/internal-runner.ts
 - Web runner 收到工具相关 stream chunk 时会切到 `using_tool`；internal runner 检测到工具结果后也会记录工具进度。
 - 模型错误、超时、客户端中断会写入结构化失败分类。
 - 客户端中断现在归为 `canceled`，并记录 `user_canceled / cancel / retriable=false`。
+- Task Plan / Dependency v1 后，Runtime 不负责自动拆解计划，只消费 Task Queue 给出的可运行任务。依赖 gating 属于 Task Queue，不绕过单 Agent 单线程模型。
 
 本轮 M7 改动对 Runtime 的影响：
 
@@ -65,5 +67,5 @@ src/runtime/internal-runner.ts
 
 - 更细的模型错误分类。
 - 执行上下文快照。
-- running task 的当前步骤和最近输出已有基础展示，后续需要进一步补模型步骤、token 用量和更细的工具失败语义。
+- running task 的当前步骤和最近输出已有基础展示；Task Plan step 已可展示结构化计划，后续需要进一步补模型 step、token 用量和更细的工具失败语义。
 - 审批续跑仍需要更完整的任务语义：当前会创建新的 runtime task 执行批准后的工具，后续可考虑把“等待审批”和“审批后继续”建模为同一 Task 的暂停/恢复。

@@ -51,6 +51,7 @@ src/memory/episode-store.ts
 - Dream Worker：按运行记录做每日整理和反思。
 - Episode v1：终态 Task 可生成经历摘要，并写入 `episode.created` / `episode.updated` / `episode.failed` 事件。
 - Episode 会从任务事件流提取工具使用和关键步骤，包括 `tool.call` / `tool.result` 中的工具名。
+- Episode 会从 Task Plan / Dependency 事件提取关键步骤，例如计划步骤、步骤状态、依赖阻塞和子任务创建。
 - Prospective memory 基础工具能力，用于记录未来计划或待办。
 
 本轮改动对 Memory System 的影响：
@@ -62,6 +63,7 @@ src/memory/episode-store.ts
 - Runtime 启动时会为缺失或状态过期的终态 task 补齐/刷新 episode，保证 retry 后仍维护同一条 episode。
 - 数据库 schema 已在 Core Runtime 初始化阶段补齐兼容迁移，老数据会获得默认值。
 - Task timeline API 会读取 `getEpisodeByTaskId()`，把 Episode 作为终态经历摘要展示；Episode 不是新的事实源，完整执行链路仍由 Event 提供。
+- Task Plan / Dependency v1 不新增 Episode 字段；经历摘要继续写入 `key_steps`、`problems` 和 `source_event_ids`。
 
 ## 4. 后续需要补齐
 

@@ -60,6 +60,14 @@ src/scripts/
 - Watchdog 默认每 60 秒巡检一次异常 Task 和 Agent 状态。
 - 启动时的 `recoverRunningTasks()` 仍保留在 Runtime 初始化流程；Watchdog 负责运行期间的持续巡检和审计事件写入。
 
+本轮 M3 Task Plan / Dependency v1 改动对 Core Runtime 的影响：
+
+- `tasks` 表新增 `parent_task_id` 和 `plan_step_id`，用于表达父子任务和任务步骤关联。
+- 新增 `task_steps` 表，保存任务计划步骤、步骤状态和可选 child task 关联。
+- 新增 `task_dependencies` 表，保存 task-level 依赖关系和依赖原因。
+- 老数据库通过 `ensureColumn()` 自动补齐 `tasks` 新字段；新表通过 `CREATE TABLE IF NOT EXISTS` 平滑创建。
+- Core Runtime 只负责 schema 初始化、兼容迁移和索引创建；计划、依赖校验、blocked 状态和事件审计仍属于 Task System。
+
 ## 4. 后续需要补齐
 
 - 数据库 schema 版本号。

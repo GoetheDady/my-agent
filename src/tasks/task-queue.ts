@@ -1,8 +1,17 @@
 import type { Database } from "bun:sqlite";
 import { getAgent, updateAgentStatus } from "../agents/agent-registry";
 import { getDb } from "../core/database";
+import { appendEvent } from "../events/event-log";
 import { defaultRealtimeService } from "../realtime/service";
-import { getTask, TASK_LEASE_MS, TASK_SELECT_COLUMNS, taskRowToRecord, type TaskRow } from "./task-store";
+import {
+  getTask,
+  TASK_LEASE_MS,
+  TASK_SELECT_COLUMNS,
+  taskRowToRecord,
+  updateTaskProgress,
+  type TaskRow,
+} from "./task-store";
+import { getUnmetTaskDependencies } from "./task-plan-store";
 import type { TaskRecord } from "./task-types";
 
 /**
@@ -35,8 +44,15 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
     const nextTask = database
       .query<TaskRow, [string]>(
         `SELECT ${TASK_SELECT_COLUMNS}
-         FROM tasks
+       FROM tasks
          WHERE agent_id = ? AND status = 'queued'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM task_dependencies dependency
+             JOIN tasks blocker ON blocker.id = dependency.depends_on_task_id
+             WHERE dependency.task_id = tasks.id
+               AND blocker.status != 'completed'
+           )
          ORDER BY priority DESC, created_at ASC
          LIMIT 1`,
       )
@@ -87,6 +103,13 @@ export function claimNextTaskForChannels(
         `SELECT ${TASK_SELECT_COLUMNS}
          FROM tasks
          WHERE agent_id = ? AND status = 'queued' AND source_channel IN (${placeholders})
+           AND NOT EXISTS (
+             SELECT 1
+             FROM task_dependencies dependency
+             JOIN tasks blocker ON blocker.id = dependency.depends_on_task_id
+             WHERE dependency.task_id = tasks.id
+               AND blocker.status != 'completed'
+           )
          ORDER BY priority DESC, created_at ASC
          LIMIT 1`,
       )
@@ -129,6 +152,35 @@ export function claimTask(taskId: string, database: Database = getDb()): TaskRec
     }
 
     if (agent.status === "running") {
+      return null;
+    }
+
+    const unmetDependencies = getUnmetTaskDependencies(task.id, database);
+    if (unmetDependencies.length > 0) {
+      updateTaskProgress(task.id, {
+        status: "blocked",
+        message: "等待依赖任务完成",
+        metadata: {
+          blockers: unmetDependencies.map((dependency) => ({
+            taskId: dependency.depends_on_task_id,
+            status: dependency.depends_on_status,
+            reason: dependency.reason,
+          })),
+        },
+      }, database);
+      appendEvent({
+        agent_id: task.agent_id,
+        task_id: task.id,
+        conversation_id: task.conversation_id,
+        type: "task.dependency.blocked",
+        payload: {
+          blockers: unmetDependencies.map((dependency) => ({
+            taskId: dependency.depends_on_task_id,
+            status: dependency.depends_on_status,
+            reason: dependency.reason,
+          })),
+        },
+      }, database);
       return null;
     }
 

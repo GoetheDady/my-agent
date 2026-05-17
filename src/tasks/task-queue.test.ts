@@ -16,6 +16,12 @@ import {
   updateTaskProgress,
 } from "./task-store";
 import { listTaskEvents } from "../events/event-log";
+import {
+  addTaskDependency,
+  listTaskSteps,
+  setTaskPlan,
+  updateTaskStepStatus,
+} from "./task-plan-store";
 
 function withTaskDb<T>(run: (db: Database) => T): T {
   const db = new Database(":memory:");
@@ -52,6 +58,8 @@ describe("task queue", () => {
       expect(getTask(task.id, db)).toMatchObject({
         id: task.id,
         agent_id: "default",
+        parent_task_id: null,
+        plan_step_id: null,
         source_channel: "web",
         source_user_id: "user-1",
         input: "hello",
@@ -67,6 +75,27 @@ describe("task queue", () => {
         progress_status: "waiting",
         progress_message: "",
       });
+    });
+  });
+
+  test("createTask stores parent task and plan step links", () => {
+    withTaskDb((db) => {
+      createTask({ id: "parent", source_channel: "web", input: "parent" }, db);
+      const [step] = setTaskPlan("parent", [{ title: "child step", detail: "" }], db);
+
+      const child = createTask({
+        id: "child",
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+        source_channel: "delegation",
+        input: "child",
+      }, db);
+
+      expect(child).toMatchObject({
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+      });
+      expect(listTaskEvents("parent", db).map((event) => event.type)).toContain("task.child.created");
     });
   });
 
@@ -132,6 +161,37 @@ describe("task queue", () => {
     });
   });
 
+  test("claimNextTask skips queued tasks with unmet dependencies", () => {
+    withTaskDb((db) => {
+      createTask({ id: "blocked", source_channel: "web", input: "blocked", priority: 10, created_at: 1 }, db);
+      createTask({ id: "blocker", source_channel: "web", input: "blocker", priority: 1, created_at: 2 }, db);
+      createTask({ id: "free", source_channel: "web", input: "free", priority: 0, created_at: 3 }, db);
+      addTaskDependency("blocked", "blocker", "等待 blocker 完成", db);
+
+      expect(claimNextTask("default", db)?.id).toBe("blocker");
+      markTaskCompleted("blocker", "done", db);
+      expect(claimNextTask("default", db)?.id).toBe("blocked");
+    });
+  });
+
+  test("claimTask marks a dependency-blocked task without claiming it", () => {
+    withTaskDb((db) => {
+      createTask({ id: "blocked", source_channel: "web", input: "blocked", priority: 10 }, db);
+      createTask({ id: "blocker", source_channel: "web", input: "blocker", priority: 1 }, db);
+      addTaskDependency("blocked", "blocker", "等待 blocker 完成", db);
+
+      expect(claimTask("blocked", db)).toBeNull();
+
+      expect(getTask("blocked", db)).toMatchObject({
+        status: "queued",
+        progress_status: "blocked",
+        progress_message: "等待依赖任务完成",
+      });
+      expect(listTaskEvents("blocked", db).map((event) => event.type)).toContain("task.dependency.blocked");
+      expect(getAgent("default", db)).toMatchObject({ status: "idle", current_task_id: null });
+    });
+  });
+
   test("claimNextTask does not claim another task while agent is running", () => {
     withTaskDb((db) => {
       createTask({ id: "first", source_channel: "web", input: "first", created_at: 1 }, db);
@@ -189,6 +249,29 @@ describe("task queue", () => {
         current_task_id: null,
       });
       expect(claimNextTask("default", db)?.id).toBe("second");
+    });
+  });
+
+  test("child task terminal state updates the linked parent step", () => {
+    withTaskDb((db) => {
+      createTask({ id: "parent", source_channel: "web", input: "parent" }, db);
+      const [step] = setTaskPlan("parent", [{ title: "child step", detail: "" }], db);
+      createTask({
+        id: "child",
+        parent_task_id: "parent",
+        plan_step_id: step.id,
+        source_channel: "delegation",
+        input: "child",
+      }, db);
+      updateTaskStepStatus(step.id, "running", db);
+
+      markTaskCompleted("child", "done", db);
+
+      expect(listTaskSteps("parent", db)[0]).toMatchObject({
+        id: step.id,
+        status: "completed",
+        child_task_id: "child",
+      });
     });
   });
 

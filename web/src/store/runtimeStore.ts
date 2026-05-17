@@ -16,6 +16,8 @@ export interface RuntimeAgent {
 export interface RuntimeTask {
   id: string;
   agent_id: string;
+  parent_task_id?: string | null;
+  plan_step_id?: string | null;
   conversation_id: string | null;
   source_channel: string;
   source_user_id: string;
@@ -105,10 +107,38 @@ export interface RuntimeTaskEpisode {
   problems: string[];
 }
 
+export type RuntimeTaskStepStatus = "pending" | "running" | "completed" | "failed" | "canceled" | "skipped";
+
+export interface RuntimeTaskStep {
+  id: string;
+  task_id: string;
+  step_index: number;
+  title: string;
+  detail: string;
+  status: RuntimeTaskStepStatus;
+  child_task_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface RuntimeTaskDependency {
+  task_id: string;
+  depends_on_task_id: string;
+  reason: string;
+  created_at: number;
+  depends_on_status: RuntimeTaskStatus;
+  depends_on_input: string;
+}
+
 export interface RuntimeTaskTimelineResponse {
   task: RuntimeTask;
   episode: RuntimeTaskEpisode | null;
   current: RuntimeTaskCurrentView;
+  plan: {
+    steps: RuntimeTaskStep[];
+  };
+  dependencies: RuntimeTaskDependency[];
+  children: RuntimeTask[];
   timeline: RuntimeTaskTimelineItem[];
 }
 
@@ -614,12 +644,27 @@ export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
   if (event.type.startsWith("task.")) {
     const labels: Record<string, string> = {
       "task.created": "任务入队",
+      "task.plan.updated": "任务计划更新",
+      "task.step.updated": "任务步骤更新",
+      "task.dependency.added": "任务依赖添加",
+      "task.dependency.removed": "任务依赖移除",
+      "task.dependency.blocked": "等待依赖",
+      "task.child.created": "子任务创建",
       "task.started": "任务开始",
       "task.completed": "任务完成",
     };
+    const firstBlocker = Array.isArray(payload.blockers) && payload.blockers[0] && typeof payload.blockers[0] === "object"
+      ? getString(payload.blockers[0] as Record<string, unknown>, "taskId")
+      : null;
     return {
       label: labels[event.type] ?? "任务事件",
-      detail: event.task_id ?? event.type,
+      detail: getDisplayValue(payload, "stepCount")
+        ?? getString(payload, "title")
+        ?? getString(payload, "dependsOnTaskId")
+        ?? firstBlocker
+        ?? getString(payload, "childTaskId")
+        ?? event.task_id
+        ?? event.type,
       tone: "task",
     };
   }

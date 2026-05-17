@@ -27,6 +27,8 @@ const tasks: RuntimeTask[] = [
   {
     id: "task-running",
     agent_id: "default",
+    parent_task_id: null,
+    plan_step_id: null,
     conversation_id: "conversation-1",
     source_channel: "web",
     source_user_id: "default",
@@ -42,6 +44,8 @@ const tasks: RuntimeTask[] = [
   {
     id: "task-queued",
     agent_id: "default",
+    parent_task_id: null,
+    plan_step_id: null,
     conversation_id: "conversation-1",
     source_channel: "web",
     source_user_id: "default",
@@ -100,6 +104,41 @@ const timelineResponse = {
     leaseExpiresAt: null,
     lastProgressAt: 40,
   },
+  plan: {
+    steps: [
+      {
+        id: "step-1",
+        task_id: "task-running",
+        step_index: 0,
+        title: "读取上下文",
+        detail: "查看相关文件",
+        status: "completed",
+        child_task_id: "task-child",
+        created_at: 1,
+        updated_at: 2,
+      },
+    ],
+  },
+  dependencies: [
+    {
+      task_id: "task-running",
+      depends_on_task_id: "task-blocker",
+      reason: "等待前置任务",
+      created_at: 1,
+      depends_on_status: "completed",
+      depends_on_input: "前置任务",
+    },
+  ],
+  children: [
+    {
+      ...tasks[1],
+      id: "task-child",
+      parent_task_id: "task-running",
+      plan_step_id: "step-1",
+      source_channel: "delegation",
+      input: "子任务",
+    },
+  ],
   timeline: [
     {
       id: "event-tool",
@@ -215,6 +254,9 @@ describe("runtimeStore", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/runtime/tasks/task-running/timeline");
     expect(useRuntimeStore.getState().selectedTaskTimeline?.task.id).toBe("task-running");
     expect(useRuntimeStore.getState().selectedTaskTimeline?.current.currentToolName).toBe("read_file");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.plan.steps[0].title).toBe("读取上下文");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.dependencies[0].depends_on_task_id).toBe("task-blocker");
+    expect(useRuntimeStore.getState().selectedTaskTimeline?.children[0].id).toBe("task-child");
     expect(useRuntimeStore.getState().taskTimelineError).toBeNull();
   });
 
@@ -383,6 +425,45 @@ describe("runtimeStore", () => {
       progress_status: "canceled",
       progress_message: "任务已取消",
     })).toBe("系统自动取消：任务已取消");
+  });
+
+  test("formats blocked task detail", () => {
+    expect(getTaskStatusDetail({
+      ...tasks[1],
+      progress_status: "blocked",
+      progress_message: "等待依赖任务完成",
+    })).toBe("等待依赖任务完成");
+  });
+
+  test("renders task plan and dependency events for the control panel", () => {
+    expect(getRuntimeEventView({
+      id: "event-plan",
+      agent_id: "default",
+      task_id: "task-running",
+      conversation_id: "conversation-1",
+      type: "task.plan.updated",
+      payload: JSON.stringify({ stepCount: 2 }),
+      payloadJson: { stepCount: 2 },
+      created_at: 1,
+    })).toMatchObject({
+      label: "任务计划更新",
+      detail: "2",
+      tone: "task",
+    });
+    expect(getRuntimeEventView({
+      id: "event-dependency",
+      agent_id: "default",
+      task_id: "task-running",
+      conversation_id: "conversation-1",
+      type: "task.dependency.blocked",
+      payload: JSON.stringify({ blockers: [{ taskId: "task-blocker" }] }),
+      payloadJson: { blockers: [{ taskId: "task-blocker" }] },
+      created_at: 1,
+    })).toMatchObject({
+      label: "等待依赖",
+      detail: "task-blocker",
+      tone: "task",
+    });
   });
 
   test("summarizes elevated watchdog events for the control panel", () => {

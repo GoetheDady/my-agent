@@ -41,6 +41,30 @@ describe("episode store", () => {
         agent_id: "default",
         task_id: task.id,
         conversation_id: task.conversation_id,
+        type: "task.plan.updated",
+        payload: { steps: [{ title: "读取源码", detail: "检查 memory store" }] },
+        created_at: 110,
+      }, db);
+      appendEvent({
+        agent_id: "default",
+        task_id: task.id,
+        conversation_id: task.conversation_id,
+        type: "task.step.updated",
+        payload: { title: "读取源码", status: "completed" },
+        created_at: 111,
+      }, db);
+      appendEvent({
+        agent_id: "default",
+        task_id: task.id,
+        conversation_id: task.conversation_id,
+        type: "task.dependency.blocked",
+        payload: { blockers: [{ taskId: "task-before", status: "queued", reason: "等待前置任务" }] },
+        created_at: 112,
+      }, db);
+      appendEvent({
+        agent_id: "default",
+        task_id: task.id,
+        conversation_id: task.conversation_id,
         type: "tool.call",
         payload: { toolName: "read_file", args: { path: "src/memory/store.ts" } },
         created_at: 120,
@@ -72,7 +96,12 @@ describe("episode store", () => {
         task_status: "completed",
         attempt_count: 1,
         files_touched: ["src/memory/store.ts"],
-        key_steps: expect.arrayContaining(["调用工具：read_file"]),
+        key_steps: expect.arrayContaining([
+          "计划步骤：读取源码",
+          "步骤完成：读取源码",
+          "等待依赖：task-before",
+          "调用工具：read_file",
+        ]),
         tools_used: expect.arrayContaining(["read_file"]),
       });
       expect(searchEpisodes({ query: "记忆系统", agentId: "default" }, db)).toHaveLength(1);

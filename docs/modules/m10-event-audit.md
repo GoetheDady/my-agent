@@ -43,6 +43,12 @@ src/events/
 
 本轮 M3 改动新增或规范了这些事件类型：
 
+- `task.plan.updated`
+- `task.step.updated`
+- `task.dependency.added`
+- `task.dependency.removed`
+- `task.dependency.blocked`
+- `task.child.created`
 - `task.progress.updated`
 - `task.failed.classified`
 - `task.cancel.requested`
@@ -58,6 +64,14 @@ src/events/
 - `agent.watchdog.repaired`：修复 Agent running 状态和 current task 不一致。
 
 Watchdog 事件 payload 使用 `reason` 表示原因，并可带 `notificationLevel`：P0 表示需要用户决策或当前会话关注，P1 表示控制台醒目提示，P2 表示只保留审计记录。
+
+Task Plan / Dependency 事件边界：
+
+- `task.plan.updated` 记录某个 Task 的结构化步骤被替换。
+- `task.step.updated` 记录步骤状态变化，包括 child task 终态同步。
+- `task.dependency.*` 记录依赖添加、移除和领取时被阻塞的事实。
+- `task.child.created` 记录 parent task 与 child task 的关联。
+- 这些事件是审计事实，不替代 `task_steps` / `task_dependencies` 的当前结构化状态。
 
 ## 4. 后续需要补齐
 

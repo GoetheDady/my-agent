@@ -65,6 +65,8 @@ export function initializeDatabaseSchema(database: Database): void {
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
+      parent_task_id TEXT,
+      plan_step_id TEXT,
       conversation_id TEXT,
       source_channel TEXT NOT NULL,
       source_user_id TEXT NOT NULL DEFAULT 'default',
@@ -87,9 +89,13 @@ export function initializeDatabaseSchema(database: Database): void {
       progress_status TEXT NOT NULL DEFAULT 'waiting',
       progress_message TEXT NOT NULL DEFAULT '',
       last_progress_at INTEGER,
-      FOREIGN KEY (agent_id) REFERENCES agents(id)
+      FOREIGN KEY (agent_id) REFERENCES agents(id),
+      FOREIGN KEY (parent_task_id) REFERENCES tasks(id),
+      FOREIGN KEY (plan_step_id) REFERENCES task_steps(id)
     )
   `);
+  ensureColumn(database, "tasks", "parent_task_id", "TEXT");
+  ensureColumn(database, "tasks", "plan_step_id", "TEXT");
   ensureColumn(database, "tasks", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "tasks", "max_attempts", "INTEGER NOT NULL DEFAULT 3");
   ensureColumn(database, "tasks", "lease_expires_at", "INTEGER");
@@ -149,6 +155,35 @@ export function initializeDatabaseSchema(database: Database): void {
   ensureColumn(database, "tool_approvals", "resume_payload", "TEXT");
   database.run(`CREATE INDEX IF NOT EXISTS idx_tool_approvals_agent_created ON tool_approvals(agent_id, created_at)`);
   database.run(`CREATE INDEX IF NOT EXISTS idx_tool_approvals_channel ON tool_approvals(channel, external_conversation_id, external_user_id)`);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS task_steps (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      step_index INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      child_task_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(task_id, step_index),
+      FOREIGN KEY (task_id) REFERENCES tasks(id),
+      FOREIGN KEY (child_task_id) REFERENCES tasks(id)
+    )
+  `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      task_id TEXT NOT NULL,
+      depends_on_task_id TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY(task_id, depends_on_task_id),
+      FOREIGN KEY (task_id) REFERENCES tasks(id),
+      FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id)
+    )
+  `);
 
   // Delegation 层：记录 Agent A 异步委派给 Agent B 的生命周期。
   // child task 是 Agent B 的后台执行，callback task 是 Agent A 整理结果并通知用户。
@@ -348,6 +383,12 @@ export function initializeDatabaseSchema(database: Database): void {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
      ON tasks(idempotency_key)
      WHERE idempotency_key IS NOT NULL`,
+  );
+  database.run(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_task_steps_task ON task_steps(task_id, step_index)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_task_steps_child ON task_steps(child_task_id)`);
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_task_dependencies_depends_on ON task_dependencies(depends_on_task_id)`,
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_delegations_parent_agent ON delegations(parent_agent_id, status, created_at)`,

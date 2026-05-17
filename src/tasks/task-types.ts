@@ -1,5 +1,7 @@
 export type TaskStatus = "queued" | "running" | "completed" | "failed" | "canceled";
 
+export type TaskStepStatus = "pending" | "running" | "completed" | "failed" | "canceled" | "skipped";
+
 export type TaskFailureType =
   | "model_error"
   | "tool_error"
@@ -24,6 +26,7 @@ export type TaskFailureStage =
 
 export type TaskProgressStatus =
   | "waiting"
+  | "blocked"
   | "claimed"
   | "preparing"
   | "building_prompt"
@@ -43,6 +46,8 @@ export interface TaskFailureClassification {
 export interface TaskRecord {
   id: string;
   agent_id: string;
+  parent_task_id: string | null;
+  plan_step_id: string | null;
   conversation_id: string | null;
   source_channel: string;
   source_user_id: string;
@@ -65,4 +70,25 @@ export interface TaskRecord {
   progress_status: TaskProgressStatus;
   progress_message: string;
   last_progress_at: number | null;
+}
+
+export interface TaskStepRecord {
+  id: string;
+  task_id: string;
+  step_index: number;
+  title: string;
+  detail: string;
+  status: TaskStepStatus;
+  child_task_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface TaskDependencyRecord {
+  task_id: string;
+  depends_on_task_id: string;
+  reason: string;
+  created_at: number;
+  depends_on_status: TaskStatus;
+  depends_on_input: string;
 }
