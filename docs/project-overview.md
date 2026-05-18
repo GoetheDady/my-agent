@@ -620,3 +620,20 @@ bun run check
 ## 14. 项目一句话定义
 
 `my-agent` 当前是一个本地优先、后端驱动、可多 Agent 扩展、可长期记忆、可工具审批、可 Skill 扩展、可多渠道接入的个人 Agent Runtime。
+
+## 15. 新对话快速上手
+
+新 Agent 进入项目时建议：
+1. 读本文件，理解项目初心和架构。
+2. 如果要做整体模块规划，读 [project-module-map.md](./project-module-map.md)。
+3. 如果要改具体模块，再读对应目录源码和测试。
+4. 如果需要给后续新对话补充长期规则，优先更新 `AGENTS.md`。
+
+**开发时优先保护的边界：**
+
+- 不要把项目改成 Web-first；Web 只是控制台。
+- 不要让同一个 Agent 并发执行多个 Task。
+- 不要绕过 `AgentConfigService` 写 `agent.json`。
+- 不要让 Channel adapter 直接创建 Task；应该通过 `ChannelService`。
+- 不要把远程 Skill 默认启用；远程 Skill 安装后默认 disabled。
+- 不要提交 `.my-agent/` 里的运行时文件。

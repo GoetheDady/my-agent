@@ -1,7 +1,7 @@
 node_modules/
 dist/
 .my-agent/
-data
+data/
 .superpowers/
 .env
 .claude/settings.local.json
@@ -14,10 +14,7 @@ data
 *.sqlite-shm
 package-lock.json
 tsconfig.tsbuildinfo
-.opencode/.gitignore
-.opencode/node_modules/
-.opencode/package-lock.json
+.opencode/
 .test-backups/
 .sisyphus
-.opencode
 .runtime/

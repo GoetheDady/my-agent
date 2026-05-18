@@ -4,7 +4,7 @@ Compact instruction file for AI agents working in this repository.
 
 ## 新对话快速上下文
 
-如果需要快速理解项目，先读 `docs/agent-quick-context.md`。完整项目说明见 `docs/project-overview.md`。本文件是 AI coding agent 的优先工作指令。
+如果需要快速理解项目，先读 `docs/project-overview.md`（含快速上手和开发边界）。本文件是 AI coding agent 的优先工作指令。
 
 项目初心：
 
