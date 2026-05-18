@@ -1,5 +1,6 @@
 import { registerLifecycleHook } from "../lifecycle/hooks";
-import { enqueueMemoryExtraction } from "./extraction-worker";
+import { getDb } from "../core/database";
+import { enqueueMemoryExtraction, persistExtractionFailure } from "./extraction-worker";
 
 let registered = false;
 
@@ -14,7 +15,7 @@ export function registerMemoryLifecycleHooks(): void {
   registered = true;
 
   registerLifecycleHook("assistant.message.persisted", (event) => {
-    void enqueueMemoryExtraction({
+    const job = {
       agentId: event.agentId,
       userId: event.userId,
       taskId: event.taskId,
@@ -24,7 +25,10 @@ export function registerMemoryLifecycleHooks(): void {
       userText: event.userText,
       assistantText: event.assistantText,
       database: event.database,
-    }).catch((error) => {
+    };
+    void enqueueMemoryExtraction(job).catch((error) => {
+      const database = event.database ?? getDb();
+      persistExtractionFailure(database, event.assistantMessageId, event.agentId, error, job);
       console.error("[memory-worker] extraction failed:", error);
     });
   });

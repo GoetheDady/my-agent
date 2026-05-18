@@ -86,6 +86,7 @@ describe("external channel runner", () => {
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
         generateTextRunner: generateTextRunner as never,
+        memorySearcher: async () => [],
       });
 
       expect(deliveries[0]).toMatchObject({
@@ -129,6 +130,7 @@ describe("external channel runner", () => {
         database: db,
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
+        memorySearcher: async () => [],
         generateTextRunner: (async () => ({
           text: "",
           content: [],
@@ -176,6 +178,7 @@ describe("external channel runner", () => {
         database: db,
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
+        memorySearcher: async () => [],
         generateTextRunner: (async () => ({
           text: "   ",
           content: [],
@@ -211,6 +214,7 @@ describe("external channel runner", () => {
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
         generateTextRunner: createTextGenerator(["should not run"]),
+        memorySearcher: async () => [],
       });
 
       expect(getTask(task.id, db)).toMatchObject({ status: "queued", error: null });
@@ -253,6 +257,7 @@ describe("external channel runner", () => {
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
         generateTextRunner: createTextGenerator(["first done", "second done"]),
+        memorySearcher: async () => [],
       });
 
       expect(getTask(first.id, db)).toMatchObject({ status: "completed", result: "first done" });
@@ -319,6 +324,7 @@ describe("external channel runner", () => {
         approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
         channelService: createDeliveringChannelService(deliveries) as never,
         generateTextRunner: createTextGenerator(["should not run"]),
+        memorySearcher: async () => [],
       });
 
       expect(getTask(webTask.id, db)).toMatchObject({ status: "queued" });

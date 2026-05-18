@@ -6,7 +6,7 @@ import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
-import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
+import { buildAgentSystemPrompt, loadRelevantMemoriesForPrompt, type MemorySearcher } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import {
   classifyTaskFailure,
@@ -35,6 +35,7 @@ export interface RunExternalChannelTaskInput {
   channelService?: ChannelService;
   generateTextRunner?: typeof generateText;
   skipDrain?: boolean;
+  memorySearcher?: MemorySearcher;
 }
 
 export interface ResumeExternalChannelTaskInput {
@@ -44,6 +45,7 @@ export interface ResumeExternalChannelTaskInput {
   channelService?: typeof defaultChannelService;
   generateTextRunner?: typeof generateText;
   skipDrain?: boolean;
+  memorySearcher?: MemorySearcher;
 }
 
 const EXTERNAL_QUEUE_CHANNELS = ["feishu"];
@@ -280,6 +282,7 @@ async function runClaimedExternalChannelTask(input: {
   channelService: ChannelService;
   generateTextRunner: typeof generateText;
   skipDrain?: boolean;
+  memorySearcher?: MemorySearcher;
 }): Promise<void> {
   const task = input.claimed;
   const deliverMetadata = getDeliverMetadata({
@@ -315,7 +318,14 @@ async function runClaimedExternalChannelTask(input: {
       { role: "user", content: [{ type: "text", text: input.userText }] },
     ];
     updateTaskProgress(task.id, { status: "building_prompt", message: "正在构建提示词" }, input.database);
-    const systemPrompt = buildAgentSystemPrompt(task, input.database, { skillService: defaultSkillService });
+    const relevantMemories = await loadRelevantMemoriesForPrompt(task.input, {
+      memoryTopK: 5,
+      memorySearcher: input.memorySearcher,
+    });
+    const systemPrompt = await buildAgentSystemPrompt(task, input.database, {
+      skillService: defaultSkillService,
+      relevantMemories,
+    });
     updateTaskProgress(task.id, { status: "calling_model", message: "正在调用模型" }, input.database);
     const result = await input.generateTextRunner({
       model: getModel(task.agent_id),
@@ -453,6 +463,7 @@ async function runClaimedExternalChannelTask(input: {
         approvalService: input.approvalService,
         channelService: input.channelService,
         generateTextRunner: input.generateTextRunner,
+        memorySearcher: input.memorySearcher,
       });
     }
   }
@@ -502,6 +513,7 @@ export async function runExternalChannelTask(input: RunExternalChannelTaskInput)
         approvalService,
         channelService,
         generateTextRunner,
+        memorySearcher: input.memorySearcher,
       });
       return;
     }
@@ -553,6 +565,7 @@ export async function runExternalChannelTask(input: RunExternalChannelTaskInput)
     channelService,
     generateTextRunner,
     skipDrain: input.skipDrain,
+    memorySearcher: input.memorySearcher,
   });
 }
 
@@ -561,6 +574,7 @@ export async function drainExternalChannelQueue(agentId: string, options: {
   approvalService?: ApprovalService;
   channelService?: ChannelService;
   generateTextRunner?: typeof generateText;
+  memorySearcher?: MemorySearcher;
 } = {}): Promise<void> {
   if (drainingAgents.has(agentId)) return;
   drainingAgents.add(agentId);
@@ -585,6 +599,7 @@ export async function drainExternalChannelQueue(agentId: string, options: {
         channelService,
         generateTextRunner,
         skipDrain: true,
+        memorySearcher: options.memorySearcher,
       });
     }
   } finally {
@@ -623,7 +638,13 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
     });
     const result = await generateTextRunner({
       model: getModel(task.agent_id),
-      system: buildAgentSystemPrompt(task, database, { skillService: defaultSkillService }),
+      system: await buildAgentSystemPrompt(task, database, {
+        skillService: defaultSkillService,
+        relevantMemories: await loadRelevantMemoriesForPrompt(task.input, {
+          memoryTopK: 5,
+          memorySearcher: input.memorySearcher,
+        }),
+      }),
       messages,
       tools: buildAgentTools({
         agentId: task.agent_id,

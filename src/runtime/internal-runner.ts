@@ -6,7 +6,7 @@ import { getConfig } from "../core/config";
 import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
-import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
+import { buildAgentSystemPrompt, loadRelevantMemoriesForPrompt, type MemorySearcher } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import { claimTask } from "../tasks/task-queue";
 import {
@@ -33,6 +33,7 @@ export interface RunInternalAgentTaskInput {
   database?: Database;
   generateTextRunner?: typeof generateText;
   emptyResultMessage?: string;
+  memorySearcher?: MemorySearcher;
 }
 
 function stringifyCompact(value: unknown): string {
@@ -109,7 +110,14 @@ export async function runInternalAgentTask(input: RunInternalAgentTaskInput): Pr
   try {
     const runner = input.generateTextRunner ?? generateText;
     updateTaskProgress(claimed.id, { status: "building_prompt", message: "正在构建提示词" }, database);
-    const systemPrompt = buildAgentSystemPrompt(claimed, database, { skillService: defaultSkillService });
+    const relevantMemories = await loadRelevantMemoriesForPrompt(claimed.input, {
+      memoryTopK: 5,
+      memorySearcher: input.memorySearcher,
+    });
+    const systemPrompt = await buildAgentSystemPrompt(claimed, database, {
+      skillService: defaultSkillService,
+      relevantMemories,
+    });
     updateTaskProgress(claimed.id, { status: "calling_model", message: "正在调用模型" }, database);
     const result = await runner({
       model: getModel(claimed.agent_id),

@@ -37,21 +37,21 @@
 
 | 编号 | 模块 | 核心问题 | 当前状态 | 完整目标 |
 |---|---|---|---|---|
-| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 调度器，支持 Task Plan/Dependency 与 Skill candidate schema，已有 SQLite 备份基础，已有模块文档 | 可诊断、可迁移、可恢复 |
+| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 和记忆提取重试调度器，支持 Task Plan/Dependency 与 Skill candidate schema，已有 SQLite 备份基础，已有模块文档 | 可诊断、可迁移、可恢复 |
 | M2 | [Agent Identity & Config](./modules/m2-agent-identity-config.md) | Agent 是谁、允许做什么 | 已有基础，配置规范化逻辑已拆分，远程 Skill origin 可保留 contentHash，已有模块文档 | 配置边界清晰、可版本化 |
 | M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1、Agent planning tools 和 prompt-level 自动规划，已有模块文档 | 增强复杂依赖、计划质量评估和 Episode 输入契约 |
-| M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation 和工具审计事件已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
-| M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder、Task planning tools 指引、复杂任务 planning guide、父任务汇总上下文预算和结构化摘要消息，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
+| M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation、工具审计事件和 RAG-in-context 记忆检索已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
+| M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder、Task planning tools 指引、复杂任务 planning guide、父任务汇总上下文预算、结构化摘要消息和相关长期记忆注入，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
 | M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批、工具调用审计和 Runtime planning tools，已有模块文档 | 权限更细、工具失败更可恢复 |
-| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、Dream Worker、Episode v1 和 Memory → Skill candidate 触发点；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层和质量评估更完整 |
+| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、记忆提取持久化重试、Dream Worker、Episode v1 和 Memory → Skill candidate 触发点；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层和质量评估更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | [Skill System](./modules/m9-skill-system.md) | Agent 如何沉淀可复用做法 | 已有三类 Skill、provenance/usage 元数据、正式 skill_candidates 表、候选审查 API 和远程 Skill contentHash，已有模块文档 | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件、工具调用审计、Skill candidate 事件和 Skill 内容变更事件，已有模块文档 | 事件规范、查询、诊断和回放更强 |
-| M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，微信 stub，已有模块文档 | 多渠道生产化 |
+| M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，外部渠道 runner 已接入 RAG-in-context，微信 stub，已有模块文档 | 多渠道生产化 |
 | M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，支持 plan step child task 和 child task 依赖，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
-| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline 和 Task Plan/Dependency 控制面，已有模块文档 | 控制面完整化 |
+| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline、Task Plan/Dependency 控制面和异步 Chat RAG 上下文准备，已有模块文档 | 控制面完整化 |
 | M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog、Task timeline、plan/dependency 详情；Runtime Store 当前任务推导已补 JSDoc，已有模块文档 | 继续作为控制台，不成为核心 |
 | M17 | Evaluation & Testing | 如何知道 Agent 变好了 | 单元测试较多 | 行为评估和端到端场景测试 |
 | M18 | Documentation & Onboarding | 新 Agent 如何理解项目 | 已有基础文档 | 模块文档和开发路线成体系 |
@@ -89,6 +89,7 @@ src/scripts/
 - 启动时恢复租约过期 Task。
 - 启动 Task Watchdog 调度器，运行期间持续巡检异常 Task 和 Agent 状态。
 - Task Plan/Dependency v1 的 `tasks` 新字段、`task_steps`、`task_dependencies` schema 初始化和兼容迁移。
+- `memory_extraction_retries` schema 初始化，以及进程内 60 秒重试扫描器启动。
 
 ### 还需要补齐
 
@@ -206,6 +207,7 @@ src/channels/external-runner.ts
 - 执行期间续约 Task 租约。
 - 成功、失败、取消时释放 Agent。
 - 工具调用统一写入 `tool.call` / `tool.result` 审计事件，包含工具名、tool call id、耗时、输出摘要或错误。
+- 构建 prompt 前会按 task input 检索相关长期记忆，检索失败时降级为空上下文。
 
 ### 还需要补齐
 
@@ -240,7 +242,7 @@ src/prompts/
 - 注入 Agent profile：`soul.md`、`user.md`。
 - 注入 Skill index。
 - 注入工具说明。
-- 避免直接把全部记忆塞进 prompt。
+- 避免直接把全部记忆塞进 prompt，只注入少量相关、已过滤的长期记忆片段。
 - 指引复杂任务使用 `task_plan_set`、`task_step_update` 和 `task_child_create` 写入结构化计划。
 - 父任务汇总上下文会按预算压缩 parent input、plan steps、直接 child task 结果/错误和 episode 摘要，避免把完整事件流水放进 prompt。
 
@@ -325,6 +327,7 @@ src/memory/tools/
 - LanceDB 向量检索。
 - TF-IDF 文本检索。
 - assistant message persisted 后自动触发记忆提取。
+- 记忆提取失败会进入 SQLite 持久化重试队列，后台扫描器按指数退避重试，最多处理 5 次。
 - 记忆去重和再巩固。
 - Dream Worker。
 - 情景记忆 episode 基础能力，包含任务状态、失败分类、可重试性和关键步骤。

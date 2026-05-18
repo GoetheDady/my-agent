@@ -9,7 +9,7 @@ import { createDeepSeek, deepseek } from "@ai-sdk/deepseek";
 import type { Database } from "bun:sqlite";
 import { defaultAgentConfigService } from "../agents/config-service";
 import { appendEvent } from "../events/event-log";
-import { buildAgentSystemPrompt } from "../prompts/agent-prompt";
+import { buildAgentSystemPrompt, loadRelevantMemoriesForPrompt, type MemorySearcher } from "../prompts/agent-prompt";
 import { defaultSkillService } from "../skills";
 import { buildAgentTools, tools } from "../tools/service";
 import { getConfig } from "../core/config";
@@ -41,6 +41,7 @@ export interface AgentRunInput {
   abortSignal?: AbortSignal;
   streamTextRunner?: StreamTextRunner;
   database?: Database;
+  memorySearcher?: MemorySearcher;
 }
 
 export interface AgentRunResult {
@@ -129,7 +130,7 @@ function filterModelVisibleParts(parts: unknown): unknown[] {
  * @returns 包含 AI SDK 流式结果和 taskId 的运行结果。
  * @throws 当 Agent 正忙、任务无法领取或模型启动失败时抛出错误。
  */
-export function runAgentTask(input: AgentRunInput): AgentRunResult {
+export async function runAgentTask(input: AgentRunInput): Promise<AgentRunResult> {
   const database = input.database ?? getDb();
   let eventTimestamp = Date.now();
   let settled = false;
@@ -180,7 +181,7 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
   /**
    * Agent 执行主流程：
    * 1. claim task，把 queued task 原子切换成 running，同时锁住对应 Agent。
-   * 2. 构建 system prompt：只注入稳定 profile 和 working memory，不注入长期记忆全文。
+   * 2. 构建 system prompt：注入稳定 profile、working memory 和少量相关长期记忆片段。
    * 3. 使用 buildAgentTools 创建带 task/conversation 上下文的工具集合。
    * 4. streamText 流式返回模型输出，并把 delta、完成、失败等过程写入 events。
    * 5. 完成后生成/更新 episode，供之后的情景记忆和 Dream Worker 使用。
@@ -218,8 +219,13 @@ export function runAgentTask(input: AgentRunInput): AgentRunResult {
       database,
     });
     updateTaskProgress(input.task.id, { status: "building_prompt", message: "正在构建提示词" }, database);
-    const systemPrompt = buildAgentSystemPrompt(input.task, database, {
+    const relevantMemories = await loadRelevantMemoriesForPrompt(input.task.input, {
+      memoryTopK: 5,
+      memorySearcher: input.memorySearcher,
+    });
+    const systemPrompt = await buildAgentSystemPrompt(input.task, database, {
       skillService: defaultSkillService,
+      relevantMemories,
     });
     updateTaskProgress(input.task.id, { status: "calling_model", message: "正在调用模型" }, database);
     const result = runner({

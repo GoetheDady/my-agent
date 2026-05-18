@@ -11,6 +11,9 @@ import { appendEvent, listTaskEvents } from "../events/event-log";
 import { createTask } from "../tasks/task-store";
 import {
   MemoryExtractionWorker,
+  persistExtractionFailure,
+  retryFailedExtractions,
+  type MemoryExtractionJob,
   type MemoryWorkerStore,
 } from "./extraction-worker";
 import type { Memory } from "./store";
@@ -78,7 +81,129 @@ function createStore(overrides: Partial<MemoryWorkerStore> = {}): MemoryWorkerSt
   };
 }
 
+function createRetryJob(input: ReturnType<typeof createWorkerDb>): MemoryExtractionJob {
+  return {
+    agentId: "default",
+    taskId: input.task.id,
+    conversationId: input.session.id,
+    sessionId: input.session.id,
+    assistantMessageId: input.assistantMessage.id,
+    userText: "我正在开发自己的 agent runtime",
+    assistantText: "好的",
+    database: input.db,
+  };
+}
+
 describe("memory extraction worker", () => {
+  test("persists extraction failures for retry", () => {
+    const context = createWorkerDb();
+    const { db, assistantMessage } = context;
+    const before = Date.now();
+
+    try {
+      persistExtractionFailure(db, assistantMessage.id, "default", new Error("embedding timeout"), createRetryJob(context));
+      const retry = db.query<{
+        message_id: string;
+        agent_id: string;
+        attempt_count: number;
+        next_retry_at: number;
+        last_error: string;
+      }, []>("SELECT * FROM memory_extraction_retries").get();
+
+      expect(retry).toMatchObject({
+        message_id: assistantMessage.id,
+        agent_id: "default",
+        attempt_count: 0,
+      });
+      expect(JSON.parse(retry!.last_error)).toMatchObject({ error: "embedding timeout" });
+      expect(retry!.next_retry_at).toBeGreaterThanOrEqual(before + 30_000);
+      expect(retry!.next_retry_at).toBeLessThanOrEqual(Date.now() + 30_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retryFailedExtractions increments attempts and schedules exponential backoff on failure", async () => {
+    const context = createWorkerDb();
+    const { db, assistantMessage } = context;
+    const worker = new MemoryExtractionWorker({
+      store: createStore(),
+      profileSync: async () => ({ status: "skipped", applied: [] }),
+      planner: async () => {
+        throw new Error("planner unavailable");
+      },
+    });
+
+    try {
+      persistExtractionFailure(db, assistantMessage.id, "default", new Error("initial"), createRetryJob(context));
+      db.run("UPDATE memory_extraction_retries SET next_retry_at = ?", [Date.now() - 1]);
+      const before = Date.now();
+
+      await retryFailedExtractions(db, worker);
+      const retry = db.query<{ attempt_count: number; next_retry_at: number; last_error: string }, []>(
+        "SELECT attempt_count, next_retry_at, last_error FROM memory_extraction_retries",
+      ).get();
+
+      expect(retry).toMatchObject({ attempt_count: 1 });
+      expect(JSON.parse(retry!.last_error)).toMatchObject({ error: "planner unavailable" });
+      expect(retry!.next_retry_at).toBeGreaterThanOrEqual(before + 60_000);
+      expect(retry!.next_retry_at).toBeLessThanOrEqual(Date.now() + 60_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retryFailedExtractions deletes retry record after success", async () => {
+    const context = createWorkerDb();
+    const { db, assistantMessage } = context;
+    const worker = new MemoryExtractionWorker({
+      store: createStore(),
+      profileSync: async () => ({ status: "skipped", applied: [] }),
+      planner: async () => ({ new_memories: [], updates: [], summary: "无新增记忆" }),
+    });
+
+    try {
+      persistExtractionFailure(db, assistantMessage.id, "default", new Error("initial"), createRetryJob(context));
+      db.run("UPDATE memory_extraction_retries SET next_retry_at = ?", [Date.now() - 1]);
+
+      await retryFailedExtractions(db, worker);
+
+      const retry = db.query("SELECT id FROM memory_extraction_retries").get();
+      expect(retry).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retryFailedExtractions ignores exhausted records", async () => {
+    const { db, assistantMessage } = createWorkerDb();
+    const worker = new MemoryExtractionWorker({
+      store: createStore(),
+      profileSync: async () => ({ status: "skipped", applied: [] }),
+      planner: async () => {
+        throw new Error("should not run");
+      },
+    });
+
+    try {
+      db.run(
+        `INSERT INTO memory_extraction_retries
+         (id, message_id, agent_id, attempt_count, next_retry_at, last_error, created_at)
+         VALUES (?, ?, ?, 5, ?, ?, ?)`,
+        [assistantMessage.id, assistantMessage.id, "default", Date.now() - 1, "exhausted", Date.now()],
+      );
+
+      await retryFailedExtractions(db, worker);
+
+      const retry = db.query<{ attempt_count: number; last_error: string }, []>(
+        "SELECT attempt_count, last_error FROM memory_extraction_retries",
+      ).get();
+      expect(retry).toEqual({ attempt_count: 5, last_error: "exhausted" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("adds a synthetic memory_extract tool part and records completed events", async () => {
     const { db, session, task, assistantMessage } = createWorkerDb();
     const savedMemories: Memory[] = [];

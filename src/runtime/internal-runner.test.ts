@@ -28,6 +28,7 @@ describe("internal runner", () => {
       task,
       messages: [{ role: "user", content: [{ type: "text", text: task.input }] }],
       database: db,
+      memorySearcher: async () => [],
       generateTextRunner: (async () => ({
         text: "",
         steps: [{
@@ -68,6 +69,7 @@ describe("internal runner", () => {
       task,
       messages: [{ role: "user", content: [{ type: "text", text: task.input }] }],
       database: db,
+      memorySearcher: async () => [],
       emptyResultMessage: "没有可用输出，请说明失败原因。",
       generateTextRunner: (async () => ({
         text: "   ",

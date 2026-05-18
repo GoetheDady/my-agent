@@ -7,7 +7,7 @@ import { listTaskEvents } from "../events/event-log";
 import { createTask, getTask } from "../tasks/task-store";
 import type { TaskRecord } from "../tasks/task-types";
 
-function withRunnerDb<T>(run: (db: Database, task: TaskRecord) => T): T {
+async function withRunnerDb<T>(run: (db: Database, task: TaskRecord) => T | Promise<T>): Promise<T> {
   const db = new Database(":memory:");
   db.run("PRAGMA foreign_keys = ON");
   initializeDatabaseSchema(db);
@@ -15,7 +15,7 @@ function withRunnerDb<T>(run: (db: Database, task: TaskRecord) => T): T {
   const task = createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
 
   try {
-    return run(db, task);
+    return await run(db, task);
   } finally {
     db.close();
   }
@@ -28,11 +28,12 @@ function fakeStreamTextSuccess() {
 }
 
 describe("agent runtime", () => {
-  test("marks task as running", () => {
-    withRunnerDb((db, task) => {
-      runAgentTask({
+  test("marks task as running", async () => {
+    await withRunnerDb(async (db, task) => {
+      await runAgentTask({
         task,
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [],
         streamTextRunner: fakeStreamTextSuccess as never,
         database: db,
       });
@@ -45,11 +46,12 @@ describe("agent runtime", () => {
     });
   });
 
-  test("appends task started event", () => {
-    withRunnerDb((db, task) => {
-      runAgentTask({
+  test("appends task started event", async () => {
+    await withRunnerDb(async (db, task) => {
+      await runAgentTask({
         task,
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [],
         streamTextRunner: fakeStreamTextSuccess as never,
         database: db,
       });
@@ -58,11 +60,12 @@ describe("agent runtime", () => {
     });
   });
 
-  test("completes task with assistant output when stream finishes", () => {
-    withRunnerDb((db, task) => {
-      runAgentTask({
+  test("completes task with assistant output when stream finishes", async () => {
+    await withRunnerDb(async (db, task) => {
+      await runAgentTask({
         task,
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [],
         streamTextRunner: ((options: { onFinish?: (event: { text: string }) => void }) => {
           options.onFinish?.({ text: "done" });
           return fakeStreamTextSuccess();
@@ -88,11 +91,12 @@ describe("agent runtime", () => {
     });
   });
 
-  test("records tool progress when the stream emits tool chunks", () => {
-    withRunnerDb((db, task) => {
-      runAgentTask({
+  test("records tool progress when the stream emits tool chunks", async () => {
+    await withRunnerDb(async (db, task) => {
+      await runAgentTask({
         task,
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [],
         streamTextRunner: ((options: {
           onChunk?: (event: { chunk: { type: string } }) => void;
           onFinish?: (event: { text: string }) => void;
@@ -112,18 +116,19 @@ describe("agent runtime", () => {
     });
   });
 
-  test("marks task failed when model call throws", () => {
-    withRunnerDb((db, task) => {
-      expect(() =>
+  test("marks task failed when model call throws", async () => {
+    await withRunnerDb(async (db, task) => {
+      await expect(
         runAgentTask({
           task,
           messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+          memorySearcher: async () => [],
           streamTextRunner: (() => {
             throw new Error("model down");
           }) as never,
           database: db,
         }),
-      ).toThrow("model down");
+      ).rejects.toThrow("model down");
 
       expect(getTask(task.id, db)).toMatchObject({
         status: "failed",
@@ -145,13 +150,14 @@ describe("agent runtime", () => {
     });
   });
 
-  test("marks task canceled and releases agent when the client aborts the stream", () => {
-    withRunnerDb((db, task) => {
+  test("marks task canceled and releases agent when the client aborts the stream", async () => {
+    await withRunnerDb(async (db, task) => {
       const controller = new AbortController();
 
-      runAgentTask({
+      await runAgentTask({
         task,
         messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [],
         abortSignal: controller.signal,
         streamTextRunner: fakeStreamTextSuccess as never,
         database: db,
@@ -179,24 +185,68 @@ describe("agent runtime", () => {
     });
   });
 
-  test("leaves task queued when agent is busy", () => {
-    withRunnerDb((db, task) => {
+  test("leaves task queued when agent is busy", async () => {
+    await withRunnerDb(async (db, task) => {
       updateAgentStatus("default", "running", "other-task", db);
 
-      expect(() =>
+      await expect(
         runAgentTask({
           task,
           messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
           streamTextRunner: fakeStreamTextSuccess as never,
           database: db,
         }),
-      ).toThrow(AgentBusyError);
+      ).rejects.toThrow(AgentBusyError);
 
       expect(getTask(task.id, db)).toMatchObject({
         status: "queued",
         error: null,
       });
       expect(listTaskEvents(task.id, db)).toEqual([]);
+    });
+  });
+
+  test("injects retrieved memories into the system prompt", async () => {
+    await withRunnerDb(async (db, task) => {
+      let receivedSystemPrompt = "";
+
+      await runAgentTask({
+        task,
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => [
+          { memory_type: "semantic", content: "用户偏好简洁回复" },
+        ],
+        streamTextRunner: ((options: { system?: string }) => {
+          receivedSystemPrompt = options.system ?? "";
+          return fakeStreamTextSuccess();
+        }) as never,
+        database: db,
+      });
+
+      expect(receivedSystemPrompt).toContain("<relevant-memories>");
+      expect(receivedSystemPrompt).toContain("[semantic] 用户偏好简洁回复");
+    });
+  });
+
+  test("continues when relevant memory search fails", async () => {
+    await withRunnerDb(async (db, task) => {
+      let receivedSystemPrompt = "";
+
+      await runAgentTask({
+        task,
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        memorySearcher: async () => {
+          throw new Error("embedding unavailable");
+        },
+        streamTextRunner: ((options: { system?: string }) => {
+          receivedSystemPrompt = options.system ?? "";
+          return fakeStreamTextSuccess();
+        }) as never,
+        database: db,
+      });
+
+      expect(getTask(task.id, db)).toMatchObject({ status: "running" });
+      expect(receivedSystemPrompt).not.toContain("<relevant-memories>");
     });
   });
 

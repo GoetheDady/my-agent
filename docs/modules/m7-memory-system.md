@@ -45,7 +45,9 @@ src/memory/episode-store.ts
 
 - LanceDB 向量检索和 TF-IDF 文本检索。
 - 长期记忆的写入、搜索、更新和遗忘。
+- Runtime 构建 system prompt 前会调用长期记忆搜索，为 RAG-in-context 提供最多 5 条相关记忆片段；检索失败时降级为空上下文。
 - assistant message persisted 后自动触发记忆提取。
+- 记忆提取失败会写入 SQLite 持久化重试队列，由后台定时扫描并按指数退避重试；指数退避指每次失败后把下一次等待时间成倍拉长，降低故障期间的压力。
 - 记忆提取 worker 注入 `memory_extract` / `memory_reconsolidate` 工具片段。
 - 主动去重：保留高置信度记忆，并停用重复记忆。
 - Dream Worker：按运行记录做每日整理和反思。
@@ -59,6 +61,9 @@ src/memory/episode-store.ts
 
 本轮改动对 Memory System 的影响：
 
+- `src/memory/lifecycle-hooks.ts` 在 `enqueueMemoryExtraction()` 失败时不再只记录日志，而是把 assistant message id、agent id、错误和下一次重试时间写入 `memory_extraction_retries`。
+- `retryFailedExtractions()` 会扫描 `next_retry_at <= now()` 且 `attempt_count < 5` 的记录，成功后删除记录，失败后递增次数并更新下一次重试时间。
+- 重试扫描使用乐观锁更新 `attempt_count`。乐观锁指更新时带上旧值条件，若别的扫描器已经处理过同一条记录，本次更新会失败并跳过，避免重复处理。
 - Episode 记录现在保存 task 派生状态，包括 `task_status`、`attempt_count`、`failure_type`、`failure_stage` 和 `retriable`。
 - Episode 记录新增 `key_steps`，用于表达一次任务经历里的关键步骤。
 - 新增工具审计事实后，Episode 的 `tools_used` 和 `key_steps` 以 `tool.call` / `tool.result` 为主要来源提取工具链路。
@@ -84,6 +89,12 @@ src/memory/episode-store.ts
 - Dream Worker 在每日整理 real-run 中会读取近期高质量 episode，并调用 Skill System 生成正式 `skill_candidates` 记录。
 - Memory System 只提供 episode 素材和整理触发点，不直接创建正式 Skill；候选保存、审查和转正仍属于 Skill System。
 - 这让 procedural memory，也就是“做事方法记忆”，开始通过 Skill candidate 进入受控审查流程，而不是把一次经历直接写成长期 Skill。
+
+本轮 RAG-in-context 改动对 Memory System 的影响：
+
+- `searchMemories(query, topN)` 现在不仅供 `memory_recall` 等工具主动调用，也会被 Runtime 在 prompt 构建前调用。
+- Prompt 注入只使用记忆类型和正文，仍不改变长期记忆的写入、更新、去重和证据链规则。
+- 注入前会过滤可疑指令型内容，并把单条记忆裁剪到 300 个字符，避免把长期记忆当成系统指令。
 
 ## 4. 后续需要补齐
 

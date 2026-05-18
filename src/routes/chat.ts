@@ -74,7 +74,7 @@ app.post("/", async (c) => {
   let persisted = false;
   let run;
   try {
-    run = runAgentTask({
+    run = await runAgentTask({
       task,
       messages: modelMessages,
       sessionId: capturedSessionId,

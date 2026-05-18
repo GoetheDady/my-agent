@@ -393,6 +393,18 @@ export function initializeDatabaseSchema(database: Database): void {
     )
   `);
 
+  database.run(`
+    CREATE TABLE IF NOT EXISTS memory_extraction_retries (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      attempt_count INTEGER DEFAULT 0,
+      next_retry_at INTEGER NOT NULL,
+      last_error TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_tasks_agent_status ON tasks(agent_id, status, priority, created_at)`,
   );
@@ -446,6 +458,10 @@ export function initializeDatabaseSchema(database: Database): void {
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_memory_decisions_dream_run ON memory_decisions(dream_run_id)`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_memory_extraction_retries_due
+     ON memory_extraction_retries(next_retry_at, attempt_count)`,
   );
 }
 

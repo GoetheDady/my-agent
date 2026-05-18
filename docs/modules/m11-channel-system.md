@@ -42,6 +42,7 @@ src/channels/
 - 外部渠道队列 drain。
 - 外部渠道最终回复会对空模型输出做兜底，避免飞书收到空消息。
 - 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
+- 外部渠道 runner 在调用模型前会复用 Runtime 的 RAG-in-context 流程，按当前 task input 检索少量相关长期记忆并交给 Prompt & Context 注入。
 - WeChat stub。
 
 本轮模块拆分与幂等改动对 Channel 的影响：
@@ -76,6 +77,13 @@ src/channels/
 - 如果模型没有文本也没有工具结果，会回发明确兜底文案，避免用户看到空白消息。
 - 审批恢复后的飞书回复也复用同一空输出兜底逻辑。
 
+本轮 RAG-in-context 改动对 Channel 的影响：
+
+- `external-runner.ts` 的普通外部渠道执行、审批恢复执行和队列 drain 都会把 `task.input` 用作记忆检索 query。query 指检索查询文本，也就是用来从长期记忆中找相关内容的输入。
+- 外部渠道不会自己解析、写入或过滤长期记忆，只把检索出的记忆片段传给 Prompt & Context 模块统一注入。
+- 记忆检索失败不会改变渠道任务终态，也不会阻止飞书等渠道回发；失败会在 prompt 构建层降级为空记忆上下文。
+- 测试中可通过 `memorySearcher` 注入假检索函数，避免外部渠道单元测试依赖真实 embedding 服务。embedding 指把文本转换成向量，方便做语义相似度搜索。
+
 ## 4. 后续需要补齐
 
 - 为更多渠道统一生成稳定 `idempotency_key`，例如未来微信 message id、webhook event id。
@@ -83,3 +91,4 @@ src/channels/
 - 附件和富文本处理。
 - 多渠道统一错误反馈。
 - 外部渠道投递重试后的 episode 更新策略：同一 task 多次投递后 episode 是否需要反映最终投递状态。
+- 外部渠道 RAG-in-context 的可观察性：后续可在事件或 timeline 中展示是否命中记忆、命中数量和检索降级原因。

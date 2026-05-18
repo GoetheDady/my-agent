@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { resolve, extname, relative } from "path";
 import { readFile, stat } from "fs/promises";
 import { initializeRuntime } from "./core/runtime";
+import { getDb } from "./core/database";
 import { backupDatabaseIfStale } from "./core/backup";
 import chatRoutes from "./routes/chat";
 import { createSessionRoutes } from "./routes/sessions";
@@ -15,6 +16,7 @@ import toolRoutes from "./routes/tools";
 import skillRoutes from "./routes/skills";
 import { createRuntimeRoutes } from "./routes/runtime";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
+import { retryFailedExtractions } from "./memory/extraction-worker";
 import { startDreamScheduler } from "./memory/dream-scheduler";
 import { defaultRealtimeService } from "./realtime/service";
 import { startTaskWatchdogScheduler } from "./tasks/watchdog";
@@ -40,6 +42,11 @@ void backupDatabaseIfStale()
   });
 registerMemoryLifecycleHooks();
 startDreamScheduler();
+setInterval(() => {
+  void retryFailedExtractions(getDb()).catch((error) => {
+    console.error("[memory-worker] retry scan failed:", error);
+  });
+}, 60_000);
 startTaskWatchdogScheduler();
 void startFeishuWebSocketService();
 

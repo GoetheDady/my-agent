@@ -55,6 +55,9 @@ src/scripts/
 
 本轮 M7 改动对 Core Runtime 的影响：
 
+- SQLite schema 新增 `memory_extraction_retries` 表和按 `next_retry_at` / `attempt_count` 查询的索引，用于保存记忆提取失败后的持久化重试队列。
+- `src/main.ts` 在梦整理调度器启动后注册 60 秒轮询，扫描到期的记忆提取重试记录。
+- 这里的“持久化重试队列”指失败任务写入 SQLite，进程重启后仍能继续扫描和重试。
 - `episodes` 表新增 task 派生字段：`task_status`、`attempt_count`、`failure_type`、`failure_stage`、`retriable`。
 - `episodes` 表新增 `key_steps`，用于保存一次经历的关键步骤。
 - 老数据库通过 `ensureColumn()` 自动补齐新字段，避免用户删库重建。

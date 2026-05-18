@@ -36,6 +36,8 @@ import type {
 } from "./types";
 import { buildSummary, extractResultIds, uniqueStrings } from "./utils";
 
+const RETRY_BASE_DELAY_MS = 30_000;
+
 export type {
   MemoryChangePlan,
   MemoryChangePlanner,
@@ -347,4 +349,87 @@ const defaultWorker = new MemoryExtractionWorker();
  */
 export function enqueueMemoryExtraction(job: MemoryExtractionJob): Promise<MemoryWorkerResult> {
   return defaultWorker.enqueue(job);
+}
+
+export function persistExtractionFailure(
+  database: Database,
+  messageId: string,
+  agentId: string,
+  error: unknown,
+  job?: MemoryExtractionJob,
+): void {
+  const now = Date.now();
+  database.run(
+    `INSERT INTO memory_extraction_retries
+       (id, message_id, agent_id, attempt_count, next_retry_at, last_error, created_at)
+     VALUES (?, ?, ?, 0, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       next_retry_at = excluded.next_retry_at,
+       last_error = excluded.last_error`,
+    [messageId, messageId, agentId, now + RETRY_BASE_DELAY_MS, serializeFailure(error, job), now],
+  );
+}
+
+export async function retryFailedExtractions(
+  database: Database,
+  worker: MemoryExtractionWorker = defaultWorker,
+): Promise<void> {
+  const now = Date.now();
+  const records = database.query<{ id: string; attempt_count: number }, [number]>(
+    `SELECT id, attempt_count
+     FROM memory_extraction_retries
+     WHERE next_retry_at <= ? AND attempt_count < 5
+     ORDER BY created_at ASC`,
+  ).all(now);
+
+  for (const record of records) {
+    const attempts = record.attempt_count + 1;
+    const locked = database.run(
+      `UPDATE memory_extraction_retries
+       SET attempt_count = attempt_count + 1, next_retry_at = ?
+       WHERE id = ? AND attempt_count = ?`,
+      [now + retryDelay(attempts), record.id, record.attempt_count],
+    );
+    if (locked.changes === 0) continue;
+
+    const job = readRetryJob(database, record.id);
+    try {
+      if (!job) {
+        database.run("DELETE FROM memory_extraction_retries WHERE id = ?", [record.id]);
+        continue;
+      }
+      job.database = database;
+      await worker.enqueue(job);
+      database.run("DELETE FROM memory_extraction_retries WHERE id = ?", [record.id]);
+    } catch (error) {
+      const exhaustedAt = attempts >= 5 ? Number.MAX_SAFE_INTEGER : now + retryDelay(attempts);
+      database.run(
+        `UPDATE memory_extraction_retries
+         SET next_retry_at = ?, last_error = ?
+         WHERE id = ?`,
+        [exhaustedAt, serializeFailure(error, job ?? undefined), record.id],
+      );
+    }
+  }
+}
+
+function retryDelay(attemptCount: number): number {
+  return (2 ** attemptCount) * RETRY_BASE_DELAY_MS;
+}
+
+function readRetryJob(database: Database, id: string): MemoryExtractionJob | null {
+  const row = database.query<{ last_error: string }, [string]>(
+    "SELECT last_error FROM memory_extraction_retries WHERE id = ?",
+  ).get(id);
+  if (!row) return null;
+  try {
+    return (JSON.parse(row.last_error) as { job?: MemoryExtractionJob }).job ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeFailure(error: unknown, job?: MemoryExtractionJob): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return JSON.stringify({ error: message, job });
 }
