@@ -56,6 +56,8 @@ src/runtime/internal-runner.ts
 - 注入当前 Agent 的 Skill index。
 - 注入当前 Task 的 working memory。
 - 为父任务汇总构造受预算限制的结构化上下文，包含 plan steps、直接 child task 结果/错误摘要、delegation callback 信息和已有 episode 摘要。
+- `src/prompts/task-context-summary.ts` 将父任务输入、步骤、子任务结果和 episode 摘要统一裁剪到固定预算，避免把完整事件流水塞进 prompt。
+- `buildSummaryTaskMessages()` 会把结构化父任务上下文整理成最终汇总提示，要求模型说明完成、失败、取消情况，并禁止继续委派或创建新的子任务。
 - 明确长期记忆不会整体塞进 prompt，必须通过 `memory_recall`、`memory_evidence` 等工具查询。
 - 明确 Agent 配置必须通过 `agent_config_get` / `agent_config_patch` 访问和修改。
 - 明确普通异步委派使用 `agent_delegate`，并说明不等待目标 Agent 同步完成。
