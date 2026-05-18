@@ -32,9 +32,11 @@ Runtime Control API 负责暴露后端运行状态和安全控制动作。
 ```text
 src/routes/runtime.ts
 src/routes/memory.ts
+src/routes/skills.ts
 ```
 
 Memory 相关 API 的业务语义属于 [M7 Memory System](./m7-memory-system.md)，路由层归入 Runtime Control API 统一管理。
+Skill 相关 API 的业务语义属于 [M9 Skill System](./m9-skill-system.md)，其中 Skill candidate 审查路由也通过控制面暴露给 Web 或调用方。
 
 ## 3. 当前状态
 
@@ -54,7 +56,10 @@ Runtime 控制面 (`src/routes/runtime.ts`)：
 - `GET /api/runtime/tasks/:id/events`
 - `GET /api/runtime/tasks/:id/timeline`
 - `GET /api/runtime/tasks/:id/plan`
+- `GET /api/runtime/export`
+- `GET /api/runtime/backups`
 - `PUT /api/runtime/tasks/:id/plan`
+- `POST /api/runtime/backup`
 - `POST /api/runtime/tasks/:id/dependencies`
 - `DELETE /api/runtime/tasks/:id/dependencies/:dependsOnTaskId`
 - `POST /api/runtime/watchdog/run`
@@ -86,8 +91,23 @@ Memory 观察面 (`src/routes/memory.ts`)：
 - Episode 查询参数扩展了 `taskId`、`status`（TaskStatus 可多值）和 `failureType`，支持按任务结果或失败类型回看经历。
 - 新增按 taskId 和 episode id 的单条查询端点，方便从 Task 详情页直接定位 episode。
 
+本轮 M14 改动对 API 的影响：
+
+- 新增 `POST /api/runtime/backup`，触发一次 SQLite 热备份，并在返回前执行旧备份清理。这里的“热备份”指服务不中断时创建一致性快照。
+- 新增 `GET /api/runtime/backups`，列出运行时数据目录下已有的 SQLite 备份文件。
+- 新增 `GET /api/runtime/export`，返回结构化 JSON 导出，包含 agents、tasks、sessions 和 messages 等 SQLite 元数据。
+- 当前 `export` 不包含 LanceDB 向量内容，只返回记忆导出说明和数量占位；这是有意保持的边界，避免把大体积 embedding 数据塞进控制面响应。
+
+本轮 M9 改动对 API 的影响：
+
+- `GET /api/skills/candidates` 列出正式 Skill candidate；支持按 `agentId` 和 `status` 过滤。
+- `POST /api/skills/candidates/:id/accept` 会把候选转成正式 Skill，并写入候选审查记录。
+- `POST /api/skills/candidates/:id/reject` 会把候选标记为 rejected，保留审查备注。
+- 这组 API 让 Skill candidate 从兼容 review item 变成可操作的正式闭环。
+
 ## 4. 后续需要补齐
 
+- LanceDB、Agent 文件目录和 SQLite 的统一恢复接口；当前 Runtime API 只提供 SQLite 备份和结构化导出。
 - Task timeline v1 已有，后续补过滤、分页、payload schema 和跨父子任务串联。
 - running task 当前步骤视图已有基础，后续补模型 step、token 用量和更细工具状态。
 - 控制动作审计筛选。

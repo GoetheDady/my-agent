@@ -7,6 +7,7 @@ import { createTask, markTaskCompleted, markTaskRunning } from "../tasks/task-st
 import { listDreamRuns, runDreamWorker, type DreamMemoryStore } from "./dream-worker";
 import { listMemoryDecisions } from "./decision-store";
 import { upsertEpisodeForTask } from "./episode-store";
+import { listSkillCandidates } from "../skills/candidate-store";
 import type { Memory, MemorySnapshotRestore } from "./store";
 
 function createMemory(overrides: Partial<Memory>): Memory {
@@ -146,6 +147,36 @@ describe("dream worker", () => {
       });
 
       expect(syncedIds).toEqual(["new"]);
+    });
+  });
+
+  test("creates skill candidates from repeated high quality episodes during real run", async () => {
+    await withDreamDb(async (db) => {
+      for (const id of ["one", "two"]) {
+        const task = createTask({
+          id: `task-skill-${id}`,
+          source_channel: "web",
+          input: "实现可复用调试流程",
+          created_at: new Date("2026-05-09T08:00:00.000Z").getTime(),
+        }, db);
+        markTaskRunning(task.id, db);
+        markTaskCompleted(task.id, "完成了可复用调试流程。", db);
+        const episode = upsertEpisodeForTask(task.id, db);
+        if (!episode) throw new Error("episode should exist");
+        db.query("UPDATE episodes SET key_steps = ?, importance = ? WHERE id = ?")
+          .run(JSON.stringify(["复现问题", "补测试", "修复并验证"]), 0.8, episode.id);
+      }
+
+      const result = await runDreamWorker({
+        database: db,
+        date: "2026-05-09",
+        dryRun: false,
+        memoryStore: createMemoryStore(new Map()),
+        profileSync: async () => ({ status: "skipped", applied: [] }),
+      });
+
+      expect(result.skillCandidateCount).toBe(1);
+      expect(listSkillCandidates({ agentId: "default", status: "pending" }, db)).toHaveLength(1);
     });
   });
 });

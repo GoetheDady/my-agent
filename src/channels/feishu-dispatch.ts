@@ -63,6 +63,7 @@ export async function dispatchFeishuMessage(
     externalUserId: message.senderId,
     text: message.text,
     agentId: message.binding.agentId,
+    idempotency_key: `feishu:${message.appId}:${message.messageId}`,
     metadata: {
       appId: message.appId,
       chatId: message.chatId,

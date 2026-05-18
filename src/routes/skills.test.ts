@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
+import { createSkillCandidate } from "../skills/candidate-store";
 import { SkillService } from "../skills";
 import { createSkillsRoutes } from "./skills";
 
@@ -125,6 +126,49 @@ describe("skills routes", () => {
     }
   });
 
+  test("remote skill install stores content hash and update emits content change", async () => {
+    const rootDir = createTempRoot();
+    const firstRemoteDir = createTempRoot();
+    const secondRemoteDir = createTempRoot();
+    let fetchCount = 0;
+    const service = new SkillService({
+      rootDir,
+      remoteSkillFetcher: () => {
+        fetchCount += 1;
+        return fetchCount === 1
+          ? { directory: firstRemoteDir, commit: "commit-one", cleanup: () => undefined }
+          : { directory: secondRemoteDir, commit: "commit-two", cleanup: () => undefined };
+      },
+    });
+    try {
+      writeFileSync(join(firstRemoteDir, "SKILL.md"), "# Remote Skill\n\nBody one.");
+      writeFileSync(join(secondRemoteDir, "SKILL.md"), "# Remote Skill\n\nBody two.");
+      await withSkillsApp(async (app, db) => {
+        const installRes = await app.request("/skills/install", {
+          method: "POST",
+          body: JSON.stringify({ url: "https://github.com/acme/remote-skill" }),
+          headers: { "content-type": "application/json" },
+        });
+        const installBody = await installRes.json() as { skill: { origin: { contentHash?: string } } };
+        expect(installRes.status).toBe(201);
+        expect(installBody.skill.origin.contentHash).toMatch(/^[a-f0-9]{64}$/);
+
+        const updateRes = await app.request("/skills/remote-skill/update", { method: "POST" });
+        const updateBody = await updateRes.json() as { skill: { origin: { contentHash?: string } }; changed: boolean };
+        expect(updateRes.status).toBe(200);
+        expect(updateBody.changed).toBe(true);
+        expect(updateBody.skill.origin.contentHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(updateBody.skill.origin.contentHash).not.toBe(installBody.skill.origin.contentHash);
+        const events = db.query<{ type: string }, []>("SELECT type FROM events ORDER BY created_at ASC").all();
+        expect(events.map((event) => event.type)).toContain("skill.content.changed");
+      }, service);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+      rmSync(firstRemoteDir, { recursive: true, force: true });
+      rmSync(secondRemoteDir, { recursive: true, force: true });
+    }
+  });
+
   test("POST /skills/install rejects non-GitHub URLs", async () => {
     await withSkillsApp(async (app) => {
       const res = await app.request("/skills/install", {
@@ -136,6 +180,47 @@ describe("skills routes", () => {
 
       expect(res.status).toBe(409);
       expect(body.error).toContain("只支持");
+    });
+  });
+
+  test("skill candidate routes list, accept, and reject candidates", async () => {
+    await withSkillsApp(async (app, db) => {
+      const accepted = createSkillCandidate({
+        name: "Debug Flow",
+        description: "可复用调试流程",
+        category: "engineering",
+        content: "# Debug Flow\n\nSteps.",
+        sourceEpisodeIds: ["episode-1"],
+      }, db);
+      const rejected = createSkillCandidate({
+        name: "Noisy Flow",
+        description: "不稳定流程",
+        content: "# Noisy Flow",
+      }, db);
+
+      const listRes = await app.request("/skills/candidates?agentId=default");
+      const listBody = await listRes.json() as { candidates: Array<{ id: string }> };
+      expect(listRes.status).toBe(200);
+      expect(listBody.candidates.map((candidate) => candidate.id)).toEqual([rejected.id, accepted.id]);
+
+      const acceptRes = await app.request(`/skills/candidates/${accepted.id}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ skillId: "debug-flow" }),
+        headers: { "content-type": "application/json" },
+      });
+      const acceptBody = await acceptRes.json() as { candidate: { status: string }; skill: { id: string } };
+      expect(acceptRes.status).toBe(200);
+      expect(acceptBody.candidate.status).toBe("accepted");
+      expect(acceptBody.skill.id).toBe("debug-flow");
+
+      const rejectRes = await app.request(`/skills/candidates/${rejected.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ note: "太噪音" }),
+        headers: { "content-type": "application/json" },
+      });
+      const rejectBody = await rejectRes.json() as { candidate: { status: string; review_note: string } };
+      expect(rejectRes.status).toBe(200);
+      expect(rejectBody.candidate).toMatchObject({ status: "rejected", review_note: "太噪音" });
     });
   });
 });

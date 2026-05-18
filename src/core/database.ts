@@ -337,6 +337,23 @@ export function initializeDatabaseSchema(database: Database): void {
   `);
 
   database.run(`
+    CREATE TABLE IF NOT EXISTS skill_candidates (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      content TEXT NOT NULL,
+      source_episode_ids TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      reviewed_at INTEGER,
+      review_note TEXT,
+      FOREIGN KEY (agent_id) REFERENCES agents(id)
+    )
+  `);
+
+  database.run(`
     CREATE TABLE IF NOT EXISTS dream_runs (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
@@ -410,6 +427,9 @@ export function initializeDatabaseSchema(database: Database): void {
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_memory_review_agent_status ON memory_review_items(agent_id, status, created_at)`,
+  );
+  database.run(
+    `CREATE INDEX IF NOT EXISTS idx_skill_candidates_agent_status ON skill_candidates(agent_id, status, created_at)`,
   );
   database.run(
     `CREATE INDEX IF NOT EXISTS idx_dream_runs_agent_date ON dream_runs(agent_id, date, trigger, dry_run, status)`,

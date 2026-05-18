@@ -230,6 +230,20 @@ describe("runtime database schema", () => {
         ["reviewed_at", "INTEGER", 0, null, 0],
       ]);
 
+      expect(readTableColumns(db, "skill_candidates")).toEqual([
+        ["id", "TEXT", 0, null, 1],
+        ["agent_id", "TEXT", 1, null, 0],
+        ["name", "TEXT", 1, null, 0],
+        ["description", "TEXT", 1, null, 0],
+        ["category", "TEXT", 1, "'general'", 0],
+        ["content", "TEXT", 1, null, 0],
+        ["source_episode_ids", "TEXT", 1, "'[]'", 0],
+        ["status", "TEXT", 1, "'pending'", 0],
+        ["created_at", "INTEGER", 1, null, 0],
+        ["reviewed_at", "INTEGER", 0, null, 0],
+        ["review_note", "TEXT", 0, null, 0],
+      ]);
+
       expect(readTableColumns(db, "dream_runs")).toEqual([
         ["id", "TEXT", 0, null, 1],
         ["agent_id", "TEXT", 1, null, 0],
@@ -314,6 +328,10 @@ describe("runtime database schema", () => {
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
       ]);
 
+      expect(readForeignKeys(db, "skill_candidates")).toEqual([
+        { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
+      ]);
+
       expect(readForeignKeys(db, "dream_runs")).toEqual([
         { table: "agents", from: "agent_id", to: "id", on_delete: "NO ACTION" },
       ]);
@@ -355,6 +373,11 @@ describe("runtime database schema", () => {
         "date",
       ]);
       expect(readIndexColumns(db, "idx_memory_review_agent_status")).toEqual([
+        "agent_id",
+        "status",
+        "created_at",
+      ]);
+      expect(readIndexColumns(db, "idx_skill_candidates_agent_status")).toEqual([
         "agent_id",
         "status",
         "created_at",

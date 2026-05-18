@@ -6,6 +6,7 @@ export interface ChannelMessageInput {
   externalUserId?: string;
   text: string;
   agentId?: string;
+  idempotency_key?: string;
   metadata?: Record<string, unknown>;
 }
 

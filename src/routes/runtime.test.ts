@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ensureDefaultAgent, updateAgentStatus } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
@@ -10,17 +13,27 @@ import { createTask, getTask, markTaskCompleted, markTaskFailed, markTaskRunning
 import { addTaskDependency, setTaskPlan } from "../tasks/task-plan-store";
 import { createRuntimeRoutes } from "./runtime";
 
-function withRuntimeApp<T>(run: (app: Hono, db: Database) => T | Promise<T>): Promise<T> {
+function createTempDir(): string {
+  return mkdtempSync(join(tmpdir(), "my-agent-runtime-route-"));
+}
+
+function withRuntimeApp<T>(
+  run: (app: Hono, db: Database, backupDir: string) => T | Promise<T>,
+): Promise<T> {
   const db = new Database(":memory:");
+  const backupDir = createTempDir();
   db.run("PRAGMA foreign_keys = ON");
   initializeDatabaseSchema(db);
   ensureDefaultAgent(db);
   const app = new Hono();
-  app.route("/runtime", createRuntimeRoutes(db));
+  app.route("/runtime", createRuntimeRoutes(db, { backupDir }));
 
   return Promise.resolve()
-    .then(() => run(app, db))
-    .finally(() => db.close());
+    .then(() => run(app, db, backupDir))
+    .finally(() => {
+      db.close();
+      rmSync(backupDir, { recursive: true, force: true });
+    });
 }
 
 describe("runtime routes", () => {
@@ -282,6 +295,51 @@ describe("runtime routes", () => {
 
       expect(res.status).toBe(200);
       expect(body.events.map((event) => event.id)).toEqual(["event-1"]);
+    });
+  });
+
+  test("GET /runtime/export returns structured database export", async () => {
+    await withRuntimeApp(async (app, db) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+
+      const res = await app.request("/runtime/export");
+      const body = await res.json() as {
+        version: number;
+        agents: Array<{ id: string }>;
+        tasks: Array<{ id: string }>;
+        sessions: unknown[];
+        memories: { count: number; note: string };
+      };
+
+      expect(res.status).toBe(200);
+      expect(body.version).toBe(1);
+      expect(body.agents.map((agent) => agent.id)).toEqual(["default"]);
+      expect(body.tasks.map((task) => task.id)).toEqual(["task-1"]);
+      expect(body.sessions).toEqual([]);
+      expect(body.memories.note).toContain("LanceDB");
+    });
+  });
+
+  test("POST /runtime/backup creates a backup and GET /runtime/backups lists it", async () => {
+    await withRuntimeApp(async (app, db, backupDir) => {
+      createTask({ id: "task-1", source_channel: "web", input: "hello" }, db);
+
+      const backupRes = await app.request("/runtime/backup", { method: "POST" });
+      const backupBody = await backupRes.json() as {
+        backup: { path: string; size: number; filename: string };
+      };
+      const listRes = await app.request("/runtime/backups");
+      const listBody = await listRes.json() as {
+        backups: Array<{ path: string; size: number; filename: string }>;
+      };
+
+      expect(backupRes.status).toBe(201);
+      expect(backupBody.backup.path.startsWith(backupDir)).toBe(true);
+      expect(backupBody.backup.filename.endsWith(".sqlite")).toBe(true);
+      expect(backupBody.backup.size).toBeGreaterThan(0);
+      expect(listRes.status).toBe(200);
+      expect(listBody.backups).toHaveLength(1);
+      expect(listBody.backups[0]?.filename).toBe(backupBody.backup.filename);
     });
   });
 

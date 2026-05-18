@@ -1,6 +1,16 @@
 import type { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import { getAgent } from "../agents/agent-registry";
+import {
+  backupDatabase,
+  backupFileName,
+  createTimestampedBackupPath,
+  exportDatabaseJson,
+  getDefaultBackupDir,
+  listBackups,
+  pruneBackups,
+  type BackupResult,
+} from "../core/backup";
 import { getDb } from "../core/database";
 import { listAgentEvents, listTaskEvents } from "../events/event-log";
 import { finalizeEpisodeForTask } from "../memory/episode-store";
@@ -17,6 +27,11 @@ import {
 import type { TaskStatus } from "../tasks/task-types";
 import { runTaskWatchdogOnce } from "../tasks/watchdog";
 
+export interface RuntimeRouteOptions {
+  backupDir?: string;
+  backupKeepCount?: number;
+}
+
 /**
  * 创建 Runtime 观察与控制路由。
  *
@@ -26,8 +41,10 @@ import { runTaskWatchdogOnce } from "../tasks/watchdog";
  * @param database 可选数据库连接。
  * @returns Hono 路由实例。
  */
-export function createRuntimeRoutes(database: Database = getDb()): Hono {
+export function createRuntimeRoutes(database: Database = getDb(), options: RuntimeRouteOptions = {}): Hono {
   const app = new Hono();
+  const backupDir = options.backupDir ?? getDefaultBackupDir();
+  const backupKeepCount = options.backupKeepCount ?? 5;
 
   /**
    * Runtime API 只负责“观察和控制当前执行状态”：
@@ -136,6 +153,21 @@ export function createRuntimeRoutes(database: Database = getDb()): Hono {
     });
   });
 
+  app.get("/export", (c) => c.json(exportDatabaseJson(database)));
+
+  app.get("/backups", (c) => c.json({ backups: listBackups(backupDir) }));
+
+  app.post("/backup", async (c) => {
+    try {
+      const backupPath = createTimestampedBackupPath(backupDir);
+      const backup = await backupDatabase(backupPath, database);
+      pruneBackups(backupDir, backupKeepCount);
+      return c.json({ backup: toBackupResponse(backup) }, 201);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
   app.post("/watchdog/run", (c) => {
     return c.json(runTaskWatchdogOnce(database));
   });
@@ -199,5 +231,12 @@ function toTaskPlanStepInput(value: unknown): TaskPlanStepInput {
   return {
     title: typeof record.title === "string" ? record.title : "",
     detail: typeof record.detail === "string" ? record.detail : "",
+  };
+}
+
+function toBackupResponse(backup: BackupResult): BackupResult & { filename: string } {
+  return {
+    ...backup,
+    filename: backupFileName(backup.path),
   };
 }

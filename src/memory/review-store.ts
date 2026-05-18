@@ -3,7 +3,13 @@ import { getDb } from "../core/database";
 import { appendEvent } from "../events/event-log";
 
 export type MemoryReviewStatus = "pending" | "accepted" | "rejected";
-export type MemoryReviewType = "merge" | "semantic_update" | "procedural_memory" | "conflict" | "reflective_memory";
+export type MemoryReviewType =
+  | "merge"
+  | "semantic_update"
+  | "procedural_memory"
+  | "conflict"
+  | "reflective_memory"
+  | "skill_candidate";
 
 export interface MemoryReviewItem {
   id: string;

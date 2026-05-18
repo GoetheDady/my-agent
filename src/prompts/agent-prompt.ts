@@ -5,6 +5,8 @@ import { loadProfileContext, type ProfileContext } from "../profiles/files";
 import { defaultSkillService, type SkillService } from "../skills";
 import { listWorkingMemory } from "../memory/working-memory";
 import type { TaskRecord } from "../tasks/task-types";
+import { listTaskSteps } from "../tasks/task-plan-store";
+import { buildPlanningGuide, shouldInjectPlanningGuide } from "./planning-guide";
 
 export const DEFAULT_AGENT_SYSTEM_PROMPT = `你是一个有用的 AI 助手。使用中文回复。回答简洁明了。
 
@@ -38,6 +40,7 @@ export interface BuildAgentSystemPromptOptions {
   profileRootDir?: string;
   createProfileFiles?: boolean;
   skillService?: Pick<SkillService, "buildSkillIndex">;
+  planningGuide?: string;
 }
 
 /**
@@ -71,6 +74,7 @@ export function buildAgentSystemPrompt(
   const workingMemoryLines = Object.entries(workingMemory)
     .map(([key, value]) => `- ${key}: ${JSON.stringify(value)}`)
     .join("\n");
+  const planningGuide = options.planningGuide ?? buildAutomaticPlanningGuide(task, database);
 
   return [
     DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -86,6 +90,7 @@ export function buildAgentSystemPrompt(
     `source_channel: ${task.source_channel}`,
     `source_user_id: ${task.source_user_id}`,
     `</task>`,
+    planningGuide,
     buildProfileContextSection(profileContext),
     buildSkillIndexSection(skillIndex),
     workingMemoryLines ? `\n<working-memory>\n${workingMemoryLines}\n</working-memory>` : "",
@@ -126,4 +131,26 @@ function buildProfileContextSection(profileContext: ProfileContext): string {
 
   lines.push(`</profile-context>`);
   return lines.join("\n");
+}
+
+function buildAutomaticPlanningGuide(task: TaskRecord, database?: Database): string {
+  const hasParentTask = Boolean(task.parent_task_id);
+  const hasExistingPlan = listTaskSteps(task.id, database).length > 0;
+  if (!shouldInjectPlanningGuide({
+    taskInput: task.input,
+    hasParentTask,
+    hasExistingPlan,
+  })) {
+    return "";
+  }
+
+  return buildPlanningGuide(task.input, {
+    hasParentTask,
+    availableTools: [
+      "task_plan_set",
+      "task_step_update",
+      "task_child_create",
+    ],
+    recentEpisodes: [],
+  });
 }

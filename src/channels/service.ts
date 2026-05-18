@@ -89,6 +89,7 @@ export class ChannelService {
         source_channel: channel,
         source_user_id: identity.user_id,
         input: input.text,
+        idempotency_key: input.idempotency_key,
       },
       database,
     );

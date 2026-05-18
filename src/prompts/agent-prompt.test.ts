@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { createTask } from "../tasks/task-store";
+import { setTaskPlan } from "../tasks/task-plan-store";
 import { buildAgentSystemPrompt } from "./agent-prompt";
 
 function withPromptDb<T>(run: (db: Database) => T): T {
@@ -106,6 +107,51 @@ describe("prompt builder", () => {
       expect(prompt).toContain("task_step_update");
       expect(prompt).toContain("task_child_create");
       expect(prompt).toContain("不要直接用普通 agent_delegate 绕过计划步骤绑定");
+    });
+  });
+
+  test("injects planning guide for complex top-level tasks", () => {
+    withPromptDb((db) => {
+      const task = createTask({
+        id: "task-complex",
+        source_channel: "web",
+        source_user_id: "default",
+        input: "请先分析项目中所有 TODO、FIXME 和未完成测试，按模块分类后给出优先级，再说明哪些需要先补测试、哪些需要直接修复、哪些需要拆成子任务处理，并在修改后验证结果是否通过。".repeat(3),
+      }, db);
+
+      const prompt = buildAgentSystemPrompt(task, db, {
+        profileContext: { soul: "", user: "", files: [] },
+      });
+
+      expect(prompt).toContain("<planning-guide>");
+      expect(prompt).toContain("应该先调用 task_plan_set 的情况");
+    });
+  });
+
+  test("does not inject planning guide for simple tasks or tasks with existing plan", () => {
+    withPromptDb((db) => {
+      const simpleTask = createTask({
+        id: "task-simple",
+        source_channel: "web",
+        source_user_id: "default",
+        input: "查看当前时间",
+      }, db);
+      const simplePrompt = buildAgentSystemPrompt(simpleTask, db, {
+        profileContext: { soul: "", user: "", files: [] },
+      });
+      expect(simplePrompt).not.toContain("<planning-guide>");
+
+      const plannedTask = createTask({
+        id: "task-planned",
+        source_channel: "web",
+        source_user_id: "default",
+        input: "请完成一个很复杂的改造任务。".repeat(30),
+      }, db);
+      setTaskPlan(plannedTask.id, [{ title: "已有计划", detail: "无需重复注入" }], db);
+      const plannedPrompt = buildAgentSystemPrompt(plannedTask, db, {
+        profileContext: { soul: "", user: "", files: [] },
+      });
+      expect(plannedPrompt).not.toContain("<planning-guide>");
     });
   });
 });

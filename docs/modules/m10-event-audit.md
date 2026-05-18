@@ -40,6 +40,7 @@ src/events/
 - Task、Tool、Memory、Skill、Channel、Dream、Profile 事件。
 - Watchdog 自动检测、修复、恢复、取消和告警事件。
 - 统一工具审计事件：`tool.call` 记录工具名、tool call id、参数和开始时间；`tool.result` 记录成功/失败、耗时、输出摘要或错误。
+- Skill candidate 审查事件和远程 Skill 内容变更事件。
 
 本轮 M3 改动新增或规范了这些事件类型：
 
@@ -74,9 +75,23 @@ Task Plan / Dependency 事件边界：
 - 这些事件是审计事实，不替代 `task_steps` / `task_dependencies` 的当前结构化状态。
 - Agent 通过 `task_plan_*`、`task_step_update`、`task_child_create` 和 `task_dependency_*` 工具写入计划和依赖时，仍会同时产生 `tool.call` / `tool.result` 工具审计事件，以及对应的 `task.*` 事实事件。
 
+本轮 P1 Memory → Skill 闭环新增这些 Skill candidate 事件：
+
+- `skill.candidate.created`：正式候选写入 `skill_candidates` 表时记录，payload 包含 candidate id、名称和来源 episode。
+- `skill.candidate.accepted`：候选被接受并转成正式 Skill 后记录，payload 包含 candidate id 和生成的 skill id。
+- `skill.candidate.rejected`：候选被拒绝后记录，payload 包含 candidate id 和审查备注。
+
+本轮 P3 远程 Skill 内容哈希新增这些审计语义：
+
+- `skill.content.changed`：远程 Skill 更新时目录内容哈希发生变化后记录，payload 包含旧 `previousContentHash` 和新 `contentHash`。
+- `contentHash` 是目录内容的 SHA-256 摘要，用于证明“实际文件内容变了”，不是只依赖远程 commit 或时间戳。
+
+这些事件仍然是审计事实，不替代当前状态：Skill candidate 的当前审查状态保存在 `skill_candidates` 表，远程 Skill 的当前 origin 保存在 Agent-scoped `agent.json`。
+
 ## 4. 后续需要补齐
 
 - 事件 payload schema 文档。
 - 事件严重等级与 `notificationLevel` 的统一规范。
+- Skill candidate 和远程 Skill 更新事件的 payload 示例。
 - 事件导出和归档。
 - Task timeline 已有 v1，后续需要补 payload schema、过滤条件和导出。

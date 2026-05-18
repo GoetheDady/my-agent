@@ -44,11 +44,23 @@ src/channels/
 - 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
 - WeChat stub。
 
+本轮模块拆分与幂等改动对 Channel 的影响：
+
+- `ChannelMessageInput` 新增可选 `idempotency_key` 字段，并由 `ChannelService.receiveMessage()` 原样透传给 `createTask()`。
+- `feishu-dispatch.ts` 现在使用 `feishu:${appId}:${messageId}` 生成稳定幂等键。这里的“幂等”指同一条外部消息即使重复投递，也只会创建一次内部 Task，而不是重复执行多次。
+- 这次改动把外部消息唯一标识的生成放在渠道适配层，把 Task 去重复用留给 Task System，模块边界更清楚：Channel 负责提供稳定外部 ID，Task 负责判定是否复用既有任务。
+- 这意味着飞书消息重复回放、重连后重投或平台侧重复回调时，系统更容易保持“一条消息对应一个 Task”的行为。
+
 本轮 M3 改动对 Channel 的影响：
 
 - 外部渠道 runner 会写 Task progress。
 - 渠道最终投递失败归入 `failure_stage='delivery'`。
 - 渠道失败会写入结构化 outcome，方便 Runtime API 解释失败。
+- `ChannelService` 作为统一入口，现在也承担把渠道侧幂等键带进 Task System 的职责。
+
+本轮 P0 / M14 改动对 Channel 的影响：
+
+- Channel 侧没有直接新增备份逻辑，但它依赖的 Task / Session / Event SQLite 数据现在可通过 Runtime Control API 备份和导出，便于后续排查重复投递和消息回放问题。
 
 本轮 M7 改动对 Channel 的影响：
 
@@ -66,7 +78,7 @@ src/channels/
 
 ## 4. 后续需要补齐
 
-- Feishu message id 全面接入 `idempotency_key`。
+- 为更多渠道统一生成稳定 `idempotency_key`，例如未来微信 message id、webhook event id。
 - 微信真实接入。
 - 附件和富文本处理。
 - 多渠道统一错误反馈。

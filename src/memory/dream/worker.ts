@@ -12,6 +12,8 @@ import {
   listDreamRuns,
 } from "../dream-run-store";
 import { listReviewItems } from "../review-store";
+import { createSkillCandidatesFromEpisodes } from "../../skills/candidates";
+import { listSkillCandidates } from "../../skills/candidate-store";
 import {
   addMemory,
   getMemory,
@@ -142,6 +144,15 @@ export async function runDreamWorker(
       summary.memory_change_ids = decisions.map((decision) => decision.id);
       updateDailySummaryMemoryChanges(summary.id, summary.memory_change_ids, database);
     }
+    const skillReviewItems = dryRun
+      ? []
+      : createSkillCandidatesFromEpisodes({
+        agentId,
+        from: summary.created_at - 24 * 60 * 60 * 1000,
+        to: summary.updated_at + 1,
+        limit: 50,
+      }, database);
+    const skillCandidates = listSkillCandidates({ agentId, status: "pending", limit: 1000 }, database);
     const pendingReviewCount = listReviewItems({ agentId, status: "pending", limit: 1000 }, database).length;
     const completedRun = completeDreamRun(dreamRun.id, database) ?? dreamRun;
     const persistedDecisions = dryRun
@@ -156,6 +167,8 @@ export async function runDreamWorker(
       dedupe,
       decisions: persistedDecisions,
       decisionCount: persistedDecisions.length,
+      skillCandidates,
+      skillCandidateCount: skillReviewItems.length,
       pendingReviewCount,
     };
 
@@ -172,6 +185,7 @@ export async function runDreamWorker(
         decisionCount: persistedDecisions.length,
         appliedDecisionCount: persistedDecisions.filter((decision) => decision.status === "applied").length,
         skippedDecisionCount: persistedDecisions.filter((decision) => decision.status === "skipped").length,
+        skillCandidateCount: skillReviewItems.length,
       },
     }, database);
     return result;

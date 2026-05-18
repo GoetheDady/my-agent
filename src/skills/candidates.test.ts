@@ -4,6 +4,7 @@ import { ensureDefaultAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent } from "../events/event-log";
 import { listReviewItems } from "../memory/review-store";
+import { listSkillCandidates } from "./candidate-store";
 import { createTask, markTaskCompleted, markTaskFailed, markTaskRunning } from "../tasks/task-store";
 import { upsertEpisodeForTask } from "../memory/episode-store";
 import { createSkillCandidateFromEpisode } from "./candidates";
@@ -61,6 +62,7 @@ describe("skill candidates", () => {
       expect(candidate?.proposed_content).toContain("关键步骤");
       expect(candidate?.source_event_ids.length).toBeGreaterThan(0);
       expect(listReviewItems({ agentId: "default", status: "pending" }, db).map((item) => item.type)).toContain("skill_candidate");
+      expect(listSkillCandidates({ agentId: "default", status: "pending" }, db)).toHaveLength(1);
     });
   });
 
@@ -80,6 +82,7 @@ describe("skill candidates", () => {
 
       expect(candidate).toBeNull();
       expect(listReviewItems({ agentId: "default", status: "pending" }, db)).toHaveLength(0);
+      expect(listSkillCandidates({ agentId: "default", status: "pending" }, db)).toHaveLength(0);
     });
   });
 });

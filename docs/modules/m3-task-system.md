@@ -252,15 +252,17 @@ M3 只提供：
 - `context_missing`
 - `unknown`
 
-### 5.4 Task 计划和依赖已有 v1，仍缺自动规划和复杂调度
+### 5.4 Task 计划和依赖已有 v1，自动规划已有 prompt-level 基础版
 
 复杂任务已经可以表达为步骤、子任务和 task-level 依赖。
 Agent 也已经可以通过 runtime planning tools 主动写入这些结构。
 
+本轮 P2 自动规划改动补了一个最小版本：复杂的顶层 task 会自动注入 planning guide，先引导模型判断是否需要写 `task_plan_set`，再执行具体步骤。这里的 prompt-level 指“通过系统提示影响模型行为”，不是新增独立调度器或 planner agent。
+
 后续仍需要设计：
 
 - 等待、暂停、恢复。
-- LLM 自动生成计划。
+- 更强的 LLM 计划生成和计划质量评估。
 - 完整父子任务汇总。
 - DAG 级调度和跨 Agent 协作时间线。
 
@@ -292,6 +294,13 @@ Task Store 已支持 `idempotency_key`，但外部渠道需要稳定生成并传
 - Task 表仍只保存当前状态、最终结果、失败分类、进度和租约字段。
 - 单个任务的完整执行链路不写入 Task 表，而是通过 Task timeline 只读聚合视图从 Event 和 Episode 读取。
 - `tool.call` / `tool.result` 成为工具调用审计事实；Task 只通过 progress metadata 暴露“当前工具”和“最近输出”的轻量状态。
+
+本轮模块拆分重构对 M3 的影响：
+
+- `classifyTaskFailure()` 和 `TaskFailureContext` 从 `task-store.ts` 拆到新的 `src/tasks/task-failure.ts`。
+- `task-store.ts` 继续 re-export 这些类型和函数，因此现有调用方和导入路径可以保持不变。
+- 这次拆分把“任务持久化与状态流转”跟“失败分类规则”分开了。失败分类规则本质上是纯判断逻辑，也就是只根据输入错误文本和上下文返回结构化分类，不直接读写数据库。
+- 后续如果要扩展新的失败类型，例如更细的渠道错误、模型配额错误或外部依赖错误，可以优先在 `task-failure.ts` 演进，而不用让 `task-store.ts` 继续膨胀。
 
 ## 6. 完整目标
 

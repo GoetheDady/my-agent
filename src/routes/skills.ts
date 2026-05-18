@@ -2,6 +2,12 @@ import type { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import { getDb } from "../core/database";
 import { SkillService, defaultSkillService } from "../skills";
+import {
+  getSkillCandidate,
+  listSkillCandidates,
+  markSkillCandidateAccepted,
+  markSkillCandidateRejected,
+} from "../skills/candidate-store";
 
 export function createSkillsRoutes(service: SkillService = defaultSkillService, database: Database = getDb()): Hono {
   const app = new Hono();
@@ -22,6 +28,52 @@ export function createSkillsRoutes(service: SkillService = defaultSkillService, 
       agentId,
       index: service.buildSkillIndex(agentId),
     });
+  });
+
+  app.get("/candidates", (c) => {
+    const agentId = c.req.query("agentId") ?? "default";
+    const status = c.req.query("status");
+    return c.json({
+      candidates: listSkillCandidates({
+        agentId,
+        status: status === "accepted" || status === "rejected" || status === "pending" ? status : "pending",
+      }, database),
+    });
+  });
+
+  app.post("/candidates/:id/accept", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as {
+      agentId?: string;
+      skillId?: string;
+      note?: string;
+      status?: "enabled" | "disabled";
+    };
+    const candidate = getSkillCandidate(c.req.param("id"), database);
+    if (!candidate) return c.json({ error: "Skill candidate 不存在" }, 404);
+    if (candidate.status !== "pending") return c.json({ error: "Skill candidate 已审查" }, 409);
+    const skillId = normalizeSkillId(body.skillId ?? candidate.name);
+    try {
+      const skill = service.createSkill({
+        skillId,
+        name: candidate.name,
+        description: candidate.description,
+        category: candidate.category,
+        content: candidate.content,
+        status: body.status ?? "enabled",
+      }, { agentId: body.agentId ?? candidate.agent_id, database });
+      const reviewed = markSkillCandidateAccepted(candidate.id, { note: body.note, skillId: skill.id }, database);
+      return c.json({ candidate: reviewed, skill });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+    }
+  });
+
+  app.post("/candidates/:id/reject", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { note?: string };
+    const candidate = getSkillCandidate(c.req.param("id"), database);
+    if (!candidate) return c.json({ error: "Skill candidate 不存在" }, 404);
+    if (candidate.status !== "pending") return c.json({ error: "Skill candidate 已审查" }, 409);
+    return c.json({ candidate: markSkillCandidateRejected(candidate.id, body.note ?? "", database) });
   });
 
   app.get("/:skillId", (c) => {
@@ -138,6 +190,16 @@ export function createSkillsRoutes(service: SkillService = defaultSkillService, 
   });
 
   return app;
+}
+
+function normalizeSkillId(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return normalized.length > 0 ? normalized : "skill";
 }
 
 export default createSkillsRoutes();

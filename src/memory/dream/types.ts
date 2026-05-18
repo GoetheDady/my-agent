@@ -3,6 +3,7 @@ import type { ProfileSyncPort } from "../../profiles/sync";
 import type { MemoryDedupeResult, MemoryDedupeStore } from "../dedupe";
 import type { MemoryDecisionMemoryStore, MemoryDecisionRecord } from "../decision-store";
 import type { DreamRunRecord, DreamRunTrigger } from "../dream-run-store";
+import type { SkillCandidateRecord } from "../../skills/candidate-store";
 import type {
   addMemory,
   getMemory,
@@ -49,6 +50,8 @@ export interface DreamRunResult {
   dedupe: MemoryDedupeResult;
   decisions: MemoryDecisionRecord[];
   decisionCount: number;
+  skillCandidates: SkillCandidateRecord[];
+  skillCandidateCount: number;
   pendingReviewCount: number;
 }
 

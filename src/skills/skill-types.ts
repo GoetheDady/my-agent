@@ -22,6 +22,7 @@ export type SkillOrigin =
     branch: string;
     subdir: string;
     commit: string;
+    contentHash?: string;
     installedAt: number;
     updatedAt: number;
     legacySource?: string;

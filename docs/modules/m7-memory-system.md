@@ -49,10 +49,13 @@ src/memory/episode-store.ts
 - 记忆提取 worker 注入 `memory_extract` / `memory_reconsolidate` 工具片段。
 - 主动去重：保留高置信度记忆，并停用重复记忆。
 - Dream Worker：按运行记录做每日整理和反思。
+- Dream Worker real-run 会从重复出现的高质量 episode 生成正式 Skill candidate，并保留旧 review item 兼容层。
 - Episode v1：终态 Task 可生成经历摘要，并写入 `episode.created` / `episode.updated` / `episode.failed` 事件。
 - Episode 会从任务事件流提取工具使用和关键步骤，包括 `tool.call` / `tool.result` 中的工具名。
 - Episode 会从 Task Plan / Dependency 事件提取关键步骤，例如计划步骤、步骤状态、依赖阻塞和子任务创建。
 - Prospective memory 基础工具能力，用于记录未来计划或待办。
+- `memory_review_items` 兼容层支持 `skill_candidate` 类型，供 Skill System 把高质量 episode 转成待审查 Skill 候选。
+- `skill_candidates` 正式候选表用于承载 Skill 闭环中的候选、审查和转正流程。
 
 本轮改动对 Memory System 的影响：
 
@@ -65,10 +68,28 @@ src/memory/episode-store.ts
 - Task timeline API 会读取 `getEpisodeByTaskId()`，把 Episode 作为终态经历摘要展示；Episode 不是新的事实源，完整执行链路仍由 Event 提供。
 - Task Plan / Dependency v1 不新增 Episode 字段；经历摘要继续写入 `key_steps`、`problems` 和 `source_event_ids`。
 
+本轮 P0 数据备份对 Memory System 的影响：
+
+- `GET /api/runtime/export` 会返回结构化 SQLite 元数据，但当前不导出 LanceDB 向量内容；响应中的 `memories` 只保留数量占位和说明。
+- SQLite 热备份可以覆盖 episodes、memory review items、dream runs、memory decisions 等 SQLite 表，但长期记忆正文和 embedding 仍在 LanceDB 目录中。
+- 因此当前 P0 只解决 SQLite 侧备份与迁移素材导出，完整 Memory 恢复还需要把 `.my-agent/memories.lancedb/` 纳入统一备份包。
+
+本轮类型边界修复对 Memory System 的影响：
+
+- `MemoryReviewType` 增加 `skill_candidate`，使 `src/skills/candidates.ts` 中已有的 Skill 候选 review item 逻辑和类型声明一致。
+- 这只是类型声明补齐，不改变 `memory_review_items` 表结构；`type` 字段仍是 TEXT，旧数据兼容。
+
+本轮 P1 Memory → Skill 闭环对 Memory System 的影响：
+
+- Dream Worker 在每日整理 real-run 中会读取近期高质量 episode，并调用 Skill System 生成正式 `skill_candidates` 记录。
+- Memory System 只提供 episode 素材和整理触发点，不直接创建正式 Skill；候选保存、审查和转正仍属于 Skill System。
+- 这让 procedural memory，也就是“做事方法记忆”，开始通过 Skill candidate 进入受控审查流程，而不是把一次经历直接写成长期 Skill。
+
 ## 4. 后续需要补齐
 
 - Episode 摘要需要更稳定地区分成功、失败、取消和可重试失败。
 - Episode 与长期事实记忆的边界需要继续清晰化：经历摘要不应直接变成稳定事实。
 - 记忆冲突处理策略需要更明确，例如同一用户偏好发生变化时如何保留证据链。
-- 记忆导出、备份和恢复能力需要补齐。
+- 记忆导出、备份和恢复能力需要补齐：SQLite 元数据已有备份/导出基础，LanceDB 向量库和恢复流程仍未完成。
+- Memory → Skill candidate 的质量指标还需要补齐，例如重复模式命中率、候选接受率和误报率。
 - 记忆质量评估需要可观察指标，例如命中率、重复率和用户纠正率。

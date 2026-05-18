@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { resolve, extname, relative } from "path";
 import { readFile, stat } from "fs/promises";
 import { initializeRuntime } from "./core/runtime";
+import { backupDatabaseIfStale } from "./core/backup";
 import chatRoutes from "./routes/chat";
 import { createSessionRoutes } from "./routes/sessions";
 import { createAgentRoutes } from "./routes/agents";
@@ -28,6 +29,15 @@ import type { RealtimeSocketData } from "./realtime/types";
  * 注意：记忆提取和梦整理都属于后台认知流程，不应该阻塞 HTTP 服务启动。
  */
 initializeRuntime();
+void backupDatabaseIfStale()
+  .then((result) => {
+    if (result.created && result.backup) {
+      console.log(`[backup] 已创建启动备份: ${result.backup.path}`);
+    }
+  })
+  .catch((error) => {
+    console.warn("[backup] 启动备份失败", error);
+  });
 registerMemoryLifecycleHooks();
 startDreamScheduler();
 startTaskWatchdogScheduler();

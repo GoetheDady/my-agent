@@ -45,6 +45,13 @@ src/scripts/
 - WAL 和外键约束。
 - Gateway 相关脚本。
 - 启动后注册后台调度器，包括梦整理调度器和 Task Watchdog 调度器。
+- 启动时检查最近一次 SQLite 备份；超过 24 小时则异步创建一次新备份，不阻塞 HTTP 服务启动。
+
+本轮 P0 数据备份改动对 Core Runtime 的影响：
+
+- 新增 `src/core/backup.ts`，集中承载 SQLite 热备份、备份列表、旧备份清理和结构化 JSON 导出逻辑。这里的“热备份”指服务不中断时创建一致性数据库快照。
+- `src/main.ts` 启动后会调用 `backupDatabaseIfStale()`，最近备份超过 24 小时时异步创建新备份。
+- 当前备份只覆盖 SQLite；LanceDB 向量库和 Agent 文件目录仍需要后续统一编排。
 
 本轮 M7 改动对 Core Runtime 的影响：
 
@@ -68,6 +75,11 @@ src/scripts/
 - 老数据库通过 `ensureColumn()` 自动补齐 `tasks` 新字段；新表通过 `CREATE TABLE IF NOT EXISTS` 平滑创建。
 - Core Runtime 只负责 schema 初始化、兼容迁移和索引创建；计划、依赖校验、blocked 状态和事件审计仍属于 Task System。
 
+本轮 P1 Skill candidate 表改动对 Core Runtime 的影响：
+
+- SQLite schema 新增 `skill_candidates` 表和 `idx_skill_candidates_agent_status` 索引，用于保存正式 Skill 候选、审查状态和来源 episode。
+- 该表的业务语义属于 Skill System；Core Runtime 只负责建表、外键和索引初始化。
+
 ## 4. 后续需要补齐
 
 - 数据库 schema 版本号。
@@ -75,3 +87,4 @@ src/scripts/
 - 运行时目录权限检查。
 - 迁移失败时的中文错误说明。
 - 后台调度器健康状态和最近运行时间展示。
+- LanceDB 和 Agent 文件目录的统一备份/恢复编排；当前启动自动备份只覆盖 SQLite。

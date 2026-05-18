@@ -57,6 +57,14 @@ src/agents/
 - Feishu channel binding 保存在目标 Agent 的 `agent.json` 中。
 - legacy skills registry 和 legacy profile 文件只作为迁移来源，不作为新配置源。
 
+本轮模块拆分重构对 Agent Config 的影响：
+
+- `src/agents/config-normalizer.ts` 承接了原先堆在 `config-service.ts` 里的纯函数，包括 `createDefaultConfig()`、`normalizeConfig()`、`validateConfig()`、`mergePatch()`，以及 `safeAgentSegment()`、`isRecord()`、`asStringArray()` 等工具函数。
+- `src/agents/config-service.ts` 现在只保留 `AgentConfigService`、事件写入和 `agent.json` 文件 I/O；模块职责更接近“配置服务”，不再同时承担大量数据整形细节。
+- 这次拆分没有改变对外 API，调用方仍通过 `AgentConfigService` 读取、patch 和 reset 配置。
+- 纯函数拆出后，后续如果要扩展 Agent config schema、补 migration 或补更细校验，可以在不碰文件读写路径的前提下单独测试和演进规范化逻辑。
+- 远程 Skill origin 的 `contentHash` 现在也会在配置规范化时保留；`contentHash` 是目录内容的 SHA-256 摘要，用于判断远程 Skill 文件内容是否发生真实变化。
+
 本轮 P4 Skill 闭环改动对 Agent Config 的影响：
 
 - `AgentConfigSkill` 新增可选 `provenance`，用于保存 Skill 来源 task、episode、source events、创建原因和创建者。
@@ -74,6 +82,7 @@ src/agents/
 
 ## 5. 后续需要补齐
 
+- 为 `config-normalizer.ts` 增加更细粒度的单元测试覆盖，尤其是 patch 合并、legacy 字段兼容和非法输入校验。
 - Agent config schema 版本和迁移记录。
 - 配置 diff、回滚和审计 UI。
 - Agent 模板，例如个人助手、研究员、工程师、审阅者。

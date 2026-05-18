@@ -35,6 +35,7 @@ Prompt & Context 负责决定每次模型调用时，Agent 能看到什么，以
 ```text
 src/prompts/
 ├── agent-prompt.ts
+├── planning-guide.ts
 └── agent-prompt.test.ts
 ```
 
@@ -61,6 +62,7 @@ src/runtime/internal-runner.ts
 - 明确长期记忆不会整体塞进 prompt，必须通过 `memory_recall`、`memory_evidence` 等工具查询。
 - 明确 Agent 配置必须通过 `agent_config_get` / `agent_config_patch` 访问和修改。
 - 明确普通异步委派使用 `agent_delegate`，并说明不等待目标 Agent 同步完成。
+- 对复杂顶层 task 自动注入 planning guide，引导模型先判断是否需要结构化计划，再决定是否调用 `task_plan_set`。
 
 本轮 M3/M12 父任务汇总上下文改动对 Prompt & Context 的影响：
 
@@ -75,6 +77,13 @@ src/runtime/internal-runner.ts
 - system prompt 新增计划步骤委派指引：需要其他 Agent 处理某个步骤时优先用 `task_child_create`，让 child task 绑定到对应 plan step。
 - system prompt 明确不要用普通 `agent_delegate` 绕过计划步骤绑定，除非该委派不需要 plan step 关联。
 
+本轮 P2 Task 自动规划改动对 Prompt & Context 的影响：
+
+- 新增 `src/prompts/planning-guide.ts`，把复杂任务何时需要计划、如何调用 planning tools、何时创建子任务整理成独立 prompt 片段。
+- `agent-prompt.ts` 会在复杂、顶层、尚无已有 plan 的 task 上注入 planning guide；简单 task、child task 和已有 plan 的 task 不重复注入。
+- 自动规划当前是 prompt-level 能力：也就是通过 system prompt 约束模型行为，并不改变 Task Queue 的领取规则，也不保证模型一定会创建计划。
+- 相关回归测试已覆盖复杂任务注入、简单任务不注入和已有 plan 不重复注入。
+
 ## 4. 模块边界
 
 Prompt & Context 只告诉模型如何使用能力，不保存能力状态。
@@ -83,15 +92,16 @@ Prompt & Context 只告诉模型如何使用能力，不保存能力状态。
 
 - Task plan、step、dependency 的当前状态保存在 Task System。
 - Tool 是否可见由 Tool System 和 Agent config 决定。
-- Prompt 指引只是模型行为约束，不保证模型一定会拆解任务；后续自动规划需要单独设计。
+- Prompt 指引只是模型行为约束，不保证模型一定会拆解任务；后续如果需要强制规划，需要在 Runtime 或 Task System 另做策略。
 - Profile 是稳定背景，不是长期记忆证据；涉及历史事实仍应调用 Memory tools。
 
 ## 5. 后续需要补齐
 
 - Prompt 版本记录。
 - 更完整的全局上下文预算管理。
+- Planning guide 的质量评估，例如是否在复杂任务中稳定产出可执行步骤。
 - Skill 自动选择策略。
 - 记忆召回选择策略。
 - Task history 与事件流水的通用摘要策略。
 - 多渠道上下文格式统一。
-- Prompt 回归评估，验证关键工具指引不会被后续修改破坏。
+- Prompt 回归评估继续扩展，验证关键工具指引不会被后续修改破坏。
