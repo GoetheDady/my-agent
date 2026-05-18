@@ -217,6 +217,16 @@ export function getQueuedTasks(tasks: RuntimeTask[]): RuntimeTask[] {
     .sort((a, b) => b.priority - a.priority || a.created_at - b.created_at);
 }
 
+/**
+ * 根据当前 Agent 和任务列表确定正在处理的任务。
+ *
+ * 优先返回 `agent.current_task_id` 指向的任务；如果该任务不存在，则回退到
+ * 任务列表中第一个 `running` 状态的任务。
+ *
+ * @param agent 当前运行时 Agent；为空时返回 `null`
+ * @param tasks 当前可见的任务列表
+ * @returns 当前任务；不存在则返回 `null`
+ */
 export function getCurrentTask(agent: RuntimeAgent | null, tasks: RuntimeTask[]): RuntimeTask | null {
   if (!agent) return null;
   if (agent.current_task_id) {

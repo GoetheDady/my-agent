@@ -63,6 +63,7 @@ src/routes/memory.ts
 - 控制台路由：`/console`、`/console/tasks`、`/console/events`、`/console/tools`、`/console/skills`、`/console/memory`、`/console/channels` 等页面。
 - Agent 会话侧边栏按 Agent 分组展示会话，并支持选择当前 Agent。
 - Runtime 面板展示 Agent 状态、当前任务、排队任务、最近任务和最近事件。
+- `runtimeStore` 提供 `getCurrentTask()` 等视图辅助函数，用于按 Agent 当前任务指针优先推导控制台当前任务。
 - Chat 页面通过 `/api/chat` 流式对话，并保留工具审批卡片。
 - Chat transport 会在手动发送和审批自动续发时统一带上当前 `sessionId`、绑定 Agent 和 thinking 开关，避免批准工具后创建额外“新对话”。
 - 实时连接通过 `/api/ws` 推动会话、运行时、工具、记忆和 Skill 相关刷新。
@@ -102,6 +103,11 @@ src/routes/memory.ts
 - 详情面板会展示 Task Plan steps、Dependency blockers 和 child tasks；blocked task 会通过 progress message 解释正在等待依赖。
 - Watchdog 提醒如果能定位到 task，会点击打开对应任务详情。
 - 这仍是观察面能力；前端不保存新的任务状态，也不重新实现 Task / Event / Episode 业务规则。
+
+本轮为 Runtime Store 的当前任务推导函数补充 JSDoc：
+
+- `getCurrentTask(agent, tasks)` 明确记录其优先使用 `agent.current_task_id`，找不到时回退到第一个 running task。
+- 这是前端可读性改动，不改变 Runtime Snapshot、Task 排序或后端执行语义。
 
 ## 5. 当前边界
 
