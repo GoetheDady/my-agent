@@ -49,7 +49,7 @@ export interface ResumeExternalChannelTaskInput {
 }
 
 const EXTERNAL_QUEUE_CHANNELS = ["feishu"];
-const drainingAgents = new Set<string>();
+const drainingState = new Map<string, { pending: boolean }>();
 const DEFAULT_PROVIDER_OPTIONS = {
   deepseek: { thinking: { type: "disabled" } },
 } as const;
@@ -576,34 +576,61 @@ export async function drainExternalChannelQueue(agentId: string, options: {
   generateTextRunner?: typeof generateText;
   memorySearcher?: MemorySearcher;
 } = {}): Promise<void> {
-  if (drainingAgents.has(agentId)) return;
-  drainingAgents.add(agentId);
+  const existingState = drainingState.get(agentId);
+  if (existingState) {
+    existingState.pending = true;
+    return;
+  }
+
+  const state = { pending: false };
+  drainingState.set(agentId, state);
   const database = options.database ?? getDb();
   const approvalService = options.approvalService ?? defaultApprovalService;
   const channelService = options.channelService ?? defaultChannelService;
   const generateTextRunner = options.generateTextRunner ?? generateText;
 
-  try {
-    while (true) {
-      const claimed = claimNextTaskForChannels(agentId, EXTERNAL_QUEUE_CHANNELS, database);
-      if (!claimed) return;
-      const deliverMetadata = getDeliverMetadata({ taskId: claimed.id, database });
-      const received = toReceiveResult(claimed);
-      await runClaimedExternalChannelTask({
-        received,
-        claimed,
-        userText: claimed.input,
-        deliverMetadata,
-        database,
-        approvalService,
-        channelService,
-        generateTextRunner,
-        skipDrain: true,
-        memorySearcher: options.memorySearcher,
-      });
+  while (true) {
+    let shouldContinue = false;
+    let caughtError: unknown;
+    try {
+      while (true) {
+        const claimed = claimNextTaskForChannels(agentId, EXTERNAL_QUEUE_CHANNELS, database);
+        if (!claimed) break;
+        const deliverMetadata = getDeliverMetadata({ taskId: claimed.id, database });
+        const received = toReceiveResult(claimed);
+        await runClaimedExternalChannelTask({
+          received,
+          claimed,
+          userText: claimed.input,
+          deliverMetadata,
+          database,
+          approvalService,
+          channelService,
+          generateTextRunner,
+          skipDrain: true,
+          memorySearcher: options.memorySearcher,
+        });
+      }
+    } catch (error) {
+      caughtError = error;
+    } finally {
+      if (caughtError) {
+        drainingState.delete(agentId);
+      } else if (state.pending) {
+        state.pending = false;
+        shouldContinue = true;
+      } else {
+        drainingState.delete(agentId);
+      }
     }
-  } finally {
-    drainingAgents.delete(agentId);
+
+    if (caughtError) {
+      throw caughtError;
+    }
+
+    if (!shouldContinue) {
+      return;
+    }
   }
 }
 

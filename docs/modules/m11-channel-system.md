@@ -7,6 +7,7 @@
 - **Channel**：外部输入输出渠道，例如 Web、飞书、未来微信。
 - **Delivery**：消息投递，把 Agent 结果发回外部渠道。
 - **Idempotency Key**：幂等键，用来避免外部重复消息创建重复 Task。
+- **Missed wakeup**：唤醒丢失。这里指队列消费者刚判断“没有新任务”但尚未退出时，新任务入队发出的唤醒被旧 drain 状态吞掉，导致任务暂时无人处理。
 
 ## 1. 模块定位
 
@@ -43,7 +44,16 @@ src/channels/
 - 外部渠道最终回复会对空模型输出做兜底，避免飞书收到空消息。
 - 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
 - 外部渠道 runner 在调用模型前会复用 Runtime 的 RAG-in-context 流程，按当前 task input 检索少量相关长期记忆并交给 Prompt & Context 注入。
+- 外部渠道队列 drain 使用 `drainingState` 记录每个 Agent 的 drain 状态和 `pending` 标记，避免新任务在 drain 退出窗口期入队时被静默搁置。
 - WeChat stub。
+
+本轮 drain missed-wakeup 修复对 Channel 的影响：
+
+- `external-runner.ts` 将原来的 `drainingAgents: Set<string>` 改为 `drainingState: Map<string, { pending: boolean }>`。这里的 `Map` 是键值映射表，用 Agent ID 找到该 Agent 当前 drain 状态。
+- 当同一个 Agent 已经在 drain 时，新触发不会直接丢弃，而是把对应状态的 `pending` 设为 `true`。`pending` 表示“当前 drain 结束前又来过一次唤醒，需要重新检查队列”。
+- drain 循环在发现队列为空后，会先看 `pending`：如果为 `true`，清掉标记并重新进入 claim 循环；如果为 `false`，才删除状态并真正退出。
+- 异常路径会删除 `drainingState`，避免模型执行或投递抛错后留下永久 busy 状态。
+- 这次修复不改变公共 API，也不改变 Task claim 规则，只修正内部并发控制，降低飞书等外部渠道 queued task 因唤醒窗口期而延迟处理的风险。
 
 本轮模块拆分与幂等改动对 Channel 的影响：
 
@@ -92,3 +102,4 @@ src/channels/
 - 多渠道统一错误反馈。
 - 外部渠道投递重试后的 episode 更新策略：同一 task 多次投递后 episode 是否需要反映最终投递状态。
 - 外部渠道 RAG-in-context 的可观察性：后续可在事件或 timeline 中展示是否命中记忆、命中数量和检索降级原因。
+- 外部渠道 drain 可观察性：后续可在事件或 debug 日志里记录 pending 重扫次数，方便定位队列压力和唤醒抖动。
