@@ -52,7 +52,7 @@
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
 | M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline、Task Plan/Dependency 控制面、Workbench Git 分支控制面和异步 Chat RAG 上下文准备，已有模块文档 | 控制面完整化 |
-| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog、Task timeline、plan/dependency 详情和开发工作台；Watchdog 状态提醒会列出可定位任务明细并支持本地忽略；Runtime Store 当前任务推导已补 JSDoc，已有模块文档 | 继续作为控制台，不成为核心 |
+| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog、Task timeline、plan/dependency 详情和开发工作台；Chat 消息列表支持增量同步、memo 渲染和轻量虚拟滚动；已有模块文档 | 继续作为控制台，不成为核心 |
 | M17 | Evaluation & Testing | 如何知道 Agent 变好了 | 单元测试较多 | 行为评估和端到端场景测试 |
 | M18 | Documentation & Onboarding | 新 Agent 如何理解项目 | 已有基础文档 | 模块文档和开发路线成体系 |
 
@@ -696,6 +696,7 @@ web/
 - Runtime Events 支持 Watchdog 事件中文展示。
 - Runtime Snapshot 支持 P0/P1 Watchdog 提醒、可定位任务明细、本地忽略和 Task 自动取消/失败原因展示。
 - Tasks 控制台支持选中单个任务并展示 Task timeline、当前工具、最近输出和 episode 摘要。
+- Chat 消息渲染支持按 message id 增量合并、消息气泡 memo、思考块和工具卡片状态保留，以及长对话轻量虚拟滚动。
 
 ### 还需要补齐
 

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, ShieldQuestion, X } from 'lucide-react';
 import type { ToolApprovalSummary, ToolRiskLevel } from '../../types';
 
+const rememberChoiceState = new Map<string, boolean>();
+
 interface ToolApprovalCardProps {
   toolName: string;
   args: Record<string, unknown>;
@@ -49,7 +51,7 @@ export function ToolApprovalCard({
   onApprove,
   onDeny,
 }: ToolApprovalCardProps) {
-  const [rememberChoice, setRememberChoice] = useState(false);
+  const [rememberChoice, setRememberChoice] = useState(() => rememberChoiceState.get(toolCallId) ?? false);
   const [processing, setProcessing] = useState(false);
   const registeredToolCallIdRef = useRef<string | null>(null);
 
@@ -140,7 +142,11 @@ export function ToolApprovalCard({
           <input
             type="checkbox"
             checked={rememberChoice}
-            onChange={(e) => setRememberChoice(e.target.checked)}
+            onChange={(e) => {
+              const next = e.target.checked;
+              rememberChoiceState.set(toolCallId, next);
+              setRememberChoice(next);
+            }}
             disabled={actionDisabled || !canRemember}
             className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-accent)]"
           />

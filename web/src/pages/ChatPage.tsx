@@ -9,7 +9,7 @@ import { createSessionResolver } from "../lib/sessionResolver";
 import { getSessionPath } from "../lib/sessionRoute";
 import { continueToolApprovalOnce } from "../lib/toolApprovalContinuation";
 import { useAgentStore } from "../store/agentStore";
-import { parseDbContent, useChatStore } from "../store/chatStore";
+import { parseDbContent, useChatStore, type ChatMessage } from "../store/chatStore";
 import { useRealtimeStore } from "../store/realtimeStore";
 import { useRuntimeStore } from "../store/runtimeStore";
 import { useSessionStore } from "../store/sessionStore";
@@ -80,6 +80,13 @@ export default function ChatPage() {
     },
   });
 
+  const syncMessagesIncrementally = useCallback((nextMessages: ChatMessage[]) => {
+    useChatStore.getState().setMessages((current) => reconcileMessages(current, nextMessages));
+    setMessages((currentMessages) => (
+      reconcileMessages(currentMessages as ChatMessage[], nextMessages) as typeof currentMessages
+    ));
+  }, [setMessages]);
+
   const isLoading = status === "submitted" || status === "streaming";
 
   useEffect(() => {
@@ -104,13 +111,13 @@ export default function ChatPage() {
       role: m.role,
       parts: parseDbContent(m.content, m.role),
     }));
-    setMessages(uiMessages as Parameters<typeof setMessages>[0]);
+    syncMessagesIncrementally(uiMessages);
     setSessionId(id);
     setActiveSessionId(id);
     setSelectedAgentId(session.agent_id);
     void fetchRuntimeSnapshot(session.agent_id);
     return true;
-  }, [fetchRuntimeSnapshot, sessions, setActiveSessionId, setMessages, setSelectedAgentId, setSessionId]);
+  }, [fetchRuntimeSnapshot, sessions, setActiveSessionId, setSelectedAgentId, setSessionId, syncMessagesIncrementally]);
 
   const fetchSessionUiMessages = useCallback(async (id: string) => {
     const res = await fetch("/api/sessions/" + id + "/messages");
@@ -164,10 +171,10 @@ export default function ChatPage() {
       void fetchSessionUiMessages(currentSessionId).then((uiMessages) => {
         if (!uiMessages) return;
         if (useChatStore.getState().sessionId !== currentSessionId) return;
-        setMessages(uiMessages as Parameters<typeof setMessages>[0]);
+        syncMessagesIncrementally(uiMessages);
       });
     }
-  }, [fetchSessionUiMessages, lastRealtimeEvent, setMessages]);
+  }, [fetchSessionUiMessages, lastRealtimeEvent, syncMessagesIncrementally]);
 
   const getCurrentChatBody = useCallback(() => {
     const currentSessionId = useChatStore.getState().sessionId;
@@ -296,7 +303,7 @@ export default function ChatPage() {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
       <MessageList
-        messages={messages}
+        messages={messages as ChatMessage[]}
         handleApprove={handleApprove}
         handleDeny={handleDeny}
         approvals={approvals}
@@ -333,4 +340,43 @@ function normalizeSessionMessages(
     };
   }
   return data;
+}
+
+function reconcileMessages(currentMessages: ChatMessage[], nextMessages: ChatMessage[]): ChatMessage[] {
+  if (currentMessages.length === 0) return nextMessages;
+
+  const currentById = new Map(currentMessages.map((message) => [message.id, message]));
+  let changed = currentMessages.length !== nextMessages.length;
+
+  const reconciled = nextMessages.map((nextMessage, index) => {
+    const currentMessage = currentById.get(nextMessage.id);
+    if (!currentMessage) {
+      changed = true;
+      return nextMessage;
+    }
+
+    if (currentMessages[index]?.id !== nextMessage.id) {
+      changed = true;
+    }
+
+    if (
+      currentMessage.role === nextMessage.role &&
+      areMessagePartsEqual(currentMessage.parts, nextMessage.parts)
+    ) {
+      return currentMessage;
+    }
+
+    changed = true;
+    return {
+      ...currentMessage,
+      role: nextMessage.role,
+      parts: nextMessage.parts,
+    };
+  });
+
+  return changed ? reconciled : currentMessages;
+}
+
+function areMessagePartsEqual(left: ChatMessage["parts"], right: ChatMessage["parts"]): boolean {
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
 }

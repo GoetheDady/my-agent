@@ -1,28 +1,9 @@
 import { create } from "zustand";
 
-interface ChatState {
-  sessionId: string | null;
-  thinkingEnabled: boolean;
-
-  setSessionId: (id: string | null) => void;
-  setThinkingEnabled: (enabled: boolean) => void;
-  clearSession: () => void;
-}
-
-export const useChatStore = create<ChatState>((set) => ({
-  sessionId: null,
-  thinkingEnabled: false,
-
-  setSessionId: (id) => set({ sessionId: id }),
-  setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
-  clearSession: () => {
-    set({ sessionId: null });
-  },
-}));
-
-export function parseDbContent(contentStr: string, role: "user" | "assistant"): Array<{
+export interface ChatMessagePart {
   type: string;
   text?: string;
+  reasoning?: string;
   toolName?: string;
   toolCallId?: string;
   state?: string;
@@ -31,8 +12,65 @@ export function parseDbContent(contentStr: string, role: "user" | "assistant"): 
   errorText?: string;
   approval?: { id?: string };
   toolInvocation?: { toolName: string; args: Record<string, unknown>; state?: string; toolCallId?: string };
-  reasoning?: string;
-}> {
+}
+
+export interface ChatMessage {
+  id: string;
+  role: string;
+  parts: ChatMessagePart[];
+}
+
+interface ChatState {
+  sessionId: string | null;
+  thinkingEnabled: boolean;
+  messages: ChatMessage[];
+
+  setSessionId: (id: string | null) => void;
+  setThinkingEnabled: (enabled: boolean) => void;
+  setMessages: (messages: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[])) => void;
+  addMessage: (msg: ChatMessage) => void;
+  updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
+  appendToLastMessage: (text: string) => void;
+  clearSession: () => void;
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  sessionId: null,
+  thinkingEnabled: false,
+  messages: [],
+
+  setSessionId: (id) => set({ sessionId: id }),
+  setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
+  setMessages: (messages) => set((state) => ({
+    messages: typeof messages === "function" ? messages(state.messages) : messages,
+  })),
+  addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+  updateMessage: (id, updater) => set((state) => ({
+    messages: state.messages.map((msg) => msg.id === id ? updater(msg) : msg),
+  })),
+  appendToLastMessage: (text) => set((state) => {
+    const lastMessage = state.messages.at(-1);
+    if (!lastMessage) return { messages: state.messages };
+    const nextParts = lastMessage.parts.length > 0
+      ? lastMessage.parts.map((part, index) => (
+        index === lastMessage.parts.length - 1 && part.type === "text"
+          ? { ...part, text: (part.text ?? "") + text }
+          : part
+      ))
+      : [{ type: "text", text }];
+    return {
+      messages: [
+        ...state.messages.slice(0, -1),
+        { ...lastMessage, parts: nextParts },
+      ],
+    };
+  }),
+  clearSession: () => {
+    set({ sessionId: null, messages: [] });
+  },
+}));
+
+export function parseDbContent(contentStr: string, role: "user" | "assistant"): ChatMessagePart[] {
   if (role === "user") {
     try {
       const parsed = JSON.parse(contentStr);

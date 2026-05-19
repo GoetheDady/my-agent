@@ -1,30 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import MarkdownContent from "./MarkdownContent";
 import { Brain, CheckCircle2, ChevronDown, Clock3, Wrench, XCircle } from "lucide-react";
 import { ToolApprovalCard } from "./ToolApprovalCard";
 import { getNormalizedToolPart } from "../../lib/toolPart";
 import type { ToolApprovalSummary } from "../../types";
+import type { ChatMessage, ChatMessagePart } from "../../store/chatStore";
 
-interface MessagePart {
-  type: string;
-  text?: string;
-  reasoning?: string;
-  input?: unknown;
-  toolCallId?: string;
-  state?: string;
-  approval?: { id?: string };
-  errorText?: string;
-  output?: unknown;
-  toolInvocation?: { toolName: string; args: Record<string, unknown>; state: string; toolCallId: string };
-}
+const thinkingOpenState = new Map<string, boolean>();
+const emptyParts: ChatMessagePart[] = [];
 
-interface AIMessage {
-  id: string;
-  role: string;
-  parts: MessagePart[];
-}
-
-export default function MessageBubble({
+function MessageBubble({
   message,
   handleApprove,
   handleDeny,
@@ -33,7 +18,7 @@ export default function MessageBubble({
   approvalErrors,
   registerApproval,
 }: {
-  message: AIMessage;
+  message: ChatMessage;
   handleApprove?: (toolCallId: string, rememberChoice: boolean) => Promise<void> | void;
   handleDeny?: (toolCallId: string) => Promise<void> | void;
   approvals?: Record<string, ToolApprovalSummary>;
@@ -42,16 +27,20 @@ export default function MessageBubble({
   registerApproval?: (input: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
 }) {
   const isUser = message.role === "user";
-
-  if (isUser) {
-    const text = message.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof p.text === "string")
+  const parts = useMemo(() => message.parts ?? emptyParts, [message.parts]);
+  const userText = useMemo(() => {
+    if (!isUser) return "";
+    return parts
+      .filter((p): p is ChatMessagePart & { type: "text"; text: string } => p.type === "text" && typeof p.text === "string")
       .map((p) => p.text)
       .join("\n");
+  }, [isUser, parts]);
+
+  if (isUser) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[78%] rounded-2xl rounded-br-md bg-[var(--color-user)] px-4 py-3 text-[var(--color-text)] shadow-sm ring-1 ring-blue-100">
-          <p className="whitespace-pre-wrap text-[15px] leading-6">{text}</p>
+          <p className="whitespace-pre-wrap text-[15px] leading-6">{userText}</p>
         </div>
       </div>
     );
@@ -60,7 +49,7 @@ export default function MessageBubble({
   return (
     <div className="flex justify-start">
       <div className="max-w-[86%] space-y-3">
-        {message.parts.map((part, i) => {
+        {parts.map((part, i) => {
           const tool = getNormalizedToolPart(part);
 
           // 检测工具审批请求
@@ -95,7 +84,7 @@ export default function MessageBubble({
             );
           }
           if ((part.type === "reasoning" || part.type === "thinking") && part.text) {
-            return <ThinkingBlock key={i} content={part.text} />;
+            return <ThinkingBlock key={`thinking-${message.id}-${i}`} stateKey={`${message.id}:${i}`} content={part.text} />;
           }
           if (tool) {
             // 审批请求已经在上面处理了，这里处理其他状态
@@ -176,6 +165,8 @@ export default function MessageBubble({
   );
 }
 
+export default memo(MessageBubble);
+
 function isMemoryTool(toolName: string): boolean {
   return toolName.startsWith("memory_") || toolName.startsWith("memory.");
 }
@@ -200,8 +191,8 @@ function getToolDisplayName(toolName: string): string {
   return labels[toolName] ?? toolName.replace(/\./g, "_");
 }
 
-function ThinkingBlock({ content }: { content: string }) {
-  const [isOpen, setIsOpen] = useState(true);
+function ThinkingBlock({ content, stateKey }: { content: string; stateKey: string }) {
+  const [isOpen, setIsOpen] = useState(() => thinkingOpenState.get(stateKey) ?? true);
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState<number | undefined>(undefined);
 
@@ -211,10 +202,18 @@ function ThinkingBlock({ content }: { content: string }) {
     }
   }, [content, isOpen]);
 
+  const toggleOpen = () => {
+    setIsOpen((current) => {
+      const next = !current;
+      thinkingOpenState.set(stateKey, next);
+      return next;
+    });
+  };
+
   return (
     <div className="rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-thinking)] px-3 py-2">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggleOpen}
         className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-[var(--color-text-soft)] transition-colors hover:text-[var(--color-text-muted)]"
       >
         <ChevronDown

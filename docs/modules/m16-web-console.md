@@ -112,6 +112,15 @@ src/routes/workbench.ts
 - `getCurrentTask(agent, tasks)` 明确记录其优先使用 `agent.current_task_id`，找不到时回退到第一个 running task。
 - 这是前端可读性改动，不改变 Runtime Snapshot、Task 排序或后端执行语义。
 
+本轮优化了聊天消息渲染性能：
+
+- `chatStore` 增加 `setMessages`、`addMessage`、`updateMessage` 和 `appendToLastMessage`，为增量消息更新保留统一入口。
+- `ChatPage` 拉取会话消息后按 message id 做差异合并，未变化的消息对象会复用原引用，避免每次实时事件都全量替换消息数组。
+- `MessageBubble` 使用 `React.memo`，并缓存消息 parts 和用户文本计算；思考块展开状态按消息和 part 位置持久化，避免父组件重渲染后重置。
+- `MessageList` 使用轻量虚拟滚动，只渲染当前可视窗口附近的消息，并通过 `IntersectionObserver` 判断底部可见性；只有用户已经在底部时才自动滚到底部。
+- 工具审批卡片的“记住此路径”选择按 tool call 持久化，避免虚拟滚动卸载后丢失。
+- 这里的 **虚拟滚动** 指长列表只挂载可视区域附近的 DOM 节点；**IntersectionObserver** 指浏览器提供的可见性观察 API，用来判断元素是否进入滚动容器视口。
+
 本轮新增开发工作台页面：
 
 - 新增 `/console/workbench` 页面，轮询 `/api/workbench/branches` 展示未合并到 `main` 的本地分支。
