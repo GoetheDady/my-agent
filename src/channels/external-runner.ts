@@ -50,6 +50,7 @@ export interface ResumeExternalChannelTaskInput {
 
 const EXTERNAL_QUEUE_CHANNELS = ["feishu"];
 const drainingState = new Map<string, { pending: boolean }>();
+const MODEL_RUN_TIMEOUT_MS = 45_000;
 const DEFAULT_PROVIDER_OPTIONS = {
   deepseek: { thinking: { type: "disabled" } },
 } as const;
@@ -133,6 +134,24 @@ function normalizeExternalResultText(result: GenerateTextResult<ToolSet, never>)
   const toolSummary = summarizeToolOutputs(result);
   if (toolSummary) return toolSummary;
   return "模型没有返回可用文本结果，请换一种问法或稍后重试。";
+}
+
+function createModelTimeoutSignal(
+  timeoutMs: number,
+): { signal: AbortSignal; reason: () => string; cleanup: () => void } {
+  const controller = new AbortController();
+  let reason = "";
+  const timeout = setTimeout(() => {
+    reason = `Model run timed out after ${timeoutMs}ms`;
+    controller.abort();
+  }, timeoutMs);
+  (timeout as { unref?: () => void }).unref?.();
+
+  return {
+    signal: controller.signal,
+    reason: () => reason || "Model run aborted",
+    cleanup: () => clearTimeout(timeout),
+  };
 }
 
 function buildResumeMessages(input: {
@@ -313,6 +332,7 @@ async function runClaimedExternalChannelTask(input: {
   });
 
   const stopLeaseHeartbeat = startTaskLeaseHeartbeat(task.id, input.database);
+  const runAbortSignal = createModelTimeoutSignal(MODEL_RUN_TIMEOUT_MS);
   try {
     const messages: ModelMessage[] = [
       { role: "user", content: [{ type: "text", text: input.userText }] },
@@ -343,6 +363,7 @@ async function runClaimedExternalChannelTask(input: {
       stopWhen: stepCountIs(5),
       experimental_context: {},
       providerOptions: DEFAULT_PROVIDER_OPTIONS,
+      abortSignal: runAbortSignal.signal,
     });
 
     const approvalRequest = findApprovalRequest(result as GenerateTextResult<ToolSet, never>);
@@ -430,8 +451,14 @@ async function runClaimedExternalChannelTask(input: {
     }, input.database);
     finalizeEpisodeForTask(task.id, input.database);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const classification = classifyTaskFailure(message, { stage: "delivery" });
+    const message = runAbortSignal.signal.aborted
+      ? runAbortSignal.reason()
+      : error instanceof Error ? error.message : String(error);
+    const isModelTimeout = runAbortSignal.signal.aborted || /timed out/i.test(message);
+    const classification = classifyTaskFailure(message, {
+      stage: isModelTimeout ? "model_call" : "delivery",
+      isTimeout: isModelTimeout,
+    });
     markTaskFailed(task.id, message, classification, input.database);
     appendEvent({
       agent_id: task.agent_id,
@@ -456,6 +483,7 @@ async function runClaimedExternalChannelTask(input: {
       database: input.database,
     });
   } finally {
+    runAbortSignal.cleanup();
     stopLeaseHeartbeat();
     if (!input.skipDrain) {
       await drainExternalChannelQueue(task.agent_id, {
@@ -656,6 +684,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
     throw new Error(`Task not found: ${approval.taskId}`);
   }
 
+  const runAbortSignal = createModelTimeoutSignal(MODEL_RUN_TIMEOUT_MS);
   try {
     const messages = buildResumeMessages({
       userText: resumePayload.userText,
@@ -689,6 +718,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
           : [],
       },
       providerOptions: DEFAULT_PROVIDER_OPTIONS,
+      abortSignal: runAbortSignal.signal,
     });
     const responseText = normalizeExternalResultText(result as GenerateTextResult<ToolSet, never>);
     updateTaskProgress(task.id, { status: "persisting_result", message: "正在保存恢复结果" }, database);
@@ -716,8 +746,14 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
       metadata: resumePayload.deliverMetadata,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const classification = classifyTaskFailure(message, { stage: "delivery" });
+    const message = runAbortSignal.signal.aborted
+      ? runAbortSignal.reason()
+      : error instanceof Error ? error.message : String(error);
+    const isModelTimeout = runAbortSignal.signal.aborted || /timed out/i.test(message);
+    const classification = classifyTaskFailure(message, {
+      stage: isModelTimeout ? "model_call" : "delivery",
+      isTimeout: isModelTimeout,
+    });
     markTaskFailed(task.id, message, classification, database);
     appendEvent({
       agent_id: task.agent_id,
@@ -745,6 +781,7 @@ export async function resumeApprovedExternalChannelTask(input: ResumeExternalCha
       // 审批恢复失败且飞书也无法回发时，task.failed 已经保留根因。
     }
   } finally {
+    runAbortSignal.cleanup();
     if (!input.skipDrain) {
       await drainExternalChannelQueue(task.agent_id, {
         database,

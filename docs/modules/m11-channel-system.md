@@ -44,6 +44,7 @@ src/channels/
 - 外部渠道最终回复会对空模型输出做兜底，避免飞书收到空消息。
 - 外部渠道任务终态 episode 生成（已接入 `finalizeEpisodeForTask()`，覆盖完成、失败、投递失败、任务不可执行、审批后恢复等路径）。
 - 外部渠道 runner 在调用模型前会复用 Runtime 的 RAG-in-context 流程，按当前 task input 检索少量相关长期记忆并交给 Prompt & Context 注入。
+- 外部渠道 runner 现在也有和 Web runner 一致的模型调用超时保护，默认 45 秒；超时会按 `timeout / model_call / retriable=true` 记录失败，避免飞书任务长期卡在 running。
 - 外部渠道队列 drain 使用 `drainingState` 记录每个 Agent 的 drain 状态和 `pending` 标记，避免新任务在 drain 退出窗口期入队时被静默搁置。
 - WeChat stub。
 

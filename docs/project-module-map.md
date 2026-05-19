@@ -47,7 +47,7 @@
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | [Skill System](./modules/m9-skill-system.md) | Agent 如何沉淀可复用做法 | 已有三类 Skill、provenance/usage 元数据、正式 skill_candidates 表、候选审查 API 和远程 Skill contentHash，已有模块文档 | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件、工具调用审计、Skill candidate 事件和 Skill 内容变更事件，已有模块文档 | 事件规范、查询、诊断和回放更强 |
-| M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，外部渠道 runner 已接入 RAG-in-context，队列 drain 已修复 missed-wakeup 竞态，微信 stub，已有模块文档 | 多渠道生产化 |
+| M11 | [Channel System](./modules/m11-channel-system.md) | 外部消息如何进入和回复 | Web/飞书可用，外部渠道 runner 已接入 RAG-in-context 和模型超时保护，队列 drain 已修复 missed-wakeup 竞态，微信 stub，已有模块文档 | 多渠道生产化 |
 | M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，支持 plan step child task 和 child task 依赖，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |

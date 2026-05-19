@@ -6,7 +6,12 @@ import { initializeDatabaseSchema } from "../core/database";
 import { appendEvent, listTaskEvents } from "../events/event-log";
 import { createTask, getTask } from "../tasks/task-store";
 import { ApprovalService } from "../tools/approval-service";
-import { drainExternalChannelQueue, getTaskChannelMetadata, runExternalChannelTask } from "./external-runner";
+import {
+  drainExternalChannelQueue,
+  getTaskChannelMetadata,
+  resumeApprovedExternalChannelTask,
+  runExternalChannelTask,
+} from "./external-runner";
 import type { ChannelMessageOutput, ChannelReceiveResult } from "./types";
 
 function createRunnerDb(): Database {
@@ -107,6 +112,138 @@ describe("external channel runner", () => {
       });
       expect(getTask(task.id, db)).toMatchObject({ status: "completed", result: "final answer" });
       expect(listTaskEvents(task.id, db).map((event) => event.type)).toContain("task.processing.notified");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("passes an abort signal to external channel model calls", async () => {
+    const db = createRunnerDb();
+    const deliveries: ChannelMessageOutput[] = [];
+    const task = createTask({
+      id: "feishu-task-abort-signal",
+      conversation_id: "conversation-1",
+      source_channel: "feishu",
+      source_user_id: "ou_user",
+      input: "hello",
+    }, db);
+    try {
+      await runExternalChannelTask({
+        received: createReceived(task.id, db),
+        userText: "hello",
+        deliverMetadata: { appId: "cli_test", chatId: "oc_chat", messageId: "om_signal" },
+        database: db,
+        approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
+        channelService: createDeliveringChannelService(deliveries) as never,
+        memorySearcher: async () => [],
+        generateTextRunner: (async (options: { abortSignal?: AbortSignal }) => {
+          expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+          expect(options.abortSignal?.aborted).toBe(false);
+          return {
+            text: "done",
+            content: [{ type: "text", text: "done" }],
+            response: { messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] },
+            steps: [],
+          };
+        }) as never,
+      });
+
+      expect(getTask(task.id, db)).toMatchObject({ status: "completed", result: "done" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("classifies external model timeout as retriable model-call timeout", async () => {
+    const db = createRunnerDb();
+    const deliveries: ChannelMessageOutput[] = [];
+    const task = createTask({
+      id: "feishu-task-timeout",
+      conversation_id: "conversation-1",
+      source_channel: "feishu",
+      source_user_id: "ou_user",
+      input: "hello",
+    }, db);
+    try {
+      await runExternalChannelTask({
+        received: createReceived(task.id, db),
+        userText: "hello",
+        deliverMetadata: { appId: "cli_test", chatId: "oc_chat", messageId: "om_timeout" },
+        database: db,
+        approvalService: new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` })),
+        channelService: createDeliveringChannelService(deliveries) as never,
+        memorySearcher: async () => [],
+        generateTextRunner: (async (options: { abortSignal?: AbortSignal }) => {
+          expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+          throw new Error("Model run timed out after 45000ms");
+        }) as never,
+      });
+
+      expect(getTask(task.id, db)).toMatchObject({
+        status: "failed",
+        error: "Model run timed out after 45000ms",
+        failure_type: "timeout",
+        failure_stage: "model_call",
+        retriable: true,
+      });
+      expect(deliveries.at(-1)?.text).toContain("处理失败：Model run timed out after 45000ms");
+      expect(listTaskEvents(task.id, db).map((event) => event.type)).toContain("task.failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("passes an abort signal when resuming approved external channel tasks", async () => {
+    const db = createRunnerDb();
+    const deliveries: ChannelMessageOutput[] = [];
+    const approvalService = new ApprovalService(db, new AgentConfigService({ rootDir: `/tmp/my-agent-runner-${crypto.randomUUID()}` }));
+    const task = createTask({
+      id: "feishu-task-resume-signal",
+      conversation_id: "conversation-1",
+      source_channel: "feishu",
+      source_user_id: "ou_user",
+      input: "write file",
+    }, db);
+    const approval = approvalService.createChannelApproval({
+      agentId: "default",
+      taskId: task.id,
+      channel: "feishu",
+      conversationId: "conversation-1",
+      externalConversationId: "cli_test:oc_chat",
+      externalUserId: "ou_user",
+      toolCallId: "tool-call-1",
+      toolName: "write_file",
+      args: { path: "README.md", content: "x", mode: "append" },
+      resumePayload: {
+        userText: "write file",
+        messages: [{ role: "assistant", content: [{ type: "text", text: "need approval" }] }],
+        deliverMetadata: { appId: "cli_test", chatId: "oc_chat", messageId: "om_resume" },
+      },
+    });
+    approvalService.approveApproval(approval.id);
+
+    try {
+      await resumeApprovedExternalChannelTask({
+        approvalId: approval.id,
+        database: db,
+        approvalService,
+        channelService: createDeliveringChannelService(deliveries) as never,
+        memorySearcher: async () => [],
+        generateTextRunner: (async (options: { abortSignal?: AbortSignal }) => {
+          expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+          expect(options.abortSignal?.aborted).toBe(false);
+          return {
+            text: "resumed done",
+            content: [{ type: "text", text: "resumed done" }],
+            response: { messages: [{ role: "assistant", content: [{ type: "text", text: "resumed done" }] }] },
+            steps: [],
+          };
+        }) as never,
+        skipDrain: true,
+      });
+
+      expect(getTask(task.id, db)).toMatchObject({ status: "completed", result: "resumed done" });
+      expect(deliveries.at(-1)?.text).toBe("resumed done");
     } finally {
       db.close();
     }
