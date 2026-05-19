@@ -8,6 +8,8 @@
 - **Episode**：情景记忆。这里指一次 Task 结束后生成的经历摘要，记录做了什么、结果如何、用过哪些工具、遇到哪些问题。
 - **Deduplication**：去重。这里指发现相似记忆后保留更可信的一条，并把重复项标记为非活跃。
 - **Reconstruction / Reconsolidation**：再巩固。这里指根据新信息重新整理已有记忆，使旧记忆和新事实保持一致。
+- **Global Lock**：全局锁。这里指进程内的 `running` 标记，用来保证 Dream Worker 同一时间只运行一次。
+- **finally**：异常清理语句。这里指无论正常完成还是抛出错误，都会执行的清理块。
 
 ## 1. 模块定位
 
@@ -51,6 +53,7 @@ src/memory/episode-store.ts
 - 记忆提取 worker 注入 `memory_extract` / `memory_reconsolidate` 工具片段。
 - 主动去重：保留高置信度记忆，并停用重复记忆。
 - Dream Worker：按运行记录做每日整理和反思。
+- Dream Worker 的进程内全局锁由外层 `try-finally` 保护；`running = true` 之后即使 setup、事件写入或整理流程抛错，也会在 `finally` 中重置为 `false`，避免记忆整理系统永久锁死。
 - Dream Worker real-run 会从重复出现的高质量 episode 生成正式 Skill candidate，并保留旧 review item 兼容层。
 - Episode v1：终态 Task 可生成经历摘要，并写入 `episode.created` / `episode.updated` / `episode.failed` 事件。
 - Episode 会从任务事件流提取工具使用和关键步骤，包括 `tool.call` / `tool.result` 中的工具名。

@@ -66,7 +66,9 @@ export function claimNextTask(agentId: string, database: Database = getDb()): Ta
     return claimQueuedTask(taskRowToRecord(nextTask), database);
   });
 
-  return claim();
+  const claimedTask = claim();
+  broadcastTaskClaimed(claimedTask);
+  return claimedTask;
 }
 
 /**
@@ -122,7 +124,9 @@ export function claimNextTaskForChannels(
     return claimQueuedTask(taskRowToRecord(nextTask), database);
   });
 
-  return claim();
+  const claimedTask = claim();
+  broadcastTaskClaimed(claimedTask);
+  return claimedTask;
 }
 
 /**
@@ -187,7 +191,9 @@ export function claimTask(taskId: string, database: Database = getDb()): TaskRec
     return claimQueuedTask(task, database);
   });
 
-  return claim();
+  const claimedTask = claim();
+  broadcastTaskClaimed(claimedTask);
+  return claimedTask;
 }
 
 function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
@@ -220,12 +226,21 @@ function claimQueuedTask(task: TaskRecord, database: Database): TaskRecord {
   if (!claimed) {
     throw new Error(`Task not found after claim: ${task.id}`);
   }
-  defaultRealtimeService.broadcast({
-    type: "runtime.task.updated",
-    agentId: claimed.agent_id,
-    taskId: claimed.id,
-    payload: { task: claimed },
-    createdAt: Date.now(),
-  });
   return claimed;
+}
+
+function broadcastTaskClaimed(task: TaskRecord | null): void {
+  if (!task) return;
+
+  try {
+    defaultRealtimeService.broadcast({
+      type: "runtime.task.updated",
+      agentId: task.agent_id,
+      taskId: task.id,
+      payload: { task },
+      createdAt: Date.now(),
+    });
+  } catch (error) {
+    console.warn("[task-queue] Failed to broadcast claimed task", error);
+  }
 }

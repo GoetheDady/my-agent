@@ -14,6 +14,8 @@
 - **Observability**：可观察性，指系统能暴露任务当前阶段、最近进展和失败位置。
 - **Task Plan**：任务计划。这里指一个 Task 下的结构化步骤列表，不等同于模型自动规划。
 - **Task Dependency**：任务依赖。这里指一个 queued Task 必须等待另一个 Task completed 后才能被领取。
+- **Transaction**：数据库事务。这里指把任务状态和 Agent 状态更新作为一个整体提交，失败时整体回滚。
+- **Realtime Broadcast**：实时推送。这里指通过 WebSocket 通知前端状态变化；它只是通知，不是事实数据本身。
 
 ## 1. 模块定位
 
@@ -116,6 +118,8 @@ Task 被领取时：
 3. 设置 `lease_expires_at`。
 4. 递增 `attempt_count`。
 5. 更新 Agent 当前任务。
+
+任务领取的数据库事务只包含 Task 和 Agent 状态变更。`runtime.task.updated` 实时推送会在事务提交后执行，并捕获推送异常；即使 WebSocket 抖动，任务领取结果也不会回滚，前端可通过轮询读取最终事实状态。
 
 Runtime 执行期间会续约。完成、失败、取消时清理租约并释放 Agent。
 

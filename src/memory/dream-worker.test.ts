@@ -41,6 +41,28 @@ function withDreamDb<T>(run: (db: Database) => T | Promise<T>): Promise<T> {
 }
 
 describe("dream worker", () => {
+  test("releases global running lock when setup fails before dream run exists", async () => {
+    const closedDb = new Database(":memory:");
+    closedDb.close();
+
+    await expect(runDreamWorker({
+      database: closedDb,
+      date: "2026-05-09",
+      dryRun: true,
+    })).rejects.toThrow();
+
+    await withDreamDb(async (db) => {
+      const result = await runDreamWorker({
+        database: db,
+        date: "2026-05-09",
+        dryRun: true,
+        dedupeStore: createMemoryStore(new Map()),
+      });
+
+      expect(result.dryRun).toBe(true);
+    });
+  });
+
   test("generates daily summary in dry run without persisting it", async () => {
     await withDreamDb(async (db) => {
       const task = createTask({

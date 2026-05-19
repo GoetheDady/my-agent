@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { ensureDefaultAgent, getAgent } from "../agents/agent-registry";
 import { initializeDatabaseSchema } from "../core/database";
+import { defaultRealtimeService } from "../realtime/service";
 import { claimNextTask, claimTask } from "./task-queue";
 import {
   createTask,
@@ -158,6 +159,36 @@ describe("task queue", () => {
         status: "running",
         current_task_id: "high-old",
       });
+    });
+  });
+
+  test("claimNextTask keeps claimed task when realtime broadcast fails", () => {
+    withTaskDb((db) => {
+      createTask({ id: "broadcast-fails", source_channel: "web", input: "run" }, db);
+
+      const originalBroadcast = defaultRealtimeService.broadcast.bind(defaultRealtimeService);
+      const originalWarn = console.warn;
+      defaultRealtimeService.broadcast = () => {
+        throw new Error("socket unavailable");
+      };
+      console.warn = () => {};
+
+      try {
+        const claimed = claimNextTask("default", db);
+
+        expect(claimed).toMatchObject({ id: "broadcast-fails", status: "running" });
+        expect(getTask("broadcast-fails", db)).toMatchObject({
+          status: "running",
+          progress_status: "claimed",
+        });
+        expect(getAgent("default", db)).toMatchObject({
+          status: "running",
+          current_task_id: "broadcast-fails",
+        });
+      } finally {
+        defaultRealtimeService.broadcast = originalBroadcast;
+        console.warn = originalWarn;
+      }
     });
   });
 
