@@ -21,6 +21,7 @@ import {
 
 interface WorkbenchBranch {
   name: string;
+  subject: string;
   baseCommit: string;
   headCommit: string;
   createdAt: string;
@@ -191,6 +192,14 @@ export default function WorkbenchPage() {
                         <GitBranch size={13} />
                         {branch.name}
                       </span>
+                      {branch.subject && (
+                        <details className="mt-1 max-w-72">
+                          <summary className="cursor-pointer truncate text-xs text-[var(--color-text-muted)]">
+                            {branch.subject.split("\n")[0]}
+                          </summary>
+                          <pre className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--color-text-soft)]">{branch.subject}</pre>
+                        </details>
+                      )}
                     </TableCell>
                     <TableCell className="font-semibold text-[var(--color-text)]">{branch.changedFiles}</TableCell>
                     <TableCell>

@@ -14,6 +14,7 @@ interface GitResult {
 
 interface WorkbenchBranch {
   name: string;
+  subject: string;
   baseCommit: string;
   headCommit: string;
   createdAt: string;
@@ -122,12 +123,14 @@ async function listWorkbenchBranches(): Promise<WorkbenchBranch[]> {
 
   const allHeads = await listLocalBranchHeads();
   const branches = await Promise.all(branchRows.map(async (branch) => {
-    const [baseCommit, stats] = await Promise.all([
+    const [baseCommit, subject, stats] = await Promise.all([
       gitStdout(["merge-base", MAIN_BRANCH, branch.name]),
+      gitStdout(["log", "--format=%B", `${MAIN_BRANCH}..${branch.name}`]).then((s) => s.trim()),
       getDiffStats(branch.name),
     ]);
     return {
       name: branch.name,
+      subject,
       baseCommit,
       headCommit: branch.headCommit,
       createdAt: branch.createdAt,
