@@ -25,16 +25,18 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
     selectedTaskTimeline,
     taskTimelineLoading,
     taskTimelineError,
+    dismissedWatchdogEventIds,
     loading,
     error,
     fetchRuntimeSnapshot,
     selectTask,
     clearSelectedTask,
+    dismissWatchdogNotice,
     cancelTask,
   } = useRuntimeStore();
   const currentTask = getCurrentTask(agent, tasks);
   const queuedTasks = getQueuedTasks(tasks);
-  const watchdogNotice = getWatchdogNotice(events);
+  const watchdogNotice = getWatchdogNotice(events, new Set(dismissedWatchdogEventIds));
 
   useEffect(() => {
     void fetchRuntimeSnapshot(selectedAgentId);
@@ -82,21 +84,45 @@ export function RuntimeSummary({ mode = "tasks" }: { mode?: "tasks" | "events" }
               </div>
             )}
             {watchdogNotice && (
-              <button
-                type="button"
-                onClick={() => watchdogNotice.taskId && void selectTask(watchdogNotice.taskId)}
+              <div
                 className={`mt-3 flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm ${
                 watchdogNotice.tone === "error"
                   ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
                   : "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
-              } ${watchdogNotice.taskId ? "cursor-pointer transition-opacity hover:opacity-85" : "cursor-default"}`}
+              }`}
               >
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                  <div className="font-semibold">{watchdogNotice.title}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold">{watchdogNotice.title}</div>
+                    <button
+                      type="button"
+                      onClick={() => dismissWatchdogNotice(watchdogNotice.eventIds)}
+                      className="rounded-md bg-white/55 p-1 transition-opacity hover:opacity-80"
+                      title="忽略这条提醒"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
                   <div className="mt-0.5 leading-5">{watchdogNotice.detail}</div>
+                  {watchdogNotice.items && watchdogNotice.items.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {watchdogNotice.items.slice(0, 4).map((item, index) => (
+                        <button
+                          key={`${item.taskId ?? item.reason}-${index}`}
+                          type="button"
+                          onClick={() => item.taskId && void selectTask(item.taskId)}
+                          disabled={!item.taskId}
+                          className="block max-w-full truncate rounded-md bg-white/55 px-2 py-1 text-left text-xs transition-opacity enabled:hover:opacity-80 disabled:cursor-default"
+                          title={item.taskId ? `${item.detail}: ${item.taskId}` : item.detail}
+                        >
+                          {item.detail}{item.taskId ? ` · ${item.taskId.slice(0, 8)}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             )}
           </div>
 

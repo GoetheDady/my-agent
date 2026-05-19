@@ -147,6 +147,15 @@ export interface RuntimeWatchdogNotice {
   detail: string;
   tone: "warning" | "error";
   taskId?: string;
+  eventIds: string[];
+  items?: RuntimeWatchdogNoticeItem[];
+}
+
+export interface RuntimeWatchdogNoticeItem {
+  eventId: string;
+  taskId?: string;
+  reason: string;
+  detail: string;
 }
 
 interface RuntimeState {
@@ -155,6 +164,7 @@ interface RuntimeState {
   events: RuntimeEvent[];
   selectedTaskId: string | null;
   selectedTaskTimeline: RuntimeTaskTimelineResponse | null;
+  dismissedWatchdogEventIds: string[];
   taskTimelineLoading: boolean;
   taskTimelineError: string | null;
   loading: boolean;
@@ -166,10 +176,14 @@ interface RuntimeState {
   selectTask: (taskId: string) => Promise<void>;
   fetchTaskTimeline: (taskId: string) => Promise<void>;
   clearSelectedTask: () => void;
+  dismissWatchdogNotice: (eventIds: string[]) => void;
+  clearDismissedWatchdogNotices: () => void;
   cancelTask: (taskId: string, agentId?: string) => Promise<void>;
   startPolling: (intervalMs?: number, agentId?: string) => void;
   stopPolling: () => void;
 }
+
+const WATCHDOG_DISMISSED_STORAGE_KEY = "my-agent.runtime.dismissedWatchdogEvents";
 
 function parsePayload(payload: string): unknown {
   try {
@@ -253,21 +267,28 @@ export function getTaskStatusDetail(task: RuntimeTask): string | null {
   return progressMessage && task.status !== "completed" ? progressMessage : null;
 }
 
-export function getWatchdogNotice(events: RuntimeEvent[]): RuntimeWatchdogNotice | null {
+export function getWatchdogNotice(
+  events: RuntimeEvent[],
+  dismissedEventIds: ReadonlySet<string> = new Set(),
+): RuntimeWatchdogNotice | null {
   let canceled = 0;
   let alerted = 0;
   let recovered = 0;
   let repaired = 0;
   let hasP0 = false;
   let taskId: string | null = null;
+  const eventIds: string[] = [];
+  const items: RuntimeWatchdogNoticeItem[] = [];
 
   for (const event of events) {
+    if (dismissedEventIds.has(event.id)) continue;
     const isWatchdogEvent = event.type.startsWith("task.watchdog.") || event.type === "agent.watchdog.repaired";
     if (!isWatchdogEvent) continue;
 
     const payload = payloadRecord(event);
     const notificationLevel = getString(payload, "notificationLevel");
     if (notificationLevel !== "P0" && notificationLevel !== "P1") continue;
+    eventIds.push(event.id);
     hasP0 ||= notificationLevel === "P0";
     taskId ??= event.task_id ?? getString(payload, "taskId") ?? getString(payload, "task_id");
 
@@ -283,6 +304,13 @@ export function getWatchdogNotice(events: RuntimeEvent[]): RuntimeWatchdogNotice
         canceled += getNumber(payload, "count") ?? 0;
       } else {
         alerted += 1;
+        const itemTaskId = event.task_id ?? getString(payload, "taskId") ?? getString(payload, "task_id") ?? undefined;
+        items.push({
+          eventId: event.id,
+          taskId: itemTaskId,
+          reason: reason ?? "unknown",
+          detail: formatWatchdogAlertReason(reason),
+        });
       }
     }
   }
@@ -300,12 +328,46 @@ export function getWatchdogNotice(events: RuntimeEvent[]): RuntimeWatchdogNotice
         detail: details.join("；"),
         tone: hasP0 ? "error" : "warning",
         taskId,
+        eventIds,
+        items,
       }
     : {
         title: "Watchdog 状态提醒",
         detail: details.join("；"),
         tone: hasP0 ? "error" : "warning",
+        eventIds,
+        items,
       };
+}
+
+function formatWatchdogAlertReason(reason: string | null): string {
+  switch (reason) {
+    case "approval_pending_timeout":
+      return "工具审批超时";
+    case "external_queued_stale":
+      return "外部渠道排队超时";
+    case "external_queue_drain_failed":
+      return "外部队列唤醒失败";
+    case "failed_retriable":
+      return "任务失败但可重试";
+    default:
+      return reason ?? "未知原因";
+  }
+}
+
+function readDismissedWatchdogEventIds(): string[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WATCHDOG_DISMISSED_STORAGE_KEY) ?? "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDismissedWatchdogEventIds(eventIds: string[]): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(WATCHDOG_DISMISSED_STORAGE_KEY, JSON.stringify(eventIds));
 }
 
 export function getRuntimeEventView(event: RuntimeEvent): RuntimeEventView {
@@ -692,6 +754,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   events: [],
   selectedTaskId: null,
   selectedTaskTimeline: null,
+  dismissedWatchdogEventIds: readDismissedWatchdogEventIds(),
   taskTimelineLoading: false,
   taskTimelineError: null,
   loading: false,
@@ -768,6 +831,17 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       taskTimelineLoading: false,
       taskTimelineError: null,
     });
+  },
+
+  dismissWatchdogNotice: (eventIds) => {
+    const next = Array.from(new Set([...get().dismissedWatchdogEventIds, ...eventIds]));
+    writeDismissedWatchdogEventIds(next);
+    set({ dismissedWatchdogEventIds: next });
+  },
+
+  clearDismissedWatchdogNotices: () => {
+    writeDismissedWatchdogEventIds([]);
+    set({ dismissedWatchdogEventIds: [] });
   },
 
   cancelTask: async (taskId, agentId) => {

@@ -52,6 +52,7 @@ src/routes/tools.ts
 src/routes/skills.ts
 src/routes/channels.ts
 src/routes/memory.ts
+src/routes/workbench.ts
 ```
 
 ## 3. 当前状态
@@ -60,7 +61,7 @@ src/routes/memory.ts
 
 - 聊天页和控制台分离布局：`ChatLayout` 负责聊天侧边栏和会话入口，`ConsoleLayout` 负责工程控制台导航。
 - 会话路由：`/` 新对话入口，`/sessions/:sessionId` 查看持久会话。
-- 控制台路由：`/console`、`/console/tasks`、`/console/events`、`/console/tools`、`/console/skills`、`/console/memory`、`/console/channels` 等页面。
+- 控制台路由：`/console`、`/console/tasks`、`/console/events`、`/console/tools`、`/console/skills`、`/console/memory`、`/console/channels`、`/console/workbench` 等页面。
 - Agent 会话侧边栏按 Agent 分组展示会话，并支持选择当前 Agent。
 - Runtime 面板展示 Agent 状态、当前任务、排队任务、最近任务和最近事件。
 - `runtimeStore` 提供 `getCurrentTask()` 等视图辅助函数，用于按 Agent 当前任务指针优先推导控制台当前任务。
@@ -94,6 +95,8 @@ src/routes/memory.ts
 - `runtimeStore` 支持解析 `task.watchdog.*` 与 `agent.watchdog.repaired` 事件，并转换为中文事件标题。
 - `RuntimeTask` 类型补齐 progress、failure、lease、attempt 等可观察字段，Task 卡片会展示系统自动取消、失败原因或运行进度。
 - `RuntimeSummary` 会从最近事件里提取 P0/P1 watchdog 提醒，例如批量清理 Web 僵尸任务、外部队列告警、审批超时或 Agent 状态修复。
+- `RuntimeSummary` 的 watchdog 提醒现在会列出可定位的任务明细；例如审批超时、可重试失败会显示原因和 task id 短码，并可点击打开对应 Task timeline。
+- Watchdog 提醒支持前端本地忽略；忽略只隐藏当前浏览器里的提醒，不删除 Runtime Event 审计记录，也不改变 Task 状态。
 - 这部分只做观察与提示，不在前端实现自动状态修复；所有修复动作仍由后端 Task Watchdog 和 Runtime API 完成。
 
 本轮新增了 Task timeline 控制台详情：
@@ -108,6 +111,15 @@ src/routes/memory.ts
 
 - `getCurrentTask(agent, tasks)` 明确记录其优先使用 `agent.current_task_id`，找不到时回退到第一个 running task。
 - 这是前端可读性改动，不改变 Runtime Snapshot、Task 排序或后端执行语义。
+
+本轮新增开发工作台页面：
+
+- 新增 `/console/workbench` 页面，轮询 `/api/workbench/branches` 展示未合并到 `main` 的本地分支。
+- 分支列表展示分支名、改动文件数、增删行数、base commit、创建时间和疑似依赖标记。
+- “查看Diff” 打开侧边栏展示后端返回的文本 diff；默认由后端限制 500 行，避免大 diff 阻塞页面。
+- “合并” 使用确认弹窗，有疑似依赖时可选择一并合并依赖分支。
+- “丢弃” 需要输入完整分支名，后端仍要求 `{ confirmed: true }`，形成前后端双重确认。
+- 这里的 **diff** 指 Git 展示分支相对 `main` 的文件和行级差异；**base commit** 指分支和 `main` 的共同祖先提交。
 
 ## 5. 当前边界
 

@@ -15,6 +15,7 @@ import memoryRoutes from "./routes/memory";
 import toolRoutes from "./routes/tools";
 import skillRoutes from "./routes/skills";
 import { createRuntimeRoutes } from "./routes/runtime";
+import { createWorkbenchRoutes } from "./routes/workbench";
 import { registerMemoryLifecycleHooks } from "./memory/lifecycle-hooks";
 import { retryFailedExtractions } from "./memory/extraction-worker";
 import { startDreamScheduler } from "./memory/dream-scheduler";
@@ -64,6 +65,7 @@ app.route("/api/memory", memoryRoutes);
 app.route("/api/tools", toolRoutes);
 app.route("/api/skills", skillRoutes);
 app.route("/api/runtime", createRuntimeRoutes());
+app.route("/api/workbench", createWorkbenchRoutes());
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 

@@ -10,6 +10,7 @@ export const TASKS_PATH = "/tasks";
 export const EVENTS_PATH = "/events";
 export const SETTINGS_PATH = "/settings";
 export const CONSOLE_PATH = "/console";
+export const WORKBENCH_PATH = "/console/workbench";
 
 export function getConsolePath(subPath: string): string {
   return `${CONSOLE_PATH}${subPath}`;

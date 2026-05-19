@@ -46,6 +46,13 @@ src/scripts/
 - Gateway 相关脚本。
 - 启动后注册后台调度器，包括梦整理调度器和 Task Watchdog 调度器。
 - 启动时检查最近一次 SQLite 备份；超过 24 小时则异步创建一次新备份，不阻塞 HTTP 服务启动。
+- 启动 HTTP 服务时注册 `/api/workbench` 路由，用于 Web Console 的本地 Git 分支控制面。
+
+本轮开发工作台改动对 Core Runtime 的影响：
+
+- `src/main.ts` 新增 `createWorkbenchRoutes()` 注册，路径为 `/api/workbench`。
+- Workbench 路由只在项目根目录执行 Git 命令，不写入 Runtime 数据库，也不参与 Agent Task 执行链路。
+- 这里的 **Git 控制面** 指后端提供给控制台的分支查看、diff、merge 和 discard 管理接口；它是开发辅助能力，不是 Agent Runtime 的数据面。
 
 本轮 P0 数据备份改动对 Core Runtime 的影响：
 

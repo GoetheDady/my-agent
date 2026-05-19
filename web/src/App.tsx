@@ -11,6 +11,7 @@ import SettingsPage from "./pages/SettingsPage";
 import SkillsPage from "./pages/SkillsPage";
 import TasksPage from "./pages/TasksPage";
 import ToolsPage from "./pages/ToolsPage";
+import WorkbenchPage from "./pages/WorkbenchPage";
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="memory" element={<MemoryPage />} />
           <Route path="events" element={<EventsPage />} />
           <Route path="channels" element={<ChannelsPage />} />
+          <Route path="workbench" element={<WorkbenchPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<ChatPage />} />

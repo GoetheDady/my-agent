@@ -31,12 +31,14 @@ Runtime Control API 负责暴露后端运行状态和安全控制动作。
 
 ```text
 src/routes/runtime.ts
+src/routes/workbench.ts
 src/routes/memory.ts
 src/routes/skills.ts
 ```
 
 Memory 相关 API 的业务语义属于 [M7 Memory System](./m7-memory-system.md)，路由层归入 Runtime Control API 统一管理。
 Skill 相关 API 的业务语义属于 [M9 Skill System](./m9-skill-system.md)，其中 Skill candidate 审查路由也通过控制面暴露给 Web 或调用方。
+Workbench 相关 API 只用于本地开发分支管理，不进入 Agent Task / Event / Memory 主链路。
 
 ## 3. 当前状态
 
@@ -66,6 +68,16 @@ Runtime 控制面 (`src/routes/runtime.ts`)：
 - `POST /api/runtime/watchdog/run`
 - `POST /api/runtime/tasks/:id/retry`
 - `POST /api/runtime/tasks/:id/cancel`
+
+Workbench Git 控制面 (`src/routes/workbench.ts`)：
+
+- `GET /api/workbench/branches` — 列出未合并到 `main` 的本地分支，包含 base commit、创建时间、diff 统计和疑似依赖。
+- `GET /api/workbench/branches/:name/diff` — 返回 `main...branch` 的文本 diff，默认最多 500 行。
+- `POST /api/workbench/branches/:name/merge` — 切换到 `main` 后优先执行 fast-forward merge，失败再尝试普通 merge；冲突返回 409。
+- `POST /api/workbench/branches/:name/discard` — 强制删除本地分支，必须提交 `{ confirmed: true }`。
+- `POST /api/workbench/branches/:name/merge-with-deps` — 按疑似依赖顺序先合并依赖分支，再合并目标分支。
+
+这里的 **fast-forward merge** 指 `main` 没有额外分叉提交时，Git 只移动 `main` 指针完成合并；**疑似依赖** 指分支 B 的 merge-base 等于另一个本地分支 A 的 HEAD，而不是 `main` 的 HEAD。
 
 Memory 观察面 (`src/routes/memory.ts`)：
 

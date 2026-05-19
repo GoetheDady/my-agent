@@ -29,6 +29,7 @@ import {
   SKILLS_PATH,
   TASKS_PATH,
   TOOLS_PATH,
+  WORKBENCH_PATH,
 } from "../lib/sessionRoute";
 
 interface NavItem {
@@ -53,6 +54,7 @@ const secondaryNav: NavItem[] = [
   { label: "Tools", path: TOOLS_PATH, icon: Wrench, description: "工具权限与策略" },
   { label: "Skills", path: SKILLS_PATH, icon: Brain, description: "Agent 本地技能索引" },
   { label: "Settings", path: SETTINGS_PATH, icon: Settings, description: "模型、记忆、工具配置" },
+  { label: "工作台", path: WORKBENCH_PATH, icon: GitBranch, description: "本地分支管理" },
 ];
 
 const pageMeta: Record<string, { title: string; description: string }> = {
@@ -67,6 +69,7 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   [TOOLS_PATH]: { title: "工具权限", description: "查看工具类别、权限策略和后续配置入口。" },
   [SKILLS_PATH]: { title: "Skills", description: "查看、创建、启停 Agent 本地技能索引和正文。" },
   [SETTINGS_PATH]: { title: "系统配置", description: "模型、记忆策略、Agent 和工具权限配置入口。" },
+  [WORKBENCH_PATH]: { title: "开发工作台", description: "查看未合并本地分支，检查 diff、合并或丢弃。" },
 };
 
 export default function AppShell() {

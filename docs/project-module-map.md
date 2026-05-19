@@ -37,7 +37,7 @@
 
 | 编号 | 模块 | 核心问题 | 当前状态 | 完整目标 |
 |---|---|---|---|---|
-| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 和记忆提取重试调度器，支持 Task Plan/Dependency 与 Skill candidate schema，已有 SQLite 备份基础，已有模块文档 | 可诊断、可迁移、可恢复 |
+| M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 和记忆提取重试调度器，注册 Workbench Git 控制面，支持 Task Plan/Dependency 与 Skill candidate schema，已有 SQLite 备份基础，已有模块文档 | 可诊断、可迁移、可恢复 |
 | M2 | [Agent Identity & Config](./modules/m2-agent-identity-config.md) | Agent 是谁、允许做什么 | 已有基础，配置规范化逻辑已拆分，远程 Skill origin 可保留 contentHash，已有模块文档 | 配置边界清晰、可版本化 |
 | M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1、Agent planning tools 和 prompt-level 自动规划，已有模块文档 | 增强复杂依赖、计划质量评估和 Episode 输入契约 |
 | M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation、工具审计事件和 RAG-in-context 记忆检索已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
@@ -51,8 +51,8 @@
 | M12 | [Multi-Agent Collaboration](./modules/m12-multi-agent-collaboration.md) | 多 Agent 如何分工 | 已有异步委派，支持 plan step child task 和 child task 依赖，已有模块文档 | 协作协议、角色边界和结果汇总完整化 |
 | M13 | Safety & Trust | 如何避免越权和污染 | 已有审批和路径限制 | 远程内容、敏感信息和注入攻击防护 |
 | M14 | Data Reliability | 本地数据如何长期可靠 | 基础数据库可用 | 备份、恢复、导出、迁移 |
-| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline、Task Plan/Dependency 控制面和异步 Chat RAG 上下文准备，已有模块文档 | 控制面完整化 |
-| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog、Task timeline、plan/dependency 详情；Runtime Store 当前任务推导已补 JSDoc，已有模块文档 | 继续作为控制台，不成为核心 |
+| M15 | [Runtime Control API](./modules/m15-runtime-control-api.md) | 如何管理运行时 | 已有部分 API，支持 Watchdog、Task timeline、Task Plan/Dependency 控制面、Workbench Git 分支控制面和异步 Chat RAG 上下文准备，已有模块文档 | 控制面完整化 |
+| M16 | [Web Console](./modules/m16-web-console.md) | 如何观察和调试 | 已有工程控制台，展示 Watchdog、Task timeline、plan/dependency 详情和开发工作台；Watchdog 状态提醒会列出可定位任务明细并支持本地忽略；Runtime Store 当前任务推导已补 JSDoc，已有模块文档 | 继续作为控制台，不成为核心 |
 | M17 | Evaluation & Testing | 如何知道 Agent 变好了 | 单元测试较多 | 行为评估和端到端场景测试 |
 | M18 | Documentation & Onboarding | 新 Agent 如何理解项目 | 已有基础文档 | 模块文档和开发路线成体系 |
 
@@ -694,7 +694,7 @@ web/
 - Runtime Snapshot 会跟随当前选中的 Agent 拉取状态。
 - Task Queue 优先展示排队任务，并按新到旧展示最近历史任务。
 - Runtime Events 支持 Watchdog 事件中文展示。
-- Runtime Snapshot 支持 P0/P1 Watchdog 提醒和 Task 自动取消/失败原因展示。
+- Runtime Snapshot 支持 P0/P1 Watchdog 提醒、可定位任务明细、本地忽略和 Task 自动取消/失败原因展示。
 - Tasks 控制台支持选中单个任务并展示 Task timeline、当前工具、最近输出和 episode 摘要。
 
 ### 还需要补齐

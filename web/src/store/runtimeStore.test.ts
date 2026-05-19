@@ -173,6 +173,7 @@ describe("runtimeStore", () => {
       pollingAgentId: "default",
       selectedTaskId: null,
       selectedTaskTimeline: null,
+      dismissedWatchdogEventIds: [],
       taskTimelineLoading: false,
       taskTimelineError: null,
     });
@@ -494,6 +495,77 @@ describe("runtimeStore", () => {
       title: "Watchdog 状态提醒",
       detail: "系统清理了 4 个异常任务",
       tone: "warning",
+      eventIds: ["event-watchdog-batch"],
+      items: [],
+    });
+  });
+
+  test("includes task details for elevated watchdog alerts", () => {
+    const notice = getWatchdogNotice([
+      {
+        id: "event-approval-1",
+        agent_id: "default",
+        task_id: "task-approval-1",
+        conversation_id: "conversation-1",
+        type: "task.watchdog.alerted",
+        payload: JSON.stringify({ reason: "approval_pending_timeout", notificationLevel: "P0" }),
+        payloadJson: { reason: "approval_pending_timeout", notificationLevel: "P0" },
+        created_at: 100,
+      },
+      {
+        id: "event-approval-2",
+        agent_id: "default",
+        task_id: "task-approval-2",
+        conversation_id: "conversation-2",
+        type: "task.watchdog.alerted",
+        payload: JSON.stringify({ reason: "failed_retriable", notificationLevel: "P1" }),
+        payloadJson: { reason: "failed_retriable", notificationLevel: "P1" },
+        created_at: 90,
+      },
+    ]);
+
+    expect(notice).toEqual({
+      title: "Watchdog 状态提醒",
+      detail: "发现 2 个需要关注的任务",
+      tone: "error",
+      taskId: "task-approval-1",
+      eventIds: ["event-approval-1", "event-approval-2"],
+      items: [
+        { eventId: "event-approval-1", taskId: "task-approval-1", reason: "approval_pending_timeout", detail: "工具审批超时" },
+        { eventId: "event-approval-2", taskId: "task-approval-2", reason: "failed_retriable", detail: "任务失败但可重试" },
+      ],
+    });
+  });
+
+  test("filters dismissed watchdog alerts from the notice", () => {
+    const notice = getWatchdogNotice([
+      {
+        id: "event-approval-1",
+        agent_id: "default",
+        task_id: "task-approval-1",
+        conversation_id: "conversation-1",
+        type: "task.watchdog.alerted",
+        payload: JSON.stringify({ reason: "approval_pending_timeout", notificationLevel: "P0" }),
+        payloadJson: { reason: "approval_pending_timeout", notificationLevel: "P0" },
+        created_at: 100,
+      },
+      {
+        id: "event-approval-2",
+        agent_id: "default",
+        task_id: "task-approval-2",
+        conversation_id: "conversation-2",
+        type: "task.watchdog.alerted",
+        payload: JSON.stringify({ reason: "failed_retriable", notificationLevel: "P1" }),
+        payloadJson: { reason: "failed_retriable", notificationLevel: "P1" },
+        created_at: 90,
+      },
+    ], new Set(["event-approval-1"]));
+
+    expect(notice).toMatchObject({
+      detail: "发现 1 个需要关注的任务",
+      tone: "warning",
+      taskId: "task-approval-2",
+      eventIds: ["event-approval-2"],
     });
   });
 });

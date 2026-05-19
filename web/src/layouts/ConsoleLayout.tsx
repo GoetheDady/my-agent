@@ -6,12 +6,14 @@ import {
   Brain,
   Cable,
   ClipboardList,
+  GitBranch,
   Settings,
   Sparkles,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAgentStore } from "../store/agentStore";
+import { WORKBENCH_PATH } from "../lib/sessionRoute";
 
 interface ConsoleNavItem {
   label: string;
@@ -28,6 +30,7 @@ const subNav: ConsoleNavItem[] = [
   { label: "Memory", path: "/console/memory", icon: Brain },
   { label: "Events", path: "/console/events", icon: Sparkles },
   { label: "渠道", path: "/console/channels", icon: Cable },
+  { label: "工作台", path: WORKBENCH_PATH, icon: GitBranch },
   { label: "设置", path: "/console/settings", icon: Settings },
 ];
 
