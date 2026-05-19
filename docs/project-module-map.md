@@ -39,11 +39,11 @@
 |---|---|---|---|---|
 | M1 | [Core Runtime](./modules/m1-core-runtime.md) | 系统如何启动、配置和初始化 | 已有基础，启动 Task Watchdog 和记忆提取重试调度器，支持 Task Plan/Dependency 与 Skill candidate schema，已有 SQLite 备份基础，已有模块文档 | 可诊断、可迁移、可恢复 |
 | M2 | [Agent Identity & Config](./modules/m2-agent-identity-config.md) | Agent 是谁、允许做什么 | 已有基础，配置规范化逻辑已拆分，远程 Skill origin 可保留 contentHash，已有模块文档 | 配置边界清晰、可版本化 |
-| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1、Agent planning tools 和 prompt-level 自动规划，已有模块文档 | 增强复杂依赖、计划质量评估和 Episode 输入契约 |
+| M3 | [Task System](./modules/m3-task-system.md) | 所有输入如何变成可靠执行单元 | 已有可靠性、可观察性、Watchdog 自愈、Task Plan/Dependency v1、Agent planning tools 和 prompt-level 自动规划，任务领取的实时推送已移出事务，已有模块文档 | 增强复杂依赖、计划质量评估和 Episode 输入契约 |
 | M4 | [Runtime Execution](./modules/m4-runtime-execution.md) | Agent 如何执行 Task | 已可执行，审批续跑 continuation、工具审计事件和 RAG-in-context 记忆检索已补齐，已有模块文档 | 执行上下文、失败分类和恢复更完整 |
 | M5 | [Prompt & Context](./modules/m5-prompt-context.md) | 每次执行带哪些上下文 | 已有 prompt builder、Task planning tools 指引、复杂任务 planning guide、父任务汇总上下文预算、结构化摘要消息和相关长期记忆注入，已有模块文档 | 上下文预算、记忆选择和 Skill 选择更稳定 |
 | M6 | [Tool System](./modules/m6-tool-system.md) | Agent 如何安全调用能力 | 已有工具、审批、工具调用审计和 Runtime planning tools，已有模块文档 | 权限更细、工具失败更可恢复 |
-| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、记忆提取持久化重试、Dream Worker、Episode v1 和 Memory → Skill candidate 触发点；Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层和质量评估更完整 |
+| M7 | [Memory System](./modules/m7-memory-system.md) | Agent 如何长期记住和整理 | 已有长期记忆、记忆提取持久化重试、Dream Worker、Episode v1 和 Memory → Skill candidate 触发点；Dream Worker 全局锁已由 finally 保护，Episode 可消费工具审计事件，已有模块文档 | 人类式记忆分层和质量评估更完整 |
 | M8 | Profile System | Agent 如何稳定理解用户和自己 | 已有 `user.md` / `soul.md` | 更新策略、冲突处理和版本记录更完整 |
 | M9 | [Skill System](./modules/m9-skill-system.md) | Agent 如何沉淀可复用做法 | 已有三类 Skill、provenance/usage 元数据、正式 skill_candidates 表、候选审查 API 和远程 Skill contentHash，已有模块文档 | 生命周期、安全、统计和推荐完整化 |
 | M10 | [Event & Audit](./modules/m10-event-audit.md) | 系统如何知道发生过什么 | 已有事件表、Watchdog 审计事件、工具调用审计、Skill candidate 事件和 Skill 内容变更事件，已有模块文档 | 事件规范、查询、诊断和回放更强 |
